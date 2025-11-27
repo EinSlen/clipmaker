@@ -18,6 +18,10 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
 
+# Pour l'upload vers Tiktok on utilise une lib extérieur
+# https://github.com/makiisthenes/TiktokAutoUploader
+
+
 # -----------------------------------------------------
 # 0. Télécharger une police si nécessaire
 # -----------------------------------------------------

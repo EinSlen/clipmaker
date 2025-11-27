@@ -1,0 +1,3 @@
+[submodule "vendor/TiktokAutoUploader"]
+	path = vendor/TiktokAutoUploader
+	url = https://github.com/makiisthenes/TiktokAutoUploader.git
