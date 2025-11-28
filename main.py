@@ -460,14 +460,6 @@ def upload_to_tiktok(video_path, title, username, description=None):
                 print("\n   Puis relance le script principal.")
                 return False
 
-            # Vérifier à nouveau que le cookie a bien été créé
-            if not check_cookie_exists(username):
-                print(f"\n❌ Le cookie n'a pas été créé après le login")
-                print("💡 Essaye de te connecter manuellement :")
-                print(f"   cd vendor/TiktokAutoUploader")
-                print(f"   python cli.py login -n {username}")
-                return False
-
         # Préparer le titre complet
         full_title = title
         if description:
