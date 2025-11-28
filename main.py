@@ -8,7 +8,6 @@ from moviepy.editor import (
 )
 from tqdm import tqdm
 import streamlink
-import re
 from urllib.parse import urlparse
 import subprocess
 import sys
@@ -113,12 +112,19 @@ def download_clip_streamlink(url, filename):
 
 
 # -----------------------------------------------------
-# 3b. Convertir vidéo au format TikTok (9:16)
+# 3b. Convertir vidéo au format TikTok (9:16) - VERSION AMÉLIORÉE
 # -----------------------------------------------------
-def convert_to_tiktok_format(clip, target_width=1080, target_height=1920):
+def convert_to_tiktok_format(clip, target_width=1080, target_height=1920, zoom_factor=1.1, crop_position='center'):
     """
     Convertit une vidéo au format TikTok (9:16 - vertical)
-    Zoom et recadrage au centre
+    Avec zoom intelligent et positionnement optimisé
+
+    Args:
+        clip: VideoFileClip à convertir
+        target_width: Largeur cible (défaut: 1080)
+        target_height: Hauteur cible (défaut: 1920)
+        zoom_factor: Facteur de zoom (1.0 = pas de zoom, 1.1 = +10%, 1.2 = +20%)
+        crop_position: Position du crop ('center', 'top', 'bottom')
     """
     # Dimensions actuelles
     original_width, original_height = clip.size
@@ -127,22 +133,45 @@ def convert_to_tiktok_format(clip, target_width=1080, target_height=1920):
     current_ratio = original_width / original_height
     target_ratio = target_width / target_height  # 9:16 = 0.5625
 
+    # Appliquer le zoom
+    zoomed_width = int(original_width * zoom_factor)
+    zoomed_height = int(original_height * zoom_factor)
+
+    # Resize avec zoom
+    clip_zoomed = clip.resize((zoomed_width, zoomed_height))
+
     if current_ratio > target_ratio:
         # La vidéo est trop large : on va recadrer les côtés
-        new_width = int(original_height * target_ratio)
-        x_center = original_width / 2
+        new_width = int(zoomed_height * target_ratio)
+        x_center = zoomed_width / 2
         x1 = int(x_center - new_width / 2)
-        y1 = 0
-        clip_cropped = clip.crop(x1=x1, y1=y1, width=new_width, height=original_height)
+
+        # Position verticale selon crop_position
+        if crop_position == 'top':
+            y1 = 0
+        elif crop_position == 'bottom':
+            y1 = zoomed_height - zoomed_height
+        else:  # center
+            y1 = 0
+
+        clip_cropped = clip_zoomed.crop(x1=x1, y1=y1, width=new_width, height=zoomed_height)
     else:
         # La vidéo est trop haute : on va recadrer en haut/bas
-        new_height = int(original_width / target_ratio)
-        y_center = original_height / 2
+        new_height = int(zoomed_width / target_ratio)
         x1 = 0
-        y1 = int(y_center - new_height / 2)
-        clip_cropped = clip.crop(x1=x1, y1=y1, width=original_width, height=new_height)
 
-    # Redimensionner à la résolution TikTok
+        # Position verticale selon crop_position
+        if crop_position == 'top':
+            y1 = 0
+        elif crop_position == 'bottom':
+            y1 = zoomed_height - new_height
+        else:  # center
+            y_center = zoomed_height / 2
+            y1 = int(y_center - new_height / 2)
+
+        clip_cropped = clip_zoomed.crop(x1=x1, y1=y1, width=zoomed_width, height=new_height)
+
+    # Redimensionner à la résolution TikTok exacte
     clip_resized = clip_cropped.resize((target_width, target_height))
 
     return clip_resized
@@ -189,8 +218,8 @@ def add_text_overlay(video_clip, text, font_path=None):
         x = (width - text_width) // 2
         y = (height - text_height) // 2
 
-        # Dessiner le contour noir (stroke)
-        stroke_width = 4
+        # Dessiner le contour noir (stroke) - plus épais pour plus de visibilité
+        stroke_width = 5
         for adj_x in range(-stroke_width, stroke_width + 1):
             for adj_y in range(-stroke_width, stroke_width + 1):
                 draw.text((x + adj_x, y + adj_y), text, font=font, fill=(0, 0, 0, 255))
@@ -222,9 +251,13 @@ def add_text_overlay(video_clip, text, font_path=None):
 # -----------------------------------------------------
 def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
                       text="Streamer >>>", target_duration=60, font_path=None,
-                      black_screen_duration=0.3):
+                      black_screen_duration=0.3, zoom_factor=1.1, crop_position='center'):
     """
     Construit la vidéo finale en concaténant les clips
+
+    Args:
+        zoom_factor: Facteur de zoom (1.0-1.2 recommandé)
+        crop_position: Position du crop ('center', 'top', 'bottom')
     """
     if not clips_paths:
         print("❌ Aucun clip à traiter")
@@ -238,6 +271,7 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
     TIKTOK_HEIGHT = 1920
 
     print(f"\n📹 Chargement et conversion des clips au format TikTok (9:16 - {TIKTOK_WIDTH}x{TIKTOK_HEIGHT})...")
+    print(f"   🔍 Zoom: {zoom_factor}x | Position: {crop_position}")
 
     black_screens_time = 0
 
@@ -249,7 +283,16 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
 
         try:
             clip = VideoFileClip(path)
-            clip_tiktok = convert_to_tiktok_format(clip, TIKTOK_WIDTH, TIKTOK_HEIGHT)
+
+            # Conversion avec zoom intelligent
+            clip_tiktok = convert_to_tiktok_format(
+                clip,
+                TIKTOK_WIDTH,
+                TIKTOK_HEIGHT,
+                zoom_factor=zoom_factor,
+                crop_position=crop_position
+            )
+
             remaining_time = target_duration - effective_duration
 
             if clip_tiktok.duration > remaining_time:
@@ -262,7 +305,7 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
                 black_screens_time += black_screen_duration
 
             print(
-                f"  ✓ Clip {i + 1}: {clip_tiktok.duration:.1f}s [Format TikTok] (total: {effective_duration + clip_tiktok.duration:.1f}s)")
+                f"  ✓ Clip {i + 1}: {clip_tiktok.duration:.1f}s [TikTok {zoom_factor}x zoom] (total: {effective_duration + clip_tiktok.duration:.1f}s)")
 
         except Exception as e:
             print(f"  ✗ Erreur avec {path}: {e}")
@@ -360,6 +403,7 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
 
     print(f"\n✅ Vidéo '{output_file}' créée avec succès !")
     print(f"   Format : {TIKTOK_WIDTH}x{TIKTOK_HEIGHT} (9:16 - TikTok/Shorts)")
+    print(f"   Zoom : {zoom_factor}x")
     print(f"   Durée finale : {total_duration:.1f}s")
     print(f"   Nombre de clips : {len(loaded_clips)}")
     print(f"   Écrans noirs : {len(loaded_clips) - 1}")
@@ -480,7 +524,7 @@ def upload_to_tiktok(video_path, title, username, description=None):
             sys.executable,
             "cli.py",
             "upload",
-            "--user",  # Comme dans ton code qui fonctionne
+            "--user",
             username,
             "-v",
             video_path_abs,
@@ -513,11 +557,15 @@ def upload_to_tiktok(video_path, title, username, description=None):
 # -----------------------------------------------------
 def main():
     # Configuration
-    twitch_url = "https://m.twitch.tv/anyme023/clips/?featured=true&range=all"
+    twitch_url = "https://m.twitch.tv/anyme023/clips/?featured=false&range=24hr"
 
     # Configuration TikTok
     TIKTOK_USERNAME = 'dvlad2'
     AUTO_UPLOAD = True  # Upload automatique activé
+
+    # ⚙️ PARAMÈTRES DE ZOOM ET CROP
+    ZOOM_FACTOR = 1.1  # 1.0 = pas de zoom, 1.1 = +10%, 1.15 = +15%, 1.2 = +20%
+    CROP_POSITION = 'center'  # 'center', 'top', ou 'bottom'
 
     # Extraire le nom du streamer depuis l'URL
     streamer_name = extract_streamer_name(twitch_url)
@@ -525,18 +573,16 @@ def main():
 
     # Titre et description TikTok
     tiktok_title = f"{streamer_name.capitalize()} core >>"
-    tiktok_tags = f"#{streamer_name.lower()} #viral #fyp #foryou #foryoupage"
-
-    print(f"DEBUG - Titre: '{tiktok_title}'")
-    print(f"DEBUG - Tags: '{tiktok_tags}'")
-    print(f"DEBUG - Titre complet envoyé: '{tiktok_title} - {tiktok_tags}'")
+    tiktok_tags = f"#{streamer_name.lower()} #viral #fyp #foryou #foryoupage @{streamer_name.capitalize()}"
 
     print("=" * 60)
-    print("🎬 TWITCH CLIP COMPILER - FORMAT TIKTOK")
+    print("🎬 TWITCH CLIP COMPILER - FORMAT TIKTOK OPTIMISÉ")
     print("=" * 60)
     print(f"Streamer : {streamer_name}")
     print(f"URL : {twitch_url}")
     print(f"Format : 1080x1920 (9:16 - TikTok/YouTube Shorts)")
+    print(f"Zoom : {ZOOM_FACTOR}x")
+    print(f"Position : {CROP_POSITION}")
     print(f"Auto-upload : {'✅ Activé' if AUTO_UPLOAD else '❌ Désactivé'}")
     print("=" * 60)
 
@@ -587,7 +633,9 @@ def main():
         text=text_overlay,
         target_duration=60,
         font_path=font_path,
-        black_screen_duration=0.3
+        black_screen_duration=0.3,
+        zoom_factor=ZOOM_FACTOR,
+        crop_position=CROP_POSITION
     )
 
     if not output_video:
@@ -634,7 +682,7 @@ def main():
             if os.path.exists(clip_file):
                 os.remove(clip_file)
                 clips_deleted += 1
-            print(f"✓ {clips_deleted} clips supprimés")
+        print(f"✓ {clips_deleted} clips supprimés")
     except Exception as e:
         print(f"⚠ Erreur lors du nettoyage : {e}")
 
