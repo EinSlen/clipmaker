@@ -424,8 +424,10 @@ def upload_to_tiktok(video_path, title, username, description=None):
                 text=True
             )
 
+            stdout_output = ""
             for stdout_line in iter(process.stdout.readline, ""):
                 print(stdout_line, end="")
+                stdout_output += stdout_line
 
             process.stdout.close()
             process.wait()
@@ -434,7 +436,7 @@ def upload_to_tiktok(video_path, title, username, description=None):
             if stderr:
                 print(f"Sortie d'erreur : {stderr}")
 
-            return process.returncode
+            return process.returncode, stdout_output
 
         # Vérifier si le cookie existe, sinon faire le login
         if not check_cookie_exists(username):
@@ -450,15 +452,22 @@ def upload_to_tiktok(video_path, title, username, description=None):
                 username
             ]
 
-            return_code = run_command(login_command)
+            return_code, output = run_command(login_command)
 
-            if return_code != 0:
+            # Vérifier si la session est déjà sauvegardée (message normal)
+            if "Unnecessary login" in output or "session already saved" in output:
+                print(f"✓ Session {username} déjà active")
+            elif return_code != 0:
                 print(f"\n❌ Échec de la connexion")
                 print("\n💡 Solution : Lance manuellement la connexion :")
                 print(f"   cd vendor/TiktokAutoUploader")
                 print(f"   python cli.py login -n {username}")
                 print("\n   Puis relance le script principal.")
                 return False
+            else:
+                print(f"✓ Connexion établie pour {username}")
+        else:
+            print(f"✓ Cookie trouvé pour {username}")
 
         # Préparer le titre complet
         full_title = title
@@ -471,7 +480,7 @@ def upload_to_tiktok(video_path, title, username, description=None):
             sys.executable,
             "cli.py",
             "upload",
-            "--user",
+            "--user",  # Comme dans ton code qui fonctionne
             username,
             "-v",
             video_path_abs,
@@ -479,7 +488,7 @@ def upload_to_tiktok(video_path, title, username, description=None):
             full_title
         ]
 
-        return_code = run_command(upload_command)
+        return_code, output = run_command(upload_command)
 
         if return_code == 0:
             print("\n✅ Upload réussi !")
@@ -516,7 +525,11 @@ def main():
 
     # Titre et description TikTok
     tiktok_title = f"{streamer_name.capitalize()} core >>"
-    tiktok_description = f"#{streamer_name.lower()} #viral #fyp @{streamer_name.capitalize()}"
+    tiktok_tags = f"#{streamer_name.lower()} #viral #fyp #foryou #foryoupage"
+
+    print(f"DEBUG - Titre: '{tiktok_title}'")
+    print(f"DEBUG - Tags: '{tiktok_tags}'")
+    print(f"DEBUG - Titre complet envoyé: '{tiktok_title} - {tiktok_tags}'")
 
     print("=" * 60)
     print("🎬 TWITCH CLIP COMPILER - FORMAT TIKTOK")
@@ -580,10 +593,10 @@ def main():
     if not output_video:
         print("\n❌ Échec de la création de la vidéo")
         return
-    else:
-        print("\n" + "=" * 60)
-        print("🎉 VIDÉO CRÉÉE !")
-        print("=" * 60)
+
+    print("\n" + "=" * 60)
+    print("🎉 VIDÉO CRÉÉE !")
+    print("=" * 60)
 
     # Étape 4 : Upload vers TikTok
     if AUTO_UPLOAD:
@@ -591,7 +604,7 @@ def main():
             video_path=output_video,
             title=tiktok_title,
             username=TIKTOK_USERNAME,
-            description=tiktok_description
+            description=tiktok_tags
         )
 
         if upload_success:
@@ -601,18 +614,19 @@ def main():
             print("\n💡 Essaye l'upload manuel :")
             print(f"   cd vendor/TiktokAutoUploader")
             print(
-                f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_description}\"")
+                f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_tags}\"")
     else:
         print("\n💡 Pour uploader sur TikTok :")
         print(f"   cd vendor/TiktokAutoUploader")
         print(
-            f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_description}\"")
+            f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_tags}\"")
 
     print("\n" + "=" * 60)
     print("🎥 Terminé !")
     print(f"📁 Vidéo : {output_video}")
     print("=" * 60)
 
+    # Étape 5 : Nettoyage - Supprimer les clips téléchargés
     print("\n🧹 Nettoyage des clips téléchargés...")
     try:
         clips_deleted = 0
