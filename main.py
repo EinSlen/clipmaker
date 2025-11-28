@@ -580,10 +580,10 @@ def main():
     if not output_video:
         print("\n❌ Échec de la création de la vidéo")
         return
-
-    print("\n" + "=" * 60)
-    print("🎉 VIDÉO CRÉÉE !")
-    print("=" * 60)
+    else:
+        print("\n" + "=" * 60)
+        print("🎉 VIDÉO CRÉÉE !")
+        print("=" * 60)
 
     # Étape 4 : Upload vers TikTok
     if AUTO_UPLOAD:
