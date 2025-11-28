@@ -331,7 +331,7 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
                 audio_tracks = [final_video.audio]
 
                 for t_time in transition_times:
-                    trans_clip = transition_audio.volumex(0.5).set_start(t_time)
+                    trans_clip = transition_audio.volumex(0.8).set_start(t_time)
                     audio_tracks.append(trans_clip)
 
                 final_audio = CompositeAudioClip(audio_tracks)
@@ -377,7 +377,7 @@ def upload_to_tiktok(video_path, title, username, description=None):
     """
     # Chemin vers le dossier TiktokAutoUploader
     uploader_dir = "./vendor/TiktokAutoUploader"
-    cookie_dir = os.path.join(uploader_dir, "cookies")
+    cookie_dir = os.path.join(uploader_dir, "CookiesDir")
 
     if not os.path.exists(uploader_dir):
         print(f"\n⚠ TiktokAutoUploader non trouvé dans {uploader_dir}")
@@ -439,6 +439,9 @@ def upload_to_tiktok(video_path, title, username, description=None):
         # Vérifier si le cookie existe, sinon faire le login
         if not check_cookie_exists(username):
             print(f"\n🔐 Connexion requise pour {username}...")
+            print("⚠️  Une fenêtre Chrome va s'ouvrir pour la connexion TikTok")
+            print("    Connecte-toi manuellement, puis le cookie sera sauvegardé.")
+
             login_command = [
                 sys.executable,
                 "cli.py",
@@ -446,9 +449,23 @@ def upload_to_tiktok(video_path, title, username, description=None):
                 "-n",
                 username
             ]
+
             return_code = run_command(login_command)
+
             if return_code != 0:
                 print(f"\n❌ Échec de la connexion")
+                print("\n💡 Solution : Lance manuellement la connexion :")
+                print(f"   cd vendor/TiktokAutoUploader")
+                print(f"   python cli.py login -n {username}")
+                print("\n   Puis relance le script principal.")
+                return False
+
+            # Vérifier à nouveau que le cookie a bien été créé
+            if not check_cookie_exists(username):
+                print(f"\n❌ Le cookie n'a pas été créé après le login")
+                print("💡 Essaye de te connecter manuellement :")
+                print(f"   cd vendor/TiktokAutoUploader")
+                print(f"   python cli.py login -n {username}")
                 return False
 
         # Préparer le titre complet
@@ -504,7 +521,10 @@ def main():
     # Extraire le nom du streamer depuis l'URL
     streamer_name = extract_streamer_name(twitch_url)
     text_overlay = f"{streamer_name} core >>>"
-    tiktok_title = f"Best {streamer_name} moments! 🔥"
+
+    # Titre et description TikTok
+    tiktok_title = f"{streamer_name.capitalize()} core >>"
+    tiktok_description = f"#{streamer_name.lower()} #viral #fyp @{streamer_name.capitalize()}"
 
     print("=" * 60)
     print("🎬 TWITCH CLIP COMPILER - FORMAT TIKTOK")
@@ -579,7 +599,7 @@ def main():
             video_path=output_video,
             title=tiktok_title,
             username=TIKTOK_USERNAME,
-            description=f"#{streamer_name}"
+            description=tiktok_description
         )
 
         if upload_success:
@@ -588,15 +608,32 @@ def main():
             print("\n⚠ Upload échoué")
             print("\n💡 Essaye l'upload manuel :")
             print(f"   cd vendor/TiktokAutoUploader")
-            print(f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title}\"")
+            print(
+                f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_description}\"")
     else:
         print("\n💡 Pour uploader sur TikTok :")
         print(f"   cd vendor/TiktokAutoUploader")
-        print(f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title}\"")
+        print(
+            f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title} - {tiktok_description}\"")
 
     print("\n" + "=" * 60)
     print("🎥 Terminé !")
     print(f"📁 Vidéo : {output_video}")
+    print("=" * 60)
+
+    print("\n🧹 Nettoyage des clips téléchargés...")
+    try:
+        clips_deleted = 0
+        for clip_file in clips_local:
+            if os.path.exists(clip_file):
+                os.remove(clip_file)
+                clips_deleted += 1
+            print(f"✓ {clips_deleted} clips supprimés")
+    except Exception as e:
+        print(f"⚠ Erreur lors du nettoyage : {e}")
+
+    print("\n" + "=" * 60)
+    print("✅ PROCESSUS TERMINÉ !")
     print("=" * 60)
 
 
