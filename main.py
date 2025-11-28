@@ -10,16 +10,14 @@ from tqdm import tqdm
 import streamlink
 import re
 from urllib.parse import urlparse
+import subprocess
+import sys
 
 # Fix pour Pillow 10+ (ANTIALIAS a été supprimé)
 import PIL
 
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
-
-
-# Pour l'upload vers Tiktok on utilise une lib extérieur
-# https://github.com/makiisthenes/TiktokAutoUploader
 
 
 # -----------------------------------------------------
@@ -170,13 +168,12 @@ def add_text_overlay(video_clip, text, font_path=None):
         draw = ImageDraw.Draw(img)
 
         # Charger la police - taille adaptée au format vertical
-        font_size = 60  # Un peu plus grand pour le format vertical
+        font_size = 60
         try:
             if font_path and os.path.exists(font_path):
                 font = ImageFont.truetype(font_path, font_size)
                 print(f"  ✓ Police chargée : {font_path}")
             else:
-                # Fallback vers la police par défaut
                 font = ImageFont.load_default()
                 print("  ℹ Utilisation de la police par défaut")
         except Exception as e:
@@ -227,17 +224,11 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
                       text="Streamer >>>", target_duration=60, font_path=None,
                       black_screen_duration=0.3):
     """
-    Construit la vidéo finale en concaténant les clips avec :
-    - Format TikTok (9:16 vertical - 1080x1920)
-    - Image noire entre chaque clip (transition)
-    - Son au début
-    - Sons de transition entre chaque clip
-    - Texte au centre pendant toute la durée
-    - Durée totale d'environ 1 minute
+    Construit la vidéo finale en concaténant les clips
     """
     if not clips_paths:
         print("❌ Aucun clip à traiter")
-        return
+        return None
 
     loaded_clips = []
     total_duration = 0
@@ -248,11 +239,9 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
 
     print(f"\n📹 Chargement et conversion des clips au format TikTok (9:16 - {TIKTOK_WIDTH}x{TIKTOK_HEIGHT})...")
 
-    # Charger les clips jusqu'à atteindre la durée cible
     black_screens_time = 0
 
     for i, path in enumerate(clips_paths):
-        # Calculer la durée totale incluant les écrans noirs
         effective_duration = total_duration + black_screens_time
 
         if effective_duration >= target_duration:
@@ -260,20 +249,15 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
 
         try:
             clip = VideoFileClip(path)
-
-            # Convertir au format TikTok
             clip_tiktok = convert_to_tiktok_format(clip, TIKTOK_WIDTH, TIKTOK_HEIGHT)
-
             remaining_time = target_duration - effective_duration
 
             if clip_tiktok.duration > remaining_time:
-                # Couper le clip pour ne pas dépasser la durée cible
                 clip_tiktok = clip_tiktok.subclip(0, remaining_time)
 
             loaded_clips.append(clip_tiktok)
             total_duration += clip_tiktok.duration
 
-            # Ajouter le temps de l'écran noir (sauf pour le dernier clip)
             if i < len(clips_paths) - 1:
                 black_screens_time += black_screen_duration
 
@@ -282,25 +266,20 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
 
         except Exception as e:
             print(f"  ✗ Erreur avec {path}: {e}")
-            import traceback
-            traceback.print_exc()
             continue
 
     if not loaded_clips:
         print("❌ Aucune vidéo n'a pu être chargée")
-        return
+        return None
 
     print(f"\n🔧 Assemblage de {len(loaded_clips)} clips avec écrans noirs de transition...")
 
-    # Créer la liste finale avec les clips et les écrans noirs
     clips_with_transitions = []
 
     for i, clip in enumerate(loaded_clips):
         clips_with_transitions.append(clip)
 
-        # Ajouter un écran noir après chaque clip sauf le dernier
         if i < len(loaded_clips) - 1:
-            # Créer un écran noir au format TikTok
             black_screen = ColorClip(
                 size=(TIKTOK_WIDTH, TIKTOK_HEIGHT),
                 color=(0, 0, 0),
@@ -309,22 +288,18 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
             clips_with_transitions.append(black_screen)
             print(f"  ⚫ Écran noir ajouté après le clip {i + 1} ({black_screen_duration}s)")
 
-    # Concaténer tous les clips avec les écrans noirs
     final_video = concatenate_videoclips(clips_with_transitions, method="compose")
 
     print(f"  ✓ Durée totale avec transitions : {final_video.duration:.1f}s")
     print(f"  ✓ Format final : {final_video.size[0]}x{final_video.size[1]} (TikTok 9:16)")
 
-    # Ajouter le texte overlay pendant TOUTE la durée
     final_video = add_text_overlay(final_video, text, font_path=font_path)
 
-    # Ajouter le son de début (intro)
     if intro_sound and os.path.exists(intro_sound):
         try:
             print("\n🎵 Ajout du son d'intro...")
             intro_audio = AudioFileClip(intro_sound)
 
-            # Si la vidéo a déjà de l'audio, on mixe
             if final_video.audio:
                 from moviepy.audio.AudioClip import CompositeAudioClip
                 intro_audio = intro_audio.set_duration(min(intro_audio.duration, final_video.duration))
@@ -339,13 +314,11 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
         except Exception as e:
             print(f"  ⚠ Impossible d'ajouter le son d'intro : {e}")
 
-    # Ajouter les sons de transition entre clips
     if transition_sound and os.path.exists(transition_sound):
         try:
             print("🎵 Ajout des sons de transition...")
             transition_audio = AudioFileClip(transition_sound)
 
-            # Calculer les positions de transition (aux moments des écrans noirs)
             transition_times = []
             current_time = 0
             for i, clip in enumerate(loaded_clips[:-1]):
@@ -353,7 +326,6 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
                 transition_times.append(current_time)
                 current_time += black_screen_duration
 
-            # Mixer les sons de transition avec l'audio existant
             if final_video.audio and transition_times:
                 from moviepy.audio.AudioClip import CompositeAudioClip
                 audio_tracks = [final_video.audio]
@@ -369,7 +341,6 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
         except Exception as e:
             print(f"  ⚠ Impossible d'ajouter les sons de transition : {e}")
 
-    # Export de la vidéo finale
     output_file = "final_compilation_tiktok.mp4"
     print(f"\n💾 Export de la vidéo finale vers '{output_file}'...")
     final_video.write_videofile(
@@ -383,7 +354,6 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
         preset='medium'
     )
 
-    # Nettoyage
     for clip in loaded_clips:
         clip.close()
     final_video.close()
@@ -394,6 +364,131 @@ def build_final_video(clips_paths, intro_sound=None, transition_sound=None,
     print(f"   Nombre de clips : {len(loaded_clips)}")
     print(f"   Écrans noirs : {len(loaded_clips) - 1}")
 
+    return output_file
+
+
+# -----------------------------------------------------
+# 6. Upload vers TikTok (version qui fonctionne)
+# -----------------------------------------------------
+def upload_to_tiktok(video_path, title, username, description=None):
+    """
+    Upload une vidéo sur TikTok en utilisant TiktokAutoUploader
+    Version basée sur la méthode qui fonctionne
+    """
+    # Chemin vers le dossier TiktokAutoUploader
+    uploader_dir = "./vendor/TiktokAutoUploader"
+    cookie_dir = os.path.join(uploader_dir, "cookies")
+
+    if not os.path.exists(uploader_dir):
+        print(f"\n⚠ TiktokAutoUploader non trouvé dans {uploader_dir}")
+        print("💡 Assurez-vous d'avoir initialisé le submodule")
+        return False
+
+    if not os.path.exists(video_path):
+        print(f"\n❌ Vidéo non trouvée : {video_path}")
+        return False
+
+    print("\n" + "=" * 60)
+    print("📤 UPLOAD VERS TIKTOK")
+    print("=" * 60)
+
+    # Convertir le chemin de la vidéo en chemin absolu
+    video_path_abs = os.path.abspath(video_path)
+
+    # Sauvegarder le dossier actuel
+    original_dir = os.getcwd()
+
+    try:
+        # Se déplacer dans le dossier TiktokAutoUploader
+        os.chdir(uploader_dir)
+        print(f"📁 Dossier de travail : {os.getcwd()}")
+
+        # Fonction pour vérifier si le cookie existe
+        def check_cookie_exists(cookie_name):
+            if not os.path.exists(cookie_dir):
+                return False
+            for filename in os.listdir(cookie_dir):
+                if cookie_name in filename:
+                    print(f'✓ Cookie de {cookie_name} trouvé')
+                    return True
+            print(f'⚠ Cookie de {cookie_name} non trouvé')
+            return False
+
+        # Fonction pour exécuter une commande
+        def run_command(command):
+            print(f"🔧 Commande : {' '.join(command)}")
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            for stdout_line in iter(process.stdout.readline, ""):
+                print(stdout_line, end="")
+
+            process.stdout.close()
+            process.wait()
+
+            stderr = process.stderr.read()
+            if stderr:
+                print(f"Sortie d'erreur : {stderr}")
+
+            return process.returncode
+
+        # Vérifier si le cookie existe, sinon faire le login
+        if not check_cookie_exists(username):
+            print(f"\n🔐 Connexion requise pour {username}...")
+            login_command = [
+                sys.executable,
+                "cli.py",
+                "login",
+                "-n",
+                username
+            ]
+            return_code = run_command(login_command)
+            if return_code != 0:
+                print(f"\n❌ Échec de la connexion")
+                return False
+
+        # Préparer le titre complet
+        full_title = title
+        if description:
+            full_title = f"{title} - {description}"
+
+        # Commande d'upload
+        print(f"\n📤 Upload de la vidéo...")
+        upload_command = [
+            sys.executable,
+            "cli.py",
+            "upload",
+            "--user",
+            username,
+            "-v",
+            video_path_abs,
+            "-t",
+            full_title
+        ]
+
+        return_code = run_command(upload_command)
+
+        if return_code == 0:
+            print("\n✅ Upload réussi !")
+            return True
+        else:
+            print(f"\n❌ Échec de l'upload (code: {return_code})")
+            return False
+
+    except Exception as e:
+        print(f"\n❌ Erreur lors de l'upload : {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        # Retourner au dossier original
+        os.chdir(original_dir)
+        print(f"📁 Retour au dossier : {os.getcwd()}")
+
 
 # -----------------------------------------------------
 # MAIN
@@ -402,9 +497,14 @@ def main():
     # Configuration
     twitch_url = "https://m.twitch.tv/anyme023/clips/?featured=true&range=all"
 
+    # Configuration TikTok
+    TIKTOK_USERNAME = 'dvlad2'
+    AUTO_UPLOAD = True  # Upload automatique activé
+
     # Extraire le nom du streamer depuis l'URL
     streamer_name = extract_streamer_name(twitch_url)
     text_overlay = f"{streamer_name} core >>>"
+    tiktok_title = f"Best {streamer_name} moments! 🔥"
 
     print("=" * 60)
     print("🎬 TWITCH CLIP COMPILER - FORMAT TIKTOK")
@@ -412,6 +512,7 @@ def main():
     print(f"Streamer : {streamer_name}")
     print(f"URL : {twitch_url}")
     print(f"Format : 1080x1920 (9:16 - TikTok/YouTube Shorts)")
+    print(f"Auto-upload : {'✅ Activé' if AUTO_UPLOAD else '❌ Désactivé'}")
     print("=" * 60)
 
     # Télécharger la police
@@ -454,7 +555,7 @@ def main():
 
     # Étape 3 : Création de la vidéo finale
     print("\n" + "=" * 60)
-    build_final_video(
+    output_video = build_final_video(
         clips_paths=clips_local,
         intro_sound="intro.mp3",
         transition_sound="transition.mp3",
@@ -464,9 +565,38 @@ def main():
         black_screen_duration=0.3
     )
 
+    if not output_video:
+        print("\n❌ Échec de la création de la vidéo")
+        return
+
     print("\n" + "=" * 60)
-    print("🎉 TERMINÉ !")
-    print("🎥 Ta vidéo est prête pour TikTok/YouTube Shorts !")
+    print("🎉 VIDÉO CRÉÉE !")
+    print("=" * 60)
+
+    # Étape 4 : Upload vers TikTok
+    if AUTO_UPLOAD:
+        upload_success = upload_to_tiktok(
+            video_path=output_video,
+            title=tiktok_title,
+            username=TIKTOK_USERNAME,
+            description=f"#{streamer_name}"
+        )
+
+        if upload_success:
+            print("\n🎊 Vidéo uploadée sur TikTok avec succès !")
+        else:
+            print("\n⚠ Upload échoué")
+            print("\n💡 Essaye l'upload manuel :")
+            print(f"   cd vendor/TiktokAutoUploader")
+            print(f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title}\"")
+    else:
+        print("\n💡 Pour uploader sur TikTok :")
+        print(f"   cd vendor/TiktokAutoUploader")
+        print(f"   python cli.py upload --user {TIKTOK_USERNAME} -v ../../{output_video} -t \"{tiktok_title}\"")
+
+    print("\n" + "=" * 60)
+    print("🎥 Terminé !")
+    print(f"📁 Vidéo : {output_video}")
     print("=" * 60)
 
 
