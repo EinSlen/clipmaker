@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Music2, Loader2, Shuffle, Play, Pause, RefreshCw, Flame } from 'lucide-react';
+import { Music2, Loader2, Shuffle, Play, Pause, RefreshCw, Flame, UploadCloud } from 'lucide-react';
 import type { MusicTrack } from '@/lib/types';
 
 type VibeOption = { id: string; label: string };
@@ -19,9 +19,11 @@ export function MusicPicker({
   const [vibes, setVibes] = React.useState<VibeOption[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [fetching, setFetching] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
   const [autoFetchedCount, setAutoFetchedCount] = React.useState<number | null>(null);
   const [playingId, setPlayingId] = React.useState<string | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const load = React.useCallback(async (v?: string) => {
     setLoading(true);
@@ -54,6 +56,28 @@ export function MusicPicker({
       await load(value.vibe);
     } finally {
       setFetching(false);
+    }
+  }
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('vibe', value.vibe || 'tendance');
+      const r = await fetch('/api/music/upload', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (j.ok) {
+        onChange({ ...value, file: j.file, random: false, vibe: j.vibe || value.vibe });
+        await load(value.vibe);
+      } else {
+        alert("Upload échoué : " + (j.error || ''));
+      }
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -110,6 +134,22 @@ export function MusicPicker({
             re-pull
           </button>
         )}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Upload une musique depuis le téléphone"
+          className="px-3 h-8 rounded-full text-xs border border-white/15 text-ink-200 hover:bg-white/5 flex items-center gap-1"
+        >
+          {uploading ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
+          upload
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg"
+          className="hidden"
+          onChange={onPickFile}
+        />
       </div>
 
       <div className="space-y-1">
@@ -131,17 +171,26 @@ export function MusicPicker({
       ) : tracks.length === 0 ? (
         <div className="space-y-2">
           <p className="text-ink-400 text-sm">
-            Aucun son pour ce thème. {value.vibe && 'Clique « re-pull » pour télécharger depuis YouTube.'}
+            Aucun son pour ce thème. Essaie « re-pull » (peut échouer sur hébergeur cloud), ou upload une musique depuis ton téléphone.
           </p>
-          {value.vibe && (
+          <div className="flex flex-wrap gap-2">
+            {value.vibe && (
+              <button
+                onClick={refreshTrending}
+                disabled={fetching}
+                className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-accent text-white text-sm"
+              >
+                {fetching ? <Loader2 className="size-4 animate-spin" /> : <Flame className="size-4" />} re-pull « {value.vibe} »
+              </button>
+            )}
             <button
-              onClick={refreshTrending}
-              disabled={fetching}
-              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-accent text-white text-sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-white/10 text-ink-50 text-sm"
             >
-              {fetching ? <Loader2 className="size-4 animate-spin" /> : <Flame className="size-4" />} Télécharger les tendances « {value.vibe} »
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />} upload .mp3
             </button>
-          )}
+          </div>
         </div>
       ) : (
         <>

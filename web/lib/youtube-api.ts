@@ -66,7 +66,71 @@ type InvSearchItem = {
   videoThumbnails?: { url: string; width: number; height: number }[];
 };
 
+// Official YouTube Data API v3 — works from any IP (including datacenter).
+// Free tier: 10000 quota units/day, search costs 100 units → ~100 searches/day.
+async function searchYoutubeOfficial(query: string, max: number, apiKey: string): Promise<YtSearchHit[]> {
+  const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+  searchUrl.searchParams.set('part', 'snippet');
+  searchUrl.searchParams.set('type', 'video');
+  searchUrl.searchParams.set('q', query);
+  searchUrl.searchParams.set('maxResults', String(Math.min(max, 50)));
+  searchUrl.searchParams.set('key', apiKey);
+
+  const r = await fetch(searchUrl, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`yt-data search HTTP ${r.status}`);
+  const j = (await r.json()) as { items?: { id: { videoId: string }; snippet: { title: string; channelTitle: string; thumbnails: Record<string, { url: string; width: number }> } }[] };
+  const items = j.items || [];
+  if (!items.length) return [];
+
+  // Get durations/views in one batch (videos.list, ~1 quota unit)
+  const ids = items.map((it) => it.id.videoId).filter(Boolean);
+  const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos');
+  detailsUrl.searchParams.set('part', 'contentDetails,statistics');
+  detailsUrl.searchParams.set('id', ids.join(','));
+  detailsUrl.searchParams.set('key', apiKey);
+  const dResp = await fetch(detailsUrl, { signal: AbortSignal.timeout(15000) });
+  const dJson = (await dResp.json().catch(() => ({}))) as { items?: { id: string; contentDetails?: { duration?: string }; statistics?: { viewCount?: string } }[] };
+  const detailsById = new Map<string, { duration: number; views: number }>();
+  for (const d of dJson.items || []) {
+    detailsById.set(d.id, {
+      duration: iso8601ToSeconds(d.contentDetails?.duration || 'PT0S'),
+      views: Number(d.statistics?.viewCount || 0)
+    });
+  }
+
+  return items.slice(0, max).map<YtSearchHit>((it) => {
+    const d = detailsById.get(it.id.videoId) || { duration: 0, views: 0 };
+    const thumbs = it.snippet.thumbnails || {};
+    const pickThumb = thumbs.high?.url || thumbs.medium?.url || thumbs.default?.url;
+    return {
+      id: it.id.videoId,
+      title: it.snippet.title,
+      channel: it.snippet.channelTitle,
+      url: `https://www.youtube.com/watch?v=${it.id.videoId}`,
+      duration: d.duration,
+      views: d.views,
+      thumbnail: pickThumb
+    };
+  });
+}
+
+function iso8601ToSeconds(iso: string): number {
+  const m = iso.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!m) return 0;
+  return (Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0);
+}
+
 export async function searchYoutube(query: string, max: number): Promise<YtSearchHit[]> {
+  // Prefer the official API if the user provided a key (works from any IP).
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (apiKey) {
+    try {
+      return await searchYoutubeOfficial(query, max, apiKey);
+    } catch (e) {
+      console.warn('[youtube-api] official search failed, falling back to Invidious:', String(e).slice(0, 150));
+    }
+  }
+  // Fallback: round-robin Invidious instances (may be blocked on datacenter IPs).
   const url = `/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
   const data = (await invFetch(url)) as InvSearchItem[];
   return (Array.isArray(data) ? data : [])

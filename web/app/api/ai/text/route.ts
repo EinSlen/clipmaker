@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { FALLBACK_TEXTS, STYLE_SYSTEM_PROMPT } from '@/lib/fallback-texts';
-import { llmComplete, parseJsonLoose } from '@/lib/llm';
+import { llmComplete, extractStringArray } from '@/lib/llm';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,17 +38,7 @@ export async function POST(req: Request) {
   });
 
   if (llm.text) {
-    const parsed = parseJsonLoose<{ texts?: unknown }>(llm.text);
-    let texts: string[] = [];
-    if (parsed && Array.isArray(parsed.texts)) {
-      texts = (parsed.texts as unknown[]).filter((t): t is string => typeof t === 'string');
-    } else {
-      texts = llm.text
-        .split(/\n{2,}/)
-        .map((s) => s.replace(/^[-*"]\s*/, '').trim())
-        .filter(Boolean)
-        .slice(0, count);
-    }
+    const texts = extractStringArray(llm.text, 'texts').slice(0, count);
     if (texts.length) return NextResponse.json({ texts, source: llm.source });
   }
   return NextResponse.json({ texts: pickRandom(FALLBACK_TEXTS, count), source: 'fallback', note: llm.error });

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { HASHTAG_BANK } from '@/lib/fallback-texts';
-import { llmComplete, parseJsonLoose } from '@/lib/llm';
+import { llmComplete, extractStringArray } from '@/lib/llm';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,15 +26,10 @@ export async function POST(req: Request) {
 
   const llm = await llmComplete({ system, user, temperature: 0.7, maxTokens: 500 });
   if (llm.text) {
-    const parsed = parseJsonLoose<{ hashtags?: unknown }>(llm.text);
-    let tags: string[] = [];
-    if (parsed && Array.isArray(parsed.hashtags)) {
-      tags = (parsed.hashtags as unknown[]).filter((t): t is string => typeof t === 'string');
-    } else {
-      tags = llm.text.split(/\s+/).filter((t) => t.startsWith('#')).slice(0, count);
-    }
+    let tags = extractStringArray(llm.text, 'hashtags');
+    if (!tags.length) tags = llm.text.split(/\s+/).filter((t) => t.startsWith('#'));
     if (tags.length) {
-      const normalized = Array.from(new Set(tags.map((h) => (h.startsWith('#') ? h : `#${h}`).toLowerCase())));
+      const normalized = Array.from(new Set(tags.map((h) => (h.startsWith('#') ? h : `#${h}`).toLowerCase()))).slice(0, count);
       return NextResponse.json({ hashtags: normalized, source: llm.source });
     }
   }

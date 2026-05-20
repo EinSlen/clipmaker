@@ -88,13 +88,89 @@ export function parseJsonLoose<T = unknown>(raw: string): T | null {
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    // Try to find the first {...} blob
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    try {
-      return JSON.parse(m[0]) as T;
-    } catch {
-      return null;
+    // Try the largest balanced {...} substring
+    const start = cleaned.indexOf('{');
+    if (start >= 0) {
+      let depth = 0;
+      let inStr = false;
+      let esc = false;
+      for (let i = start; i < cleaned.length; i++) {
+        const c = cleaned[i];
+        if (inStr) {
+          if (esc) esc = false;
+          else if (c === '\\') esc = true;
+          else if (c === '"') inStr = false;
+          continue;
+        }
+        if (c === '"') inStr = true;
+        else if (c === '{') depth++;
+        else if (c === '}') {
+          depth--;
+          if (depth === 0) {
+            try {
+              return JSON.parse(cleaned.slice(start, i + 1)) as T;
+            } catch {
+              break;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+}
+
+/** Extracts a string array from any text — handles models that wrap JSON in prose,
+ *  emit malformed JSON, or just spit a numbered list. */
+export function extractStringArray(raw: string, key = 'texts'): string[] {
+  if (!raw) return [];
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+
+  // 1) Strict JSON
+  const parsed = parseJsonLoose<Record<string, unknown>>(cleaned);
+  if (parsed && Array.isArray(parsed[key])) {
+    return (parsed[key] as unknown[]).filter((t): t is string => typeof t === 'string');
+  }
+
+  // 2) Find the first array literal `[ "a", "b", ... ]` after the key (or anywhere)
+  //    Walk the string with awareness of strings to extract balanced [...]
+  const keyIdx = cleaned.indexOf('"' + key + '"');
+  const startSearchFrom = keyIdx >= 0 ? keyIdx : 0;
+  const arrStart = cleaned.indexOf('[', startSearchFrom);
+  if (arrStart >= 0) {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = arrStart; i < cleaned.length; i++) {
+      const c = cleaned[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '[') depth++;
+      else if (c === ']') {
+        depth--;
+        if (depth === 0) {
+          try {
+            const arr = JSON.parse(cleaned.slice(arrStart, i + 1));
+            if (Array.isArray(arr)) return arr.filter((t): t is string => typeof t === 'string');
+          } catch {}
+          break;
+        }
+      }
     }
   }
+
+  // 3) Numbered/bulleted lines fallback
+  const lines = cleaned
+    .split('\n')
+    .map((l) => l.trim())
+    .map((l) => l.replace(/^\d+[\).\s]+/, '').replace(/^[-*•"]\s*/, '').replace(/^"|"$/g, '').trim())
+    .filter(Boolean);
+  if (lines.length >= 2) return lines;
+
+  return [];
 }
