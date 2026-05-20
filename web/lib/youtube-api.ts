@@ -120,19 +120,59 @@ function iso8601ToSeconds(iso: string): number {
   return (Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0);
 }
 
+// InnerTube (youtubei.js) — talks to YouTube's internal API directly without a Data API key.
+// More resilient than Invidious from datacenter IPs because it uses the same paths the
+// official web player uses.
+let _innertube: unknown | null = null;
+async function getInnertube(): Promise<{ search: (q: string) => Promise<{ videos?: { id?: string; title?: { text?: string } | string; author?: { name?: string }; duration?: { seconds?: number; text?: string }; view_count?: { text?: string }; thumbnails?: { url: string; width?: number; height?: number }[]; type?: string }[] }> }> {
+  if (_innertube) return _innertube as never;
+  const mod = await import('youtubei.js');
+  _innertube = await mod.Innertube.create({ generate_session_locally: true });
+  return _innertube as never;
+}
+
+async function searchYoutubeInnertube(query: string, max: number): Promise<YtSearchHit[]> {
+  const yt = await getInnertube();
+  const res = await yt.search(query);
+  const items = (res.videos || []).filter((v) => v && v.id);
+  return items.slice(0, max).map<YtSearchHit>((v) => {
+    const titleText = typeof v.title === 'string' ? v.title : v.title?.text || '';
+    const durSec = Number(v.duration?.seconds || 0);
+    const viewsTxt = v.view_count?.text || '';
+    const views = Number(viewsTxt.replace(/[^\d]/g, '')) || 0;
+    const thumb = v.thumbnails?.find((t) => (t.width || 0) >= 320)?.url || v.thumbnails?.[0]?.url;
+    return {
+      id: v.id!,
+      title: titleText,
+      channel: v.author?.name || '',
+      url: `https://www.youtube.com/watch?v=${v.id}`,
+      duration: durSec,
+      views,
+      thumbnail: thumb
+    };
+  });
+}
+
 export async function searchYoutube(query: string, max: number): Promise<YtSearchHit[]> {
-  // Prefer the official API if the user provided a key (works from any IP).
+  // 1) Try Innertube (no key, no setup, works from most IPs)
+  try {
+    const r = await searchYoutubeInnertube(query, max);
+    if (r.length) return r;
+  } catch (e) {
+    console.warn('[youtube-api] innertube search failed:', String(e).slice(0, 150));
+  }
+  // 2) Try the official Data API if the user gave a key
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (apiKey) {
     try {
       return await searchYoutubeOfficial(query, max, apiKey);
     } catch (e) {
-      console.warn('[youtube-api] official search failed, falling back to Invidious:', String(e).slice(0, 150));
+      console.warn('[youtube-api] official search failed:', String(e).slice(0, 150));
     }
   }
-  // Fallback: round-robin Invidious instances (may be blocked on datacenter IPs).
+  // 3) Fallback: round-robin Invidious instances (often blocked on datacenter IPs).
   const url = `/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
-  const data = (await invFetch(url)) as InvSearchItem[];
+  const data = (await invFetch(url).catch(() => [])) as InvSearchItem[];
   return (Array.isArray(data) ? data : [])
     .filter((it) => it.type === 'video' && it.videoId)
     .slice(0, max)
