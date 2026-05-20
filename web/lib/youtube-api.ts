@@ -120,37 +120,111 @@ function iso8601ToSeconds(iso: string): number {
   return (Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0);
 }
 
-// InnerTube (youtubei.js) — talks to YouTube's internal API directly without a Data API key.
-// More resilient than Invidious from datacenter IPs because it uses the same paths the
-// official web player uses.
-let _innertube: unknown | null = null;
-async function getInnertube(): Promise<{ search: (q: string) => Promise<{ videos?: { id?: string; title?: { text?: string } | string; author?: { name?: string }; duration?: { seconds?: number; text?: string }; view_count?: { text?: string }; thumbnails?: { url: string; width?: number; height?: number }[]; type?: string }[] }> }> {
-  if (_innertube) return _innertube as never;
-  const mod = await import('youtubei.js');
-  _innertube = await mod.Innertube.create({ generate_session_locally: true });
-  return _innertube as never;
+// Direct InnerTube HTTP call — uses YouTube's own web-client API key, no Data API quota,
+// no Google Cloud setup. Lightweight (no big JS lib loaded), so it doesn't blow Render's
+// 512 MB free tier. Works from most IPs.
+const INNERTUBE_WEB_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+const INNERTUBE_CLIENT_VERSION = '2.20250115.00.00';
+
+type IntRun = { text?: string };
+type IntRichRuns = { runs?: IntRun[]; simpleText?: string };
+type IntThumbnail = { url: string; width?: number; height?: number };
+type IntVideoRenderer = {
+  videoId?: string;
+  title?: IntRichRuns;
+  ownerText?: IntRichRuns;
+  longBylineText?: IntRichRuns;
+  lengthText?: IntRichRuns;
+  viewCountText?: IntRichRuns;
+  shortViewCountText?: IntRichRuns;
+  thumbnail?: { thumbnails?: IntThumbnail[] };
+};
+type IntItem = { videoRenderer?: IntVideoRenderer; compactVideoRenderer?: IntVideoRenderer };
+
+function runsToText(r?: IntRichRuns): string {
+  if (!r) return '';
+  if (r.simpleText) return r.simpleText;
+  return (r.runs || []).map((x) => x.text || '').join('');
+}
+
+function parseDurationText(s: string): number {
+  // "1:23" → 83 ; "1:02:03" → 3723
+  const parts = s.split(':').map((n) => Number(n) || 0);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
+function parseViewsText(s: string): number {
+  return Number(s.replace(/[^\d]/g, '')) || 0;
+}
+
+function collectVideoRenderers(node: unknown, out: IntVideoRenderer[]): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const x of node) collectVideoRenderers(x, out);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if (obj.videoRenderer && typeof obj.videoRenderer === 'object') {
+    out.push(obj.videoRenderer as IntVideoRenderer);
+  }
+  for (const k of Object.keys(obj)) collectVideoRenderers(obj[k], out);
 }
 
 async function searchYoutubeInnertube(query: string, max: number): Promise<YtSearchHit[]> {
-  const yt = await getInnertube();
-  const res = await yt.search(query);
-  const items = (res.videos || []).filter((v) => v && v.id);
-  return items.slice(0, max).map<YtSearchHit>((v) => {
-    const titleText = typeof v.title === 'string' ? v.title : v.title?.text || '';
-    const durSec = Number(v.duration?.seconds || 0);
-    const viewsTxt = v.view_count?.text || '';
-    const views = Number(viewsTxt.replace(/[^\d]/g, '')) || 0;
-    const thumb = v.thumbnails?.find((t) => (t.width || 0) >= 320)?.url || v.thumbnails?.[0]?.url;
-    return {
-      id: v.id!,
-      title: titleText,
-      channel: v.author?.name || '',
-      url: `https://www.youtube.com/watch?v=${v.id}`,
-      duration: durSec,
+  const r = await fetch(`https://www.youtube.com/youtubei/v1/search?key=${INNERTUBE_WEB_KEY}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(15000),
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      'X-YouTube-Client-Name': '1',
+      'X-YouTube-Client-Version': INNERTUBE_CLIENT_VERSION,
+      Origin: 'https://www.youtube.com',
+      Referer: 'https://www.youtube.com/'
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: INNERTUBE_CLIENT_VERSION,
+          hl: 'fr',
+          gl: 'FR',
+          utcOffsetMinutes: 60
+        }
+      },
+      query
+    })
+  });
+  if (!r.ok) throw new Error(`innertube HTTP ${r.status}`);
+  const j = (await r.json()) as unknown;
+  const renderers: IntVideoRenderer[] = [];
+  collectVideoRenderers(j, renderers);
+
+  const hits: YtSearchHit[] = [];
+  for (const v of renderers) {
+    if (!v.videoId) continue;
+    const title = runsToText(v.title);
+    if (!title) continue;
+    const channel = runsToText(v.ownerText) || runsToText(v.longBylineText);
+    const duration = parseDurationText(runsToText(v.lengthText));
+    const views = parseViewsText(runsToText(v.viewCountText) || runsToText(v.shortViewCountText));
+    const thumbs = v.thumbnail?.thumbnails || [];
+    const thumb = thumbs.find((t) => (t.width || 0) >= 320)?.url || thumbs[thumbs.length - 1]?.url;
+    hits.push({
+      id: v.videoId,
+      title,
+      channel,
+      url: `https://www.youtube.com/watch?v=${v.videoId}`,
+      duration,
       views,
       thumbnail: thumb
-    };
-  });
+    });
+    if (hits.length >= max) break;
+  }
+  return hits;
 }
 
 export async function searchYoutube(query: string, max: number): Promise<YtSearchHit[]> {
