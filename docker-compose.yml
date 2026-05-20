@@ -1,0 +1,33 @@
+services:
+  clipmaker:
+    build: ./web
+    image: clipmaker:latest
+    container_name: clipmaker
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./web/.env.local
+    environment:
+      REPO_ROOT: /repo
+      PYTHON_BIN: python3
+    volumes:
+      # Mount the whole repo so the app sees vendor/TiktokAutoUploader/CookiesDir/.
+      - ./:/repo
+      - ./web/uploads:/app/uploads
+      - ./web/renders:/app/renders
+      - ./web/public/music:/app/public/music
+
+  # Public HTTPS URL with zero config, no account, no token. Ephemeral domain
+  # (regenerated on each restart). Bring it up with:
+  #   docker compose --profile tunnel up -d
+  # Find the URL with:
+  #   docker compose logs tunnel | grep trycloudflare.com
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: clipmaker-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://clipmaker:3000
+    depends_on:
+      - clipmaker

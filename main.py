@@ -646,6 +646,22 @@ def main():
     print("🎉 VIDÉO CRÉÉE !")
     print("=" * 60)
 
+    # Étape 3b : Ajouter une musique triste tendance par-dessus
+    try:
+        from music_helper import mix_background_music
+        with_music = output_video.replace(".mp4", "_music.mp4")
+        mixed = mix_background_music(
+            video_path=output_video,
+            output_path=with_music,
+            vibe="tendance",
+            music_volume=0.55,
+            duck_original=0.4,
+        )
+        if mixed:
+            output_video = mixed
+    except Exception as e:
+        print(f"  ⚠ Impossible d'ajouter une musique : {e}")
+
     # Étape 4 : Upload vers TikTok
     if AUTO_UPLOAD:
         upload_success = upload_to_tiktok(

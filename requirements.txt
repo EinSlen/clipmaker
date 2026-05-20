@@ -5,6 +5,7 @@ tqdm==4.66.1
 streamlink==6.5.1
 pillow==10.2.0
 pydub==0.25.1
+pytubefix
 
 # Dépendances pour TiktokAutoUploader
 appdirs==1.4.4

@@ -1,0 +1,29 @@
+app = "clipmaker-sad"
+primary_region = "cdg"  # Paris — change si besoin
+
+[build]
+  dockerfile = "Dockerfile.fly"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+  REPO_ROOT = "/repo"
+  PYTHON_BIN = "python3"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"   # passe en veille après inactivité (free tier)
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "clipmaker_data"
+  destination = "/data"
+  # uploads/, renders/ et public/music seront symlinkés vers /data dans le Dockerfile

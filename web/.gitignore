@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+../.bin
+uploads/*
+!uploads/.gitkeep
+renders/*
+!renders/.gitkeep
+public/music/*
+!public/music/README.txt

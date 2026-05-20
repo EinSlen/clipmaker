@@ -1,0 +1,55 @@
+{
+  "_comment": "Pose tes .mp3 dans web/public/music/ et liste-les ici avec des 'vibes'. Le picker filtre par vibe.",
+  "vibes": [
+    { "id": "triste", "label": "Triste" },
+    { "id": "rupture", "label": "Rupture" },
+    { "id": "solitude", "label": "Solitude" },
+    { "id": "nostalgie", "label": "Nostalgie" },
+    { "id": "philo", "label": "Philo / cinéma" },
+    { "id": "tendance", "label": "Tendance TikTok" }
+  ],
+  "tracks": [
+    {
+      "id": "sad-piano-1",
+      "title": "Piano de pluie",
+      "vibe": ["triste", "philo", "solitude"],
+      "file": "/music/sad-piano-1.mp3",
+      "credit": "à remplir"
+    },
+    {
+      "id": "lofi-rain",
+      "title": "Lofi pluvieux",
+      "vibe": ["triste", "nostalgie", "solitude"],
+      "file": "/music/lofi-rain.mp3",
+      "credit": "à remplir"
+    },
+    {
+      "id": "ambient-melancholy",
+      "title": "Ambient mélancolique",
+      "vibe": ["philo", "triste"],
+      "file": "/music/ambient-melancholy.mp3",
+      "credit": "à remplir"
+    },
+    {
+      "id": "string-quartet-sad",
+      "title": "Cordes tristes",
+      "vibe": ["rupture", "triste", "philo"],
+      "file": "/music/string-quartet-sad.mp3",
+      "credit": "à remplir"
+    },
+    {
+      "id": "trend-sad-1",
+      "title": "Trend triste #1",
+      "vibe": ["tendance", "triste"],
+      "file": "/music/trend-sad-1.mp3",
+      "credit": "à remplir"
+    },
+    {
+      "id": "trend-sad-2",
+      "title": "Trend triste #2",
+      "vibe": ["tendance", "rupture"],
+      "file": "/music/trend-sad-2.mp3",
+      "credit": "à remplir"
+    }
+  ]
+}

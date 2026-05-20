@@ -1,0 +1,47 @@
+{
+  "_comment": "Recherches YouTube ciblées sur les sons TRISTES TENDANCE TIKTOK. L'app les télécharge automatiquement (audio mp3) par vibe. Tu peux ajouter/retirer des queries — l'app prend les meilleurs résultats par durée.",
+  "filters": {
+    "minDuration": 15,
+    "maxDuration": 240,
+    "perFetch": 4
+  },
+  "queries": {
+    "tendance": [
+      "sad tiktok trending sound 2025",
+      "trending sad tiktok song viral",
+      "tiktok trending sad audio slowed",
+      "musique triste tiktok tendance 2025",
+      "sad tiktok edit audio trending"
+    ],
+    "triste": [
+      "sad tiktok music trending 2025",
+      "sad tiktok song crying edit",
+      "musique triste tiktok pour pleurer",
+      "sad tiktok piano trending audio"
+    ],
+    "rupture": [
+      "sad tiktok breakup song trending",
+      "tiktok heartbreak sad audio viral",
+      "sad tiktok song after breakup trending",
+      "musique rupture tiktok triste tendance"
+    ],
+    "solitude": [
+      "sad tiktok lonely audio trending",
+      "tiktok sad alone song viral",
+      "musique tiktok solitude triste tendance",
+      "sad tiktok feeling alone audio"
+    ],
+    "nostalgie": [
+      "nostalgic sad tiktok trending sound",
+      "sad tiktok memories audio viral",
+      "tiktok sad missing you trending",
+      "musique tiktok nostalgie triste"
+    ],
+    "philo": [
+      "deep sad tiktok audio trending",
+      "philosophical sad tiktok song viral",
+      "cinematic sad tiktok trending audio",
+      "musique tiktok cinema triste"
+    ]
+  }
+}

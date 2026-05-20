@@ -1,0 +1,45 @@
+# Dockerfile pour Fly.io — clipMaker en standalone (Next.js + ffmpeg + yt-dlp + python)
+# Construit depuis la racine du dépôt (le /repo monté contient vendor/ et data/).
+
+FROM node:20-bookworm-slim AS deps
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY web/ ./
+RUN npm run build
+
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV PYTHON_BIN=python3
+ENV REPO_ROOT=/repo
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg python3 python3-pip \
+      curl ca-certificates fonts-dejavu fonts-liberation \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=builder /app/data ./data
+# Vendor + repo files so the vendor TikTok uploader is reachable (mode auto-upload optionnel).
+COPY vendor/ /repo/vendor/
+
+# Persist user data on the Fly volume (mounted at /data)
+RUN mkdir -p /data/uploads /data/renders /data/music \
+    && rm -rf uploads renders public/music \
+    && ln -s /data/uploads uploads \
+    && ln -s /data/renders renders \
+    && ln -s /data/music public/music
+
+EXPOSE 3000
+CMD ["npm", "start"]
