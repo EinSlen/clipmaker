@@ -426,15 +426,23 @@ async function videoMetaInnertube(videoId: string): Promise<InvVideoMeta> {
 }
 
 async function videoMeta(videoId: string): Promise<InvVideoMeta> {
-  // 1) Innertube ANDROID (rapide, fiable, URLs non cipherées)
+  // 1) Innertube multi-client (rapide, pas de signature cipher)
+  let innertubeErr = '';
   try {
     return await videoMetaInnertube(videoId);
   } catch (e) {
-    console.warn('[youtube-api] innertube player failed:', String(e).slice(0, 200));
+    innertubeErr = String((e as Error).message || e).slice(0, 300);
+    console.warn('[youtube-api] innertube failed:', innertubeErr);
   }
   // 2) Fallback Invidious (souvent down sur datacenter)
-  const url = `/api/v1/videos/${encodeURIComponent(videoId)}`;
-  return (await invFetch(url, 20000)) as InvVideoMeta;
+  try {
+    const url = `/api/v1/videos/${encodeURIComponent(videoId)}`;
+    return (await invFetch(url, 20000)) as InvVideoMeta;
+  } catch (e) {
+    const invErr = String((e as Error).message || e).slice(0, 200);
+    // Agrège les deux pour que le client puisse voir où ça coince réellement
+    throw new Error(`innertube: ${innertubeErr} || invidious: ${invErr}`);
+  }
 }
 
 function bestAudio(meta: InvVideoMeta): AdaptiveFormat | null {
