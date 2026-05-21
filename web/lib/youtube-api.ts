@@ -303,27 +303,66 @@ type IntPlayerResponse = {
   };
 };
 
-async function innertubePlayer(videoId: string): Promise<IntPlayerResponse> {
-  const ANDROID_KEY = 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w';
-  const ANDROID_VERSION = '19.09.37';
-  const r = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${ANDROID_KEY}`, {
+type IntClient = {
+  name: string;
+  key: string;
+  clientName: string;
+  clientVersion: string;
+  ua: string;
+  cn: string;
+  extra?: Record<string, unknown>;
+};
+
+// Plusieurs clients Innertube — YouTube applique différentes restrictions selon
+// l'IP source, certains clients passent là où d'autres se font 403.
+const INTERTUBE_CLIENTS: IntClient[] = [
+  {
+    name: 'IOS',
+    key: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
+    clientName: 'IOS',
+    clientVersion: '19.45.4',
+    ua: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1 like Mac OS X;)',
+    cn: '5',
+    extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.1.0.22B83' }
+  },
+  {
+    name: 'ANDROID',
+    key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+    clientName: 'ANDROID',
+    clientVersion: '19.09.37',
+    ua: 'com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip',
+    cn: '3',
+    extra: { androidSdkVersion: 34, osName: 'Android', osVersion: '14' }
+  },
+  {
+    name: 'TVHTML5_EMBED',
+    key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+    clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+    clientVersion: '2.0',
+    ua: 'Mozilla/5.0 (PlayStation 4 5.55) AppleWebKit/601.2 (KHTML, like Gecko)',
+    cn: '85'
+  }
+];
+
+async function innertubePlayerOne(videoId: string, client: IntClient): Promise<IntPlayerResponse> {
+  const r = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${client.key}`, {
     method: 'POST',
     signal: AbortSignal.timeout(15000),
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': `com.google.android.youtube/${ANDROID_VERSION} (Linux; U; Android 14) gzip`,
-      'X-YouTube-Client-Name': '3',
-      'X-YouTube-Client-Version': ANDROID_VERSION
+      'User-Agent': client.ua,
+      'X-YouTube-Client-Name': client.cn,
+      'X-YouTube-Client-Version': client.clientVersion
     },
     body: JSON.stringify({
       context: {
         client: {
-          clientName: 'ANDROID',
-          clientVersion: ANDROID_VERSION,
-          androidSdkVersion: 34,
+          clientName: client.clientName,
+          clientVersion: client.clientVersion,
           hl: 'en',
           gl: 'US',
-          utcOffsetMinutes: 0
+          utcOffsetMinutes: 0,
+          ...(client.extra || {})
         }
       },
       videoId,
@@ -331,8 +370,27 @@ async function innertubePlayer(videoId: string): Promise<IntPlayerResponse> {
       racyCheckOk: true
     })
   });
-  if (!r.ok) throw new Error(`innertube player HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as IntPlayerResponse;
+}
+
+async function innertubePlayer(videoId: string): Promise<IntPlayerResponse> {
+  const errors: string[] = [];
+  for (const c of INTERTUBE_CLIENTS) {
+    try {
+      const p = await innertubePlayerOne(videoId, c);
+      const sd = p.streamingData;
+      if (sd && ((sd.formats?.length ?? 0) + (sd.adaptiveFormats?.length ?? 0)) > 0) {
+        return p;
+      }
+      // Pas de stream → client n'a pas accès (souvent age/region). Essaie le suivant.
+      const status = p.playabilityStatus?.status || 'NO_STREAMS';
+      errors.push(`${c.name}=${status}`);
+    } catch (e) {
+      errors.push(`${c.name}=${String((e as Error).message || e).slice(0, 60)}`);
+    }
+  }
+  throw new Error(`innertube all clients failed: ${errors.join(' | ')}`);
 }
 
 function intToAdaptive(f: IntFormat): AdaptiveFormat {
