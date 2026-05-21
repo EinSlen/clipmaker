@@ -1,11 +1,11 @@
 {
-  "_comment": "Pose tes .mp3 dans web/public/music/ et liste-les ici avec des 'vibes'. Le picker filtre par vibe.",
+  "_comment": "Vibes affichées dans le picker UI. Les labels reflètent la direction @1998greenram (sad-boy ciné masculin). Les declared tracks ne s'affichent que si leur fichier existe sur disque.",
   "vibes": [
-    { "id": "triste", "label": "Triste" },
-    { "id": "rupture", "label": "Rupture" },
-    { "id": "solitude", "label": "Solitude" },
+    { "id": "triste", "label": "Sad-boy ciné" },
+    { "id": "philo", "label": "Piano / post-rock" },
+    { "id": "rupture", "label": "Heartbreak" },
+    { "id": "solitude", "label": "Nuit ambient" },
     { "id": "nostalgie", "label": "Nostalgie" },
-    { "id": "philo", "label": "Philo / cinéma" },
     { "id": "tendance", "label": "Tendance TikTok" }
   ],
   "tracks": [

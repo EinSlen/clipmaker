@@ -1,47 +1,52 @@
 {
-  "_comment": "Recherches YouTube ciblées sur les sons TRISTES TENDANCE TIKTOK. L'app les télécharge automatiquement (audio mp3) par vibe. Tu peux ajouter/retirer des queries — l'app prend les meilleurs résultats par durée.",
+  "_comment": "Recherches YouTube par vibe — orientées style @1998greenram / @u.s.e.r.0.0.46 (sad-boy cinématique masculin, post-rock atmosphérique, piano sad cinéma, slowed reverb sombre). L'app télécharge automatiquement les mp3.",
   "filters": {
-    "minDuration": 15,
-    "maxDuration": 240,
+    "minDuration": 25,
+    "maxDuration": 300,
     "perFetch": 4
   },
   "queries": {
     "tendance": [
-      "sad tiktok trending sound 2025",
-      "trending sad tiktok song viral",
-      "tiktok trending sad audio slowed",
-      "musique triste tiktok tendance 2025",
-      "sad tiktok edit audio trending"
+      "sad tiktok trending sound 2026",
+      "trending sad tiktok song slowed reverb",
+      "tiktok trending sad cinematic audio",
+      "musique triste tiktok tendance 2026",
+      "sad tiktok edit audio trending boy"
     ],
     "triste": [
-      "sad tiktok music trending 2025",
-      "sad tiktok song crying edit",
-      "musique triste tiktok pour pleurer",
-      "sad tiktok piano trending audio"
+      "post rock sad cinematic instrumental",
+      "slowed reverb sad atmospheric night",
+      "sad boy slowed reverb instrumental",
+      "cinematic sad instrumental film score",
+      "dark ambient melancholy cinematic"
     ],
     "rupture": [
-      "sad tiktok breakup song trending",
-      "tiktok heartbreak sad audio viral",
-      "sad tiktok song after breakup trending",
-      "musique rupture tiktok triste tendance"
+      "cigarettes after sex slowed reverb",
+      "sad piano breakup cinematic instrumental",
+      "heartbreak slowed reverb sad song",
+      "sad love song slowed reverb",
+      "melancholy piano heartbreak instrumental"
     ],
     "solitude": [
-      "sad tiktok lonely audio trending",
-      "tiktok sad alone song viral",
-      "musique tiktok solitude triste tendance",
-      "sad tiktok feeling alone audio"
+      "lofi rainy night sad atmospheric",
+      "dark ambient lonely night atmospheric",
+      "synthwave sad night drive lonely",
+      "slowed reverb lonely night atmospheric",
+      "lofi sad lonely night car ambient"
     ],
     "nostalgie": [
-      "nostalgic sad tiktok trending sound",
-      "sad tiktok memories audio viral",
-      "tiktok sad missing you trending",
-      "musique tiktok nostalgie triste"
+      "nostalgic instrumental piano cinematic sad",
+      "sad nostalgia post rock instrumental",
+      "slowed reverb nostalgic memories",
+      "lofi nostalgic sad piano rain",
+      "ambient nostalgic sad atmospheric cinematic"
     ],
     "philo": [
-      "deep sad tiktok audio trending",
-      "philosophical sad tiktok song viral",
-      "cinematic sad tiktok trending audio",
-      "musique tiktok cinema triste"
+      "olafur arnalds piano sad",
+      "joep beving piano lonely",
+      "ludovico einaudi melancholy piano",
+      "nils frahm piano introspective",
+      "post rock instrumental cinematic philosophical"
     ]
   }
 }
