@@ -553,11 +553,14 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
       '--no-playlist',
       '--no-progress',
       ...(cookies ? ['--cookies', cookies] : []),
-      // Avec cookies, on laisse yt-dlp choisir : web (par défaut, complet) marche
-      // grâce à la session. Sans cookies, on force tv_embedded/web_safari (pas
-      // de PoToken requis) au prix de formats limités.
+      '--age-limit', '99', // bypass age-gate quand possible
+      // Avec cookies, on tente plusieurs clients : default+web_creator (accès
+      // contenus signed-in), tv_embedded (pas de PoToken). Sans cookies on est
+      // limité à tv_embedded/web_safari.
       '--extractor-args',
-      cookies ? 'youtube:player_client=default,tv_embedded,web_safari' : 'youtube:player_client=tv_embedded,web_safari',
+      cookies
+        ? 'youtube:player_client=default,web_creator,tv_embedded,web_safari'
+        : 'youtube:player_client=tv_embedded,web_safari',
       `https://www.youtube.com/watch?v=${videoId}`
     ];
     const proc = spawn('yt-dlp', args, { windowsHide: true });
