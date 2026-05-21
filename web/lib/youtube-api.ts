@@ -547,7 +547,7 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
     // plupart des restrictions IP cloud actuelles. Si un cookies.txt est dispo
     // (Render Secret Files), on l'utilise pour bypasser l'anti-bot "Sign in".
     const args = [
-      '-f', 'bv*[ext=mp4]+ba[ext=m4a]/best[ext=mp4]/best',
+      '-f', 'bv*+ba/best',
       '--merge-output-format', 'mp4',
       '-o', outMp4,
       '--no-playlist',
