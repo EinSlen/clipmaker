@@ -5,45 +5,46 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Vibe @klaradagoat / @u.s.e.r.0.0.46 : POV intime, sad-girl/sad-boy vent, plan rapproché
-// d'une personne seule la nuit, ambiance handheld/journal — pas du b-roll stock détaché.
+// Vibe @1998greenram / @u.s.e.r.0.0.46 : sad-boy cinématique masculin, atmosphère
+// sombre/nocturne, plans contemplatifs (voiture la nuit, fumeur dehors, fenêtre,
+// silhouette dans la pluie). Mood Anathema/post-rock — pas du vent face-cam.
 const QUERIES_BY_VIBE: Record<string, string[]> = {
   sad: [
-    'sad girl pov vent video crying alone bedroom',
-    'sad boy alone room night vent diary',
-    'pov girl sitting alone dark bedroom sad',
-    'lonely girl close up crying night vertical',
-    'sad pov drinking alone night bedroom',
-    'sad vent tiktok style alone room dark',
-    'sad girl looking at camera crying dim light'
+    'lonely man driving at night cinematic',
+    'sad guy looking out window rain cinematic',
+    'man smoking alone night cinematic shot',
+    'sad boy walking dark street night cinematic',
+    'lonely figure car night rain cinematic',
+    'man alone window night melancholic cinematic',
+    'silhouette man dark city night cinematic'
   ],
   philo: [
-    'pov sitting alone window night thinking',
-    'sad guy talking to camera dark room vent',
-    'introspective vent vlog alone night bedroom',
-    'pov man looking at ceiling dark room',
-    'late night vent video alone dark room',
-    'sad reflection talking camera dim light'
+    'man staring window cinematic philosophical',
+    'lonely man rooftop city night cinematic',
+    'man thinking dark room cinematic shot',
+    'introspective man window rain cinematic',
+    'man walking bridge fog cinematic mood',
+    'silhouette man looking at city night cinematic'
   ],
   rupture: [
-    'sad girl crying breakup pov bedroom',
-    'pov sitting floor crying after breakup night',
-    'heartbroken vent video alone bedroom dark',
-    'sad girl on phone crying dark room',
-    'pov man crying breakup dim light bedroom'
+    'sad man driving night after breakup cinematic',
+    'lonely man cigarette rain cinematic shot',
+    'heartbroken man dark street cinematic',
+    'man sitting car night sad cinematic',
+    'sad man window night rain cinematic'
   ],
   solitude: [
-    'pov alone apartment night sad vlog',
-    'sad night vlog alone bedroom vent',
-    'pov walking alone street night sad',
-    'lonely girl pov bed dark room night',
-    'alone in room sad vent video dim light',
-    'pov drinking alone late night sad'
+    'lonely man walking dark street night cinematic',
+    'man alone bar night cinematic shot',
+    'silhouette walking rain night cinematic',
+    'man alone apartment window night cinematic',
+    'man driving alone highway night cinematic',
+    'lonely figure dark city night cinematic'
   ],
   anime: [
-    'sad anime girl close up crying dark room',
-    'lonely anime character pov bedroom night',
-    'anime sad scene close up dark aesthetic'
+    'sad anime boy window night aesthetic',
+    'lonely anime character night cinematic dark',
+    'anime sad boy walking rain dark aesthetic'
   ]
 };
 
@@ -73,45 +74,42 @@ function scoreCandidate(c: YtSearchHit): { score: number; reason: string } {
 
   const t = c.title.toLowerCase();
 
-  // Strong boosts: POV / vent / face-cam intimiste à la klaradagoat
-  if (/\bpov\b|first person|vlog|vent|talking to camera|talk to camera|diary|journal/.test(t)) {
-    score += 30;
-    reasons.push('POV/vent');
+  // Strong boosts: sad-boy cinématique masculin (Jaxon/Anathema vibe)
+  if (/cinematic|short film|film grain|aesthetic|moody|atmospheric/.test(t)) {
+    score += 28;
+    reasons.push('cinématique');
   }
-  if (/close[\s-]?up|selfie|webcam|phone camera|filming myself/.test(t)) {
-    score += 20;
-    reasons.push('proche');
-  }
-  if (/dark|night|dim|low\s?light|shadow|silhouette|moody|noir|bedroom at night/.test(t)) {
-    score += 22;
+  if (/dark|night|dim|low\s?light|shadow|silhouette|noir|rain|fog|smoke|neon|streetlight/.test(t)) {
+    score += 26;
     reasons.push('sombre');
   }
-  if (/sad|triste|melanchol|melanco|crying|tears|breakup|heartbroken|depression|venting|alone tonight/.test(t)) {
-    score += 22;
+  if (/sad|triste|melanchol|melanco|breakup|heartbroken|depression|empty|hopeless|nostalgia|nostalgic/.test(t)) {
+    score += 20;
     reasons.push('mood');
   }
-  if (/alone|lonely|solitude|by myself|empty room|bedroom|interior|my room/.test(t)) {
-    score += 18;
-    reasons.push('intimiste');
+  if (/alone|lonely|solitude|by myself|walking alone|driving alone|empty street|empty room|empty city/.test(t)) {
+    score += 22;
+    reasons.push('seul');
   }
-  if (/girl|woman|man|boy|guy|person|her|him|face|portrait/.test(t)) {
-    score += 8;
-    reasons.push('humain');
+  // Cadrage : voiture / nuit / fenêtre / silhouette — signature Jaxon
+  if (/driving|car at night|inside car|window|rooftop|bridge|highway|cigarette|smoking/.test(t)) {
+    score += 16;
+    reasons.push('cadrage');
   }
-  // Léger boost cinématique (moins fort qu'avant: on ne veut PAS du stock footage)
-  if (/cinematic|aesthetic|film grain|short film/.test(t)) {
-    score += 8;
-    reasons.push('ciné');
+  if (/man|boy|guy|him|male|figure|silhouette/.test(t)) {
+    score += 10;
+    reasons.push('masculin');
   }
 
-  // Pénalités: éviter le stock footage / b-roll détaché, et la pollution habituelle
-  if (/\bb[\s-]?roll\b|stock footage|free footage|royalty free|no copyright/.test(t)) score -= 25;
+  // Pénalités: éviter stock footage évident, vent face-cam, et la pollution habituelle
+  if (/\bb[\s-]?roll\b|stock footage|free footage|royalty free|no copyright/.test(t)) score -= 18;
+  if (/\bpov\b|vlog|vent|talking to camera|talk to camera|webcam|selfie|filming myself/.test(t)) score -= 20;
   if (/#shorts|tiktok compilation|tik\s?tok\b/.test(t)) score -= 30;
   if (/movie scene|movie clip|crying scene|saddest scene|saddest movie|tearjerker/.test(t)) score -= 25;
   if (/quotes|quote|saying|reaction|compilation|funny|meme|prank|tutorial|how to/.test(t)) score -= 30;
   if (/lyrics|lyric video|cover song|music video|official video/.test(t)) score -= 25;
   if (/asmr|relaxing|sleep|study|10 hours/.test(t)) score -= 25;
-  if (/landscape|drone|timelapse|wallpaper|loop animation|nature relaxation/.test(t)) score -= 25;
+  if (/landscape only|drone tour|timelapse|wallpaper|loop animation|nature relaxation/.test(t)) score -= 20;
   if (/gameplay|gaming|minecraft|fortnite|valorant|roblox/.test(t)) score -= 50;
 
   return { score, reason: reasons.join(', ') || 'candidat' };
