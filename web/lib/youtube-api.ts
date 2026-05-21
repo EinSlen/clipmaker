@@ -646,6 +646,15 @@ export async function downloadVideoMp4(videoId: string, outMp4: string): Promise
   const yt = await ytdlpDownload(videoId, outMp4);
   if (yt.ok) return true;
 
-  // Tout a échoué — propage les deux erreurs pour diagnostic
+  // yt-dlp peut exit non-zero (warning post-merge) même quand le fichier est bien produit.
+  // Si le mp4 final existe avec une taille raisonnable, on considère que c'est OK.
+  try {
+    const stat = await fs.stat(outMp4);
+    if (stat.size > 10_000) {
+      console.warn('[youtube-api] yt-dlp', yt.err, '→ mais fichier produit (', stat.size, 'B), on accepte');
+      return true;
+    }
+  } catch {}
+
   throw new Error(`meta: ${metaErr || 'no playable formats'} || yt-dlp: ${yt.err || 'failed'}`);
 }
