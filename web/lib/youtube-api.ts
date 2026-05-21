@@ -553,9 +553,11 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
       '--no-playlist',
       '--no-progress',
       ...(cookies ? ['--cookies', cookies] : []),
-      // Drop mweb/android (PoToken requis depuis 2025) — tv_embedded et web_safari
-      // restent les seuls clients qui passent sans PoToken.
-      '--extractor-args', 'youtube:player_client=tv_embedded,web_safari',
+      // Avec cookies, on laisse yt-dlp choisir : web (par défaut, complet) marche
+      // grâce à la session. Sans cookies, on force tv_embedded/web_safari (pas
+      // de PoToken requis) au prix de formats limités.
+      '--extractor-args',
+      cookies ? 'youtube:player_client=default,tv_embedded,web_safari' : 'youtube:player_client=tv_embedded,web_safari',
       `https://www.youtube.com/watch?v=${videoId}`
     ];
     const proc = spawn('yt-dlp', args, { windowsHide: true });
