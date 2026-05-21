@@ -543,11 +543,10 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
     proc.stderr.on('data', (d) => (err += d.toString()));
     proc.on('close', (code) => {
       const combined = (err + '\n' + out).trim();
-      if (code !== 0) console.warn('[yt-dlp] exit', code, combined.slice(-800));
-      // Extrait la 1re ligne ERROR: si présente (plus utile que la dernière)
-      const errLine = combined.split('\n').find((l) => /ERROR:|sign in|forbidden|unavailable/i.test(l));
-      const summary = errLine ? errLine.slice(0, 300) : combined.slice(-300);
-      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code} ${summary}` });
+      if (code !== 0) console.warn('[yt-dlp] exit', code, '\n', combined.slice(-1200));
+      const errLine = combined.split('\n').find((l) => /ERROR:|sign in|forbidden|unavailable|HTTP Error|429/i.test(l));
+      const summary = errLine ? errLine.slice(0, 350) : (combined.slice(-350) || '<aucun output capturé>');
+      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code ?? 'null'} ${summary}` });
     });
     proc.on('error', (e) => resolve({ ok: false, err: `spawn: ${String(e).slice(0, 200)}` }));
   });
