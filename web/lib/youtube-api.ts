@@ -523,17 +523,39 @@ function bestCombined(meta: InvVideoMeta): AdaptiveFormat | null {
   return list[0];
 }
 
-/** Downloads best video+audio and muxes to mp4. */
-export async function downloadVideoMp4(videoId: string, outMp4: string): Promise<boolean> {
-  const meta = await videoMeta(videoId);
+async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boolean; err?: string }> {
+  return new Promise((resolve) => {
+    // player_client multi-fallback : web_safari et mweb bypassent la plupart des
+    // restrictions IP cloud actuelles ; tv_embedded marche aussi pour les vidéos
+    // age/region restreintes.
+    const args = [
+      '-f', 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b',
+      '--merge-output-format', 'mp4',
+      '-o', outMp4,
+      '--no-playlist',
+      '--no-warnings',
+      '--no-progress',
+      '--extractor-args', 'youtube:player_client=web_safari,mweb,tv_embedded,android',
+      `https://www.youtube.com/watch?v=${videoId}`
+    ];
+    const proc = spawn('yt-dlp', args, { windowsHide: true });
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d.toString()));
+    proc.on('close', (code) => {
+      if (code !== 0) console.warn('[yt-dlp]', stderr.slice(-400));
+      resolve({ ok: code === 0, err: code === 0 ? undefined : stderr.slice(-200) });
+    });
+    proc.on('error', (e) => resolve({ ok: false, err: String(e).slice(0, 200) }));
+  });
+}
 
-  // 1) Essai stream combiné (un seul fichier, pas de mux nécessaire — plus rapide & fiable)
+async function downloadFromMeta(meta: InvVideoMeta, outMp4: string): Promise<boolean> {
+  // 1) Stream combiné (un seul fichier, simple remux — le plus fiable quand dispo)
   const combined = bestCombined(meta);
   if (combined?.url) {
     const tmp = outMp4 + '.combined.src';
     const got = await downloadToFile(combined.url, tmp);
     if (got) {
-      // remux en mp4 propre (faststart) — copy sans transcode
       const ok = await ffmpegMux([
         '-y', '-i', tmp,
         '-c', 'copy', '-movflags', '+faststart',
@@ -545,7 +567,7 @@ export async function downloadVideoMp4(videoId: string, outMp4: string): Promise
     }
   }
 
-  // 2) Fallback streams séparés (qualité plus haute)
+  // 2) Streams séparés audio/vidéo (qualité plus haute)
   const audio = bestAudio(meta);
   const video = bestVideo(meta);
   if (!audio?.url || !video?.url) {
@@ -574,4 +596,24 @@ export async function downloadVideoMp4(videoId: string, outMp4: string): Promise
   await fs.unlink(aTmp).catch(() => {});
   await fs.unlink(vTmp).catch(() => {});
   return ok;
+}
+
+/** Downloads best video+audio and muxes to mp4. */
+export async function downloadVideoMp4(videoId: string, outMp4: string): Promise<boolean> {
+  let metaErr = '';
+  // 1) Path metadata (Innertube → Invidious → mux manuel)
+  try {
+    const meta = await videoMeta(videoId);
+    if (await downloadFromMeta(meta, outMp4)) return true;
+  } catch (e) {
+    metaErr = String((e as Error).message || e).slice(0, 400);
+    console.warn('[youtube-api] meta path failed, fallback yt-dlp:', metaErr);
+  }
+
+  // 2) Fallback final: yt-dlp (installé dans le Docker) avec player_clients à jour
+  const yt = await ytdlpDownload(videoId, outMp4);
+  if (yt.ok) return true;
+
+  // Tout a échoué — propage les deux erreurs pour diagnostic
+  throw new Error(`meta: ${metaErr || 'no playable formats'} || yt-dlp: ${yt.err || 'failed'}`);
 }
