@@ -569,7 +569,7 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
       const hint = !cookies && /sign in|bot|429|HTTP Error 403/i.test(combined)
         ? ' [hint: upload un youtube_cookies.txt dans Render Secret Files]'
         : '';
-      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code ?? 'null'} ${summary}${hint}` });
+      resolve({ ok: code === 0, err: code === 0 ? undefined : `[v2] exit=${code ?? 'null'} cookies=${!!cookies} ${summary}${hint}` });
     });
     proc.on('error', (e) => resolve({ ok: false, err: `spawn: ${String(e).slice(0, 200)}` }));
   });
