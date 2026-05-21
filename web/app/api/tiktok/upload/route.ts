@@ -12,7 +12,16 @@ type Body = {
   filename: string; // file in renders/
   username: string;
   caption: string;
+  musicId?: string; // ID ou URL TikTok du son officiel à attacher
 };
+
+function extractMusicId(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (/^\d{10,}$/.test(s)) return s;
+  const m = s.match(/(\d{10,})/);
+  return m ? m[1] : null;
+}
 
 export async function POST(req: Request) {
   const body = (await req.json()) as Body;
@@ -29,10 +38,17 @@ export async function POST(req: Request) {
   }
 
   const caption = (body.caption || '').slice(0, 2000);
+  const musicId = extractMusicId(body.musicId);
+  if (body.musicId && !musicId) {
+    return NextResponse.json({ ok: false, error: 'music ID/URL invalide' }, { status: 400 });
+  }
   const py = process.env.PYTHON_BIN || 'python';
 
+  const args = ['cli.py', 'upload', '--user', username, '-v', videoAbs, '-t', caption];
+  if (musicId) args.push('--music-id', musicId);
+
   return new Promise<Response>((resolve) => {
-    const proc = spawn(py, ['cli.py', 'upload', '--user', username, '-v', videoAbs, '-t', caption], {
+    const proc = spawn(py, args, {
       cwd: TIKTOK_UPLOADER_DIR,
       windowsHide: true
     });

@@ -35,6 +35,7 @@ export default function EditorPage() {
   });
   const [account, setAccount] = React.useState<string | undefined>();
   const [extraCaption, setExtraCaption] = React.useState('');
+  const [tiktokSound, setTiktokSound] = React.useState('');
 
   const [rendering, setRendering] = React.useState(false);
   const [renderResult, setRenderResult] = React.useState<{ filename: string; musicUsed: string | null } | null>(null);
@@ -133,7 +134,12 @@ export default function EditorPage() {
       const r = await fetch('/api/tiktok/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: renderResult.filename, username: account, caption: buildCaption() })
+        body: JSON.stringify({
+          filename: renderResult.filename,
+          username: account,
+          caption: buildCaption(),
+          musicId: tiktokSound.trim() || undefined
+        })
       });
       const j = await r.json();
       setUploadLog(j.ok ? '✅ Uploadé sur @' + account : '❌ ' + (j.error || j.stderr || 'échec'));
@@ -248,6 +254,18 @@ export default function EditorPage() {
                   className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
                   placeholder="ex: pense à liker si tu te reconnais 🤍"
                 />
+              </label>
+              <label className="text-xs text-ink-400 space-y-1 block">
+                <span>Son TikTok (optionnel — ID ou URL .../music/Foo-1234)</span>
+                <input
+                  value={tiktokSound}
+                  onChange={(e) => setTiktokSound(e.target.value)}
+                  className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                  placeholder="https://www.tiktok.com/music/…  ou  7641581184534711600"
+                />
+                <span className="block text-[10px] text-ink-500">
+                  Ajoute la vidéo au compteur du son (icône disque tournant). Best-effort — TikTok peut refuser un son non-autorisé.
+                </span>
               </label>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={doShare} disabled={uploading}>

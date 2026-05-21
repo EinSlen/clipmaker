@@ -1,8 +1,21 @@
 import argparse
+import re
 from tiktok_uploader import tiktok, Video
 from tiktok_uploader.basics import eprint
 from tiktok_uploader.Config import Config
 import sys, os
+
+
+def parse_music_id(raw):
+    """Accepte un ID numérique ou une URL TikTok (.../music/Foo-1234567890),
+    retourne l'ID brut ou None."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.isdigit():
+        return raw
+    m = re.search(r"(\d{10,})", raw)
+    return m.group(1) if m else None
 
 if __name__ == "__main__":
     _ = Config.load("./config.txt")
@@ -29,6 +42,8 @@ if __name__ == "__main__":
     upload_parser.add_argument("-bc", "--brandcontent", type=int, default=0)
     upload_parser.add_argument("-ai", "--ailabel", type=int, default=0)
     upload_parser.add_argument("-p", "--proxy", default="")
+    upload_parser.add_argument("-mi", "--music-id", dest="music_id", default=None,
+                               help="ID du son TikTok (ou URL .../music/Foo-1234) à attacher au post")
 
     # Show cookies
     show_parser = subparsers.add_parser("show", help="Show users and videos available for system.")
@@ -73,7 +88,11 @@ if __name__ == "__main__":
                     print(f'[-] {name}')
                 sys.exit(1)
 
-        tiktok.upload_video(args.users, args.video,  args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy)
+        music_id = parse_music_id(args.music_id)
+        if args.music_id and not music_id:
+            eprint(f"[-] Music ID/URL invalide : {args.music_id}")
+            sys.exit(1)
+        tiktok.upload_video(args.users, args.video,  args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy, music_id=music_id)
 
     elif args.subcommand == "show":
         # if flag is c then show cookie names

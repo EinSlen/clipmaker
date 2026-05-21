@@ -46,7 +46,7 @@ def login(login_name: str):
 
 
 # Local Code...
-def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, allow_duet=0, allow_stitch=0, visibility_type=0, brand_organic_type=0, branded_content_type=0, ai_label=0, proxy=None):
+def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, allow_duet=0, allow_stitch=0, visibility_type=0, brand_organic_type=0, branded_content_type=0, ai_label=0, proxy=None, music_id=None):
 	try:
 		user_agent = UserAgent().random
 	except FakeUserAgentError as e:
@@ -240,6 +240,12 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 	# }
 
 
+	# music_info: si music_id fourni, on attache le son officiel TikTok au post.
+	# Best-effort — TikTok peut rejeter un music_id qui n'est pas autorisé pour ce compte.
+	music_info = {}
+	if music_id:
+		music_info["music_id"] = str(music_id)
+
 	data = {
 		"post_common_info": {
 			"creation_id": creation_id,
@@ -275,7 +281,7 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 					"text": title,
 					"text_extra": text_extra,
 					"markup_text": markup_text,
-					"music_info": {},
+					"music_info": music_info,
 					"poster_delay": 0,
 				}
 			}
