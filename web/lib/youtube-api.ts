@@ -5,6 +5,7 @@
 // work from anywhere. We round-robin a small list and fall back if one is down.
 
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const DEFAULT_INSTANCES = [
@@ -523,16 +524,35 @@ function bestCombined(meta: InvVideoMeta): AdaptiveFormat | null {
   return list[0];
 }
 
+// Localise un fichier cookies YouTube si dispo (Render Secret Files / env / local).
+async function resolveCookiesPath(): Promise<string | null> {
+  const candidates = [
+    process.env.YT_COOKIES_FILE,
+    '/etc/secrets/youtube_cookies.txt', // Render Secret Files mount point
+    path.join(process.cwd(), 'data', 'youtube_cookies.txt')
+  ].filter((p): p is string => !!p);
+  for (const c of candidates) {
+    try {
+      await fs.access(c);
+      return c;
+    } catch {}
+  }
+  return null;
+}
+
 async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boolean; err?: string }> {
+  const cookies = await resolveCookiesPath();
   return new Promise((resolve) => {
     // player_client multi-fallback : web_safari/mweb/tv_embedded bypassent la
-    // plupart des restrictions IP cloud actuelles.
+    // plupart des restrictions IP cloud actuelles. Si un cookies.txt est dispo
+    // (Render Secret Files), on l'utilise pour bypasser l'anti-bot "Sign in".
     const args = [
       '-f', 'bv*[ext=mp4]+ba[ext=m4a]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
       '-o', outMp4,
       '--no-playlist',
       '--no-progress',
+      ...(cookies ? ['--cookies', cookies] : []),
       '--extractor-args', 'youtube:player_client=web_safari,mweb,tv_embedded,android',
       `https://www.youtube.com/watch?v=${videoId}`
     ];
@@ -543,10 +563,13 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
     proc.stderr.on('data', (d) => (err += d.toString()));
     proc.on('close', (code) => {
       const combined = (err + '\n' + out).trim();
-      if (code !== 0) console.warn('[yt-dlp] exit', code, '\n', combined.slice(-1200));
+      if (code !== 0) console.warn('[yt-dlp] exit', code, 'cookies=', !!cookies, '\n', combined.slice(-1200));
       const errLine = combined.split('\n').find((l) => /ERROR:|sign in|forbidden|unavailable|HTTP Error|429/i.test(l));
       const summary = errLine ? errLine.slice(0, 350) : (combined.slice(-350) || '<aucun output capturé>');
-      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code ?? 'null'} ${summary}` });
+      const hint = !cookies && /sign in|bot|429|HTTP Error 403/i.test(combined)
+        ? ' [hint: upload un youtube_cookies.txt dans Render Secret Files]'
+        : '';
+      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code ?? 'null'} ${summary}${hint}` });
     });
     proc.on('error', (e) => resolve({ ok: false, err: `spawn: ${String(e).slice(0, 200)}` }));
   });

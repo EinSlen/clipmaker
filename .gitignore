@@ -28,3 +28,7 @@ web/public/music/*.m4a
 web/public/music/*.wav
 web/public/music/*.ogg
 web/public/music/*.aac
+
+# Cookies YouTube — JAMAIS commiter (sessions login user)
+web/data/youtube_cookies.txt
+youtube_cookies.txt
