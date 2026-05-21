@@ -22,6 +22,18 @@ export function YoutubePanel({
   const [loading, setLoading] = React.useState(false);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
+  // Lit la réponse comme JSON ; si le serveur a crashé sans body (500 vide),
+  // on retourne un objet d'erreur lisible au lieu de planter le composant.
+  async function safeJson(r: Response): Promise<{ ok: boolean; error?: string; [k: string]: unknown }> {
+    const text = await r.text().catch(() => '');
+    if (!text) return { ok: false, error: `Serveur a renvoyé ${r.status} sans message (probablement une erreur côté API).` };
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: false, error: `Réponse non-JSON (${r.status}): ${text.slice(0, 200)}` };
+    }
+  }
+
   const search = async () => {
     setLoading(true);
     try {
@@ -30,8 +42,9 @@ export function YoutubePanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vibe, limit: 12 })
       });
-      const j = await r.json();
-      setItems(j.items || []);
+      const j = await safeJson(r);
+      setItems((j.items as YoutubeSuggestion[]) || []);
+      if (!r.ok) alert('Suggestion échouée : ' + (j.error || `HTTP ${r.status}`));
     } finally {
       setLoading(false);
     }
@@ -45,9 +58,9 @@ export function YoutubePanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: s.url })
       });
-      const j = await r.json();
-      if (j.ok) onImported({ id: j.id, filename: j.filename, size: j.size, title: s.title });
-      else alert('Téléchargement échoué : ' + (j.error || 'erreur'));
+      const j = await safeJson(r);
+      if (j.ok) onImported({ id: j.id as string, filename: j.filename as string, size: j.size as number, title: s.title });
+      else alert('Téléchargement échoué : ' + (j.error || `HTTP ${r.status}`));
     } finally {
       setDownloadingId(null);
     }
