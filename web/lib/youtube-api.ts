@@ -282,7 +282,99 @@ type InvVideoMeta = {
   formatStreams?: FormatStream[];
 };
 
+// Innertube /player — ANDROID client renvoie des URLs non cipherées dans la plupart des cas.
+type IntFormat = {
+  url?: string;
+  itag?: number;
+  mimeType?: string;
+  bitrate?: number;
+  width?: number;
+  height?: number;
+  qualityLabel?: string;
+  audioQuality?: string;
+  signatureCipher?: string;
+};
+type IntPlayerResponse = {
+  playabilityStatus?: { status?: string; reason?: string };
+  videoDetails?: { videoId?: string; title?: string; lengthSeconds?: string };
+  streamingData?: {
+    formats?: IntFormat[];
+    adaptiveFormats?: IntFormat[];
+  };
+};
+
+async function innertubePlayer(videoId: string): Promise<IntPlayerResponse> {
+  const ANDROID_KEY = 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w';
+  const ANDROID_VERSION = '19.09.37';
+  const r = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${ANDROID_KEY}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(15000),
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': `com.google.android.youtube/${ANDROID_VERSION} (Linux; U; Android 14) gzip`,
+      'X-YouTube-Client-Name': '3',
+      'X-YouTube-Client-Version': ANDROID_VERSION
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: 'ANDROID',
+          clientVersion: ANDROID_VERSION,
+          androidSdkVersion: 34,
+          hl: 'en',
+          gl: 'US',
+          utcOffsetMinutes: 0
+        }
+      },
+      videoId,
+      contentCheckOk: true,
+      racyCheckOk: true
+    })
+  });
+  if (!r.ok) throw new Error(`innertube player HTTP ${r.status}`);
+  return (await r.json()) as IntPlayerResponse;
+}
+
+function intToAdaptive(f: IntFormat): AdaptiveFormat {
+  // mimeType ex: 'video/mp4; codecs="avc1.64001F"' ou 'audio/mp4; codecs="mp4a.40.2"'
+  const mt = f.mimeType || '';
+  const type = mt.split(';')[0] || '';
+  const container = mt.startsWith('video/') ? mt.split('/')[1]?.split(';')[0] : mt.split('/')[1]?.split(';')[0];
+  return {
+    url: f.url,
+    itag: String(f.itag ?? ''),
+    type,
+    bitrate: f.bitrate,
+    container,
+    resolution: f.qualityLabel
+  };
+}
+
+async function videoMetaInnertube(videoId: string): Promise<InvVideoMeta> {
+  const p = await innertubePlayer(videoId);
+  if (p.playabilityStatus?.status && p.playabilityStatus.status !== 'OK') {
+    throw new Error(`playability ${p.playabilityStatus.status}: ${p.playabilityStatus.reason || ''}`);
+  }
+  const sd = p.streamingData || {};
+  const formats = (sd.formats || []).filter((f) => f.url).map(intToAdaptive);
+  const adaptiveFormats = (sd.adaptiveFormats || []).filter((f) => f.url).map(intToAdaptive);
+  return {
+    videoId: p.videoDetails?.videoId,
+    title: p.videoDetails?.title,
+    lengthSeconds: Number(p.videoDetails?.lengthSeconds || 0),
+    formatStreams: formats,
+    adaptiveFormats: [...adaptiveFormats, ...formats]
+  };
+}
+
 async function videoMeta(videoId: string): Promise<InvVideoMeta> {
+  // 1) Innertube ANDROID (rapide, fiable, URLs non cipherées)
+  try {
+    return await videoMetaInnertube(videoId);
+  } catch (e) {
+    console.warn('[youtube-api] innertube player failed:', String(e).slice(0, 200));
+  }
+  // 2) Fallback Invidious (souvent down sur datacenter)
   const url = `/api/v1/videos/${encodeURIComponent(videoId)}`;
   return (await invFetch(url, 20000)) as InvVideoMeta;
 }
@@ -353,12 +445,47 @@ export async function downloadAudioMp3(videoId: string, outMp3: string): Promise
   return ok;
 }
 
+function bestCombined(meta: InvVideoMeta): AdaptiveFormat | null {
+  // formatStreams = streams combinés audio+vidéo (généralement 360p mp4).
+  const list = (meta.formatStreams || []).filter((f) => f.url && (f.type || '').startsWith('video/'));
+  if (!list.length) return null;
+  list.sort((a, b) => {
+    const aH = Number((a.resolution || '0p').replace('p', '')) || 0;
+    const bH = Number((b.resolution || '0p').replace('p', '')) || 0;
+    return bH - aH;
+  });
+  return list[0];
+}
+
 /** Downloads best video+audio and muxes to mp4. */
 export async function downloadVideoMp4(videoId: string, outMp4: string): Promise<boolean> {
   const meta = await videoMeta(videoId);
+
+  // 1) Essai stream combiné (un seul fichier, pas de mux nécessaire — plus rapide & fiable)
+  const combined = bestCombined(meta);
+  if (combined?.url) {
+    const tmp = outMp4 + '.combined.src';
+    const got = await downloadToFile(combined.url, tmp);
+    if (got) {
+      // remux en mp4 propre (faststart) — copy sans transcode
+      const ok = await ffmpegMux([
+        '-y', '-i', tmp,
+        '-c', 'copy', '-movflags', '+faststart',
+        outMp4
+      ]);
+      await fs.unlink(tmp).catch(() => {});
+      if (ok) return true;
+      console.warn('[youtube-api] combined remux failed, fallback adaptive');
+    }
+  }
+
+  // 2) Fallback streams séparés (qualité plus haute)
   const audio = bestAudio(meta);
   const video = bestVideo(meta);
-  if (!audio?.url || !video?.url) return false;
+  if (!audio?.url || !video?.url) {
+    console.warn('[youtube-api] no playable formats', { hasAudio: !!audio?.url, hasVideo: !!video?.url });
+    return false;
+  }
 
   const aTmp = outMp4 + '.audio.src';
   const vTmp = outMp4 + '.video.src';
@@ -367,6 +494,7 @@ export async function downloadVideoMp4(videoId: string, outMp4: string): Promise
     downloadToFile(video.url, vTmp)
   ]);
   if (!aOk || !vOk) {
+    console.warn('[youtube-api] stream download failed', { aOk, vOk });
     await fs.unlink(aTmp).catch(() => {});
     await fs.unlink(vTmp).catch(() => {});
     return false;

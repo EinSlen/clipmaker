@@ -37,8 +37,17 @@ export async function POST(req: Request) {
   const filename = `${randomId()}.mp4`;
   const outAbs = path.join(UPLOADS_DIR, filename);
 
-  const ok = await downloadVideoMp4(id, outAbs);
-  if (!ok) return NextResponse.json({ ok: false, error: 'download/mux failed' }, { status: 500 });
+  let ok = false;
+  try {
+    ok = await downloadVideoMp4(id, outAbs);
+  } catch (e) {
+    console.error('[youtube/download]', e);
+    return NextResponse.json(
+      { ok: false, error: `download failed: ${String((e as Error)?.message || e).slice(0, 200)}` },
+      { status: 502 }
+    );
+  }
+  if (!ok) return NextResponse.json({ ok: false, error: 'download/mux failed' }, { status: 502 });
 
   const stat = await fs.stat(outAbs);
   return NextResponse.json({ ok: true, id: filename.replace('.mp4', ''), filename, size: stat.size });

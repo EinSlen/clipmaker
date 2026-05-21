@@ -5,42 +5,45 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Queries target the @insocixble / @u.s.e.r.0.0.46 vibe: one person, dark/low-light space,
-// cinematic mood — no Shorts memes, no movie-quote compilations, no music-only clips.
+// Vibe @klaradagoat / @u.s.e.r.0.0.46 : POV intime, sad-girl/sad-boy vent, plan rapproché
+// d'une personne seule la nuit, ambiance handheld/journal — pas du b-roll stock détaché.
 const QUERIES_BY_VIBE: Record<string, string[]> = {
   sad: [
-    'lonely person dark room cinematic b roll',
-    'sad man dim light window aesthetic b roll',
-    'girl alone dark bedroom cinematic shot',
-    'silhouette person dark room melancholic',
-    'sad figure low light cinematic footage',
-    'person crying dark room cinematic'
+    'sad girl pov vent video crying alone bedroom',
+    'sad boy alone room night vent diary',
+    'pov girl sitting alone dark bedroom sad',
+    'lonely girl close up crying night vertical',
+    'sad pov drinking alone night bedroom',
+    'sad vent tiktok style alone room dark',
+    'sad girl looking at camera crying dim light'
   ],
   philo: [
-    'man staring window dark cinematic b roll',
-    'person sitting dark room thinking cinematic',
-    'pensive man dim light cinematic shot',
-    'lonely figure dark interior cinematic footage',
-    'introspective dark cinematic person b roll'
+    'pov sitting alone window night thinking',
+    'sad guy talking to camera dark room vent',
+    'introspective vent vlog alone night bedroom',
+    'pov man looking at ceiling dark room',
+    'late night vent video alone dark room',
+    'sad reflection talking camera dim light'
   ],
   rupture: [
-    'sad person dark room after breakup cinematic',
-    'lonely girl crying dark bedroom aesthetic',
-    'man sitting floor dark room sad cinematic',
-    'heartbroken person dark room b roll',
-    'sad person bed dark night cinematic'
+    'sad girl crying breakup pov bedroom',
+    'pov sitting floor crying after breakup night',
+    'heartbroken vent video alone bedroom dark',
+    'sad girl on phone crying dark room',
+    'pov man crying breakup dim light bedroom'
   ],
   solitude: [
-    'person alone dark apartment cinematic b roll',
-    'lonely man dark bar night cinematic',
-    'silhouette walking dark street rain',
-    'girl alone dark room window night',
-    'alone in dark room aesthetic footage'
+    'pov alone apartment night sad vlog',
+    'sad night vlog alone bedroom vent',
+    'pov walking alone street night sad',
+    'lonely girl pov bed dark room night',
+    'alone in room sad vent video dim light',
+    'pov drinking alone late night sad'
   ],
   anime: [
-    'sad anime character dark room aesthetic',
-    'lonely anime girl night window aesthetic',
-    'dark cinematic sad anime edit'
+    'sad anime girl close up crying dark room',
+    'lonely anime character pov bedroom night',
+    'anime sad scene close up dark aesthetic'
   ]
 };
 
@@ -70,35 +73,45 @@ function scoreCandidate(c: YtSearchHit): { score: number; reason: string } {
 
   const t = c.title.toLowerCase();
 
-  // Strong boosts: dark / cinematic / single-person framing
-  if (/cinematic|b[\s-]?roll|cinemato|stock footage|film|short film|aesthetic/.test(t)) {
-    score += 22;
-    reasons.push('cinématique');
+  // Strong boosts: POV / vent / face-cam intimiste à la klaradagoat
+  if (/\bpov\b|first person|vlog|vent|talking to camera|talk to camera|diary|journal/.test(t)) {
+    score += 30;
+    reasons.push('POV/vent');
   }
-  if (/dark|night|dim|low\s?light|shadow|silhouette|moody|noir|black/.test(t)) {
+  if (/close[\s-]?up|selfie|webcam|phone camera|filming myself/.test(t)) {
+    score += 20;
+    reasons.push('proche');
+  }
+  if (/dark|night|dim|low\s?light|shadow|silhouette|moody|noir|bedroom at night/.test(t)) {
     score += 22;
     reasons.push('sombre');
   }
-  if (/alone|lonely|solitude|sitting|standing|window|bedroom|interior|room/.test(t)) {
-    score += 14;
-    reasons.push('intimiste');
-  }
-  if (/girl|woman|man|boy|guy|person|figure|face|portrait/.test(t)) {
-    score += 10;
-    reasons.push('humain');
-  }
-  if (/sad|triste|melanchol|melanco|crying|breakup|heartbroken|depression/.test(t)) {
-    score += 14;
+  if (/sad|triste|melanchol|melanco|crying|tears|breakup|heartbroken|depression|venting|alone tonight/.test(t)) {
+    score += 22;
     reasons.push('mood');
   }
+  if (/alone|lonely|solitude|by myself|empty room|bedroom|interior|my room/.test(t)) {
+    score += 18;
+    reasons.push('intimiste');
+  }
+  if (/girl|woman|man|boy|guy|person|her|him|face|portrait/.test(t)) {
+    score += 8;
+    reasons.push('humain');
+  }
+  // Léger boost cinématique (moins fort qu'avant: on ne veut PAS du stock footage)
+  if (/cinematic|aesthetic|film grain|short film/.test(t)) {
+    score += 8;
+    reasons.push('ciné');
+  }
 
-  // Heavy penalties: avoid the noise that polluted previous results
+  // Pénalités: éviter le stock footage / b-roll détaché, et la pollution habituelle
+  if (/\bb[\s-]?roll\b|stock footage|free footage|royalty free|no copyright/.test(t)) score -= 25;
   if (/#shorts|tiktok compilation|tik\s?tok\b/.test(t)) score -= 30;
   if (/movie scene|movie clip|crying scene|saddest scene|saddest movie|tearjerker/.test(t)) score -= 25;
   if (/quotes|quote|saying|reaction|compilation|funny|meme|prank|tutorial|how to/.test(t)) score -= 30;
   if (/lyrics|lyric video|cover song|music video|official video/.test(t)) score -= 25;
   if (/asmr|relaxing|sleep|study|10 hours/.test(t)) score -= 25;
-  if (/landscape|drone|timelapse|wallpaper|loop animation|nature relaxation/.test(t)) score -= 20;
+  if (/landscape|drone|timelapse|wallpaper|loop animation|nature relaxation/.test(t)) score -= 25;
   if (/gameplay|gaming|minecraft|fortnite|valorant|roblox/.test(t)) score -= 50;
 
   return { score, reason: reasons.join(', ') || 'candidat' };
