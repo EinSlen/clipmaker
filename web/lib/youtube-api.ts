@@ -553,7 +553,9 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
       '--no-playlist',
       '--no-progress',
       ...(cookies ? ['--cookies', cookies] : []),
-      '--extractor-args', 'youtube:player_client=web_safari,mweb,tv_embedded,android',
+      // Drop mweb/android (PoToken requis depuis 2025) — tv_embedded et web_safari
+      // restent les seuls clients qui passent sans PoToken.
+      '--extractor-args', 'youtube:player_client=tv_embedded,web_safari',
       `https://www.youtube.com/watch?v=${videoId}`
     ];
     const proc = spawn('yt-dlp', args, { windowsHide: true });
@@ -564,7 +566,9 @@ async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boo
     proc.on('close', (code) => {
       const combined = (err + '\n' + out).trim();
       if (code !== 0) console.warn('[yt-dlp] exit', code, 'cookies=', !!cookies, '\n', combined.slice(-1200));
-      const errLine = combined.split('\n').find((l) => /ERROR:|sign in|forbidden|unavailable|HTTP Error|429/i.test(l));
+      // Priorité aux vrais ERROR: (pas les WARNING:)
+      const lines = combined.split('\n');
+      const errLine = lines.find((l) => l.startsWith('ERROR:')) || lines.find((l) => /sign in|forbidden|http error 4|429/i.test(l));
       const summary = errLine ? errLine.slice(0, 350) : (combined.slice(-350) || '<aucun output capturé>');
       const hint = !cookies && /sign in|bot|429|HTTP Error 403/i.test(combined)
         ? ' [hint: upload un youtube_cookies.txt dans Render Secret Files]'
