@@ -540,48 +540,69 @@ async function resolveCookiesPath(): Promise<string | null> {
   return null;
 }
 
-async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boolean; err?: string }> {
-  const cookies = await resolveCookiesPath();
+function runYtdlp(args: string[]): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise((resolve) => {
-    // player_client multi-fallback : web_safari/mweb/tv_embedded bypassent la
-    // plupart des restrictions IP cloud actuelles. Si un cookies.txt est dispo
-    // (Render Secret Files), on l'utilise pour bypasser l'anti-bot "Sign in".
-    const args = [
-      '-f', 'bv*+ba/best',
-      '--merge-output-format', 'mp4',
-      '-o', outMp4,
-      '--no-playlist',
-      '--no-progress',
-      ...(cookies ? ['--cookies', cookies] : []),
-      '--age-limit', '99', // bypass age-gate quand possible
-      // Avec cookies, on tente plusieurs clients : default+web_creator (accès
-      // contenus signed-in), tv_embedded (pas de PoToken). Sans cookies on est
-      // limité à tv_embedded/web_safari.
-      '--extractor-args',
-      cookies
-        ? 'youtube:player_client=default,web_creator,tv_embedded,web_safari'
-        : 'youtube:player_client=tv_embedded,web_safari',
-      `https://www.youtube.com/watch?v=${videoId}`
-    ];
     const proc = spawn('yt-dlp', args, { windowsHide: true });
     let out = '';
     let err = '';
     proc.stdout.on('data', (d) => (out += d.toString()));
     proc.stderr.on('data', (d) => (err += d.toString()));
-    proc.on('close', (code) => {
-      const combined = (err + '\n' + out).trim();
-      if (code !== 0) console.warn('[yt-dlp] exit', code, 'cookies=', !!cookies, '\n', combined.slice(-1200));
-      // Priorité aux vrais ERROR: (pas les WARNING:)
-      const lines = combined.split('\n');
-      const errLine = lines.find((l) => l.startsWith('ERROR:')) || lines.find((l) => /sign in|forbidden|http error 4|429/i.test(l));
-      const summary = errLine ? errLine.slice(0, 350) : (combined.slice(-350) || '<aucun output capturé>');
-      const hint = !cookies && /sign in|bot|429|HTTP Error 403/i.test(combined)
-        ? ' [hint: upload un youtube_cookies.txt dans Render Secret Files]'
-        : '';
-      resolve({ ok: code === 0, err: code === 0 ? undefined : `[v2] exit=${code ?? 'null'} cookies=${!!cookies} ${summary}${hint}` });
-    });
-    proc.on('error', (e) => resolve({ ok: false, err: `spawn: ${String(e).slice(0, 200)}` }));
+    proc.on('close', (code) => resolve({ code, out, err }));
+    proc.on('error', (e) => resolve({ code: -1, out: '', err: `spawn: ${String(e).slice(0, 200)}` }));
   });
+}
+
+function summarizeYtdlp(combined: string): string {
+  const lines = combined.split('\n');
+  const errLine = lines.find((l) => l.startsWith('ERROR:')) || lines.find((l) => /sign in|forbidden|http error 4|429/i.test(l));
+  return errLine ? errLine.slice(0, 350) : (combined.slice(-350) || '<aucun output capturé>');
+}
+
+async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boolean; err?: string }> {
+  const cookies = await resolveCookiesPath();
+  const baseArgs = [
+    '-f', 'bv*+ba/best',
+    '--merge-output-format', 'mp4',
+    '-o', outMp4,
+    '--no-playlist',
+    '--no-progress',
+    '--age-limit', '99',
+    ...(cookies ? ['--cookies', cookies] : [])
+  ];
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Passe 1 : default+web_creator (haute qualité avec cookies)
+  const clients1 = cookies ? 'default,web_creator' : 'tv_embedded,web_safari';
+  const r1 = await runYtdlp([...baseArgs, '--extractor-args', `youtube:player_client=${clients1}`, url]);
+  if (r1.code === 0) return { ok: true };
+  const c1 = (r1.err + '\n' + r1.out).trim();
+  console.warn('[yt-dlp pass1]', clients1, 'exit', r1.code, c1.slice(-800));
+
+  // Vérif fichier produit malgré exit!=0 (warnings post-merge)
+  try {
+    const st = await fs.stat(outMp4);
+    if (st.size > 10_000) return { ok: true };
+  } catch {}
+
+  // Passe 2 : SEULEMENT tv_embedded (pas de PoToken requis — bypass bot-confirm)
+  // Si on est ici, le client default a probablement hit "Sign in to confirm bot".
+  const r2 = await runYtdlp([...baseArgs, '--extractor-args', 'youtube:player_client=tv_embedded', url]);
+  if (r2.code === 0) return { ok: true };
+  const c2 = (r2.err + '\n' + r2.out).trim();
+  console.warn('[yt-dlp pass2] tv_embedded exit', r2.code, c2.slice(-800));
+  try {
+    const st = await fs.stat(outMp4);
+    if (st.size > 10_000) return { ok: true };
+  } catch {}
+
+  // Tout a échoué → message d'erreur agrégé
+  const hint = !cookies && /sign in|bot|429|HTTP Error 403/i.test(c1 + c2)
+    ? ' [hint: cookies absents]'
+    : '';
+  return {
+    ok: false,
+    err: `[v3] cookies=${!!cookies} pass1=${r1.code}:${summarizeYtdlp(c1).slice(0, 200)} | pass2=${r2.code}:${summarizeYtdlp(c2).slice(0, 200)}${hint}`
+  };
 }
 
 async function downloadFromMeta(meta: InvVideoMeta, outMp4: string): Promise<boolean> {

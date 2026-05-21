@@ -24,8 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg python3 python3-pip \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp bgutil-ytdlp-pot-provider \
-    && npm install -g bgutil-ytdlp-pot-provider
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
