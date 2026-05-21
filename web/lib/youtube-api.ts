@@ -525,27 +525,31 @@ function bestCombined(meta: InvVideoMeta): AdaptiveFormat | null {
 
 async function ytdlpDownload(videoId: string, outMp4: string): Promise<{ ok: boolean; err?: string }> {
   return new Promise((resolve) => {
-    // player_client multi-fallback : web_safari et mweb bypassent la plupart des
-    // restrictions IP cloud actuelles ; tv_embedded marche aussi pour les vidéos
-    // age/region restreintes.
+    // player_client multi-fallback : web_safari/mweb/tv_embedded bypassent la
+    // plupart des restrictions IP cloud actuelles.
     const args = [
-      '-f', 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b',
+      '-f', 'bv*[ext=mp4]+ba[ext=m4a]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
       '-o', outMp4,
       '--no-playlist',
-      '--no-warnings',
       '--no-progress',
       '--extractor-args', 'youtube:player_client=web_safari,mweb,tv_embedded,android',
       `https://www.youtube.com/watch?v=${videoId}`
     ];
     const proc = spawn('yt-dlp', args, { windowsHide: true });
-    let stderr = '';
-    proc.stderr.on('data', (d) => (stderr += d.toString()));
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => (out += d.toString()));
+    proc.stderr.on('data', (d) => (err += d.toString()));
     proc.on('close', (code) => {
-      if (code !== 0) console.warn('[yt-dlp]', stderr.slice(-400));
-      resolve({ ok: code === 0, err: code === 0 ? undefined : stderr.slice(-200) });
+      const combined = (err + '\n' + out).trim();
+      if (code !== 0) console.warn('[yt-dlp] exit', code, combined.slice(-800));
+      // Extrait la 1re ligne ERROR: si présente (plus utile que la dernière)
+      const errLine = combined.split('\n').find((l) => /ERROR:|sign in|forbidden|unavailable/i.test(l));
+      const summary = errLine ? errLine.slice(0, 300) : combined.slice(-300);
+      resolve({ ok: code === 0, err: code === 0 ? undefined : `exit=${code} ${summary}` });
     });
-    proc.on('error', (e) => resolve({ ok: false, err: String(e).slice(0, 200) }));
+    proc.on('error', (e) => resolve({ ok: false, err: `spawn: ${String(e).slice(0, 200)}` }));
   });
 }
 
