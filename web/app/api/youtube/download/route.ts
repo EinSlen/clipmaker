@@ -43,7 +43,7 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error('[youtube/download]', e);
     return NextResponse.json(
-      { ok: false, error: `download failed: ${String((e as Error)?.message || e).slice(0, 200)}` },
+      { ok: false, error: `download failed: ${String((e as Error)?.message || e).slice(0, 800)}` },
       { status: 502 }
     );
   }
