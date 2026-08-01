@@ -1,83 +1,86 @@
-# Publication automatique sur YouTube Shorts
+# Publication de YouTube Shorts avec une session navigateur
 
-ClipMaker utilise le fork épinglé [`EinSlen/youtube-shorts-agent`](https://github.com/EinSlen/youtube-shorts-agent) et l'API officielle YouTube Data v3.
+ClipMaker utilise une révision épinglée du fork MIT
+[`EinSlen/youtube-uploader`](https://github.com/EinSlen/youtube-uploader). L’envoi passe par
+YouTube Studio dans Chromium, avec des cookies de session locaux : aucune clé YouTube Data API,
+aucun projet Google Cloud et aucun mot de passe Google n’est enregistré dans le projet.
 
-Par défaut, tout fonctionne en simulation : le fichier, la durée, le format et les métadonnées sont validés, mais aucune requête d'upload n'est envoyée à YouTube. Les vidéos carrées ou verticales de 1 à 180 secondes sont acceptées.
+Cette méthode dépend de l’interface de YouTube Studio. Elle peut casser lorsque YouTube modifie la
+page et peut être moins conforme aux conditions de la plateforme que l’API officielle. Commencer
+avec une vidéo privée et éviter les cadences agressives.
 
-## 1. Préparer Google Cloud
+## 1. Installer et vérifier
 
-1. Créer ou sélectionner un projet dans [Google Cloud Console](https://console.cloud.google.com/).
-2. Activer **YouTube Data API v3**.
-3. Configurer l'écran de consentement OAuth.
-4. Créer un client OAuth de type **Application de bureau**.
-5. Utiliser `http://localhost:8788/callback` comme URI de redirection locale lorsqu'elle est demandée.
-
-Un projet API non vérifié peut être limité aux uploads privés jusqu'à son audit de conformité YouTube. Commencer systématiquement en `private`.
-
-## 2. Créer la configuration locale
-
-Depuis la racine de ClipMaker, sous PowerShell :
-
-```powershell
-New-Item -ItemType Directory -Force .youtube-agent
-Copy-Item youtube-agent.env.example .youtube-agent\.env
-```
-
-Renseigner seulement `YOUTUBE_CLIENT_ID` et `YOUTUBE_CLIENT_SECRET` dans `.youtube-agent/.env`. Ce dossier est ignoré par Git.
-
-## 3. Autoriser la chaîne YouTube
+Depuis la racine de ClipMaker :
 
 ```powershell
 Set-Location web
 npm install
 npm run youtube:doctor
+```
+
+Chrome, Edge ou Chromium est détecté automatiquement. Si nécessaire, définir son chemin dans
+`web/.env.local` :
+
+```dotenv
+YOUTUBE_BROWSER_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+## 2. Enregistrer la session YouTube
+
+```powershell
 npm run youtube:auth
 ```
 
-La commande affiche une URL Google. L'ouvrir, choisir la chaîne et accepter l'autorisation. Le callback local enregistre les tokens dans `.youtube-agent/.env` sans les afficher dans l'interface ClipMaker.
+Une fenêtre de navigateur dédiée s’ouvre. Se connecter manuellement au bon compte et à la bonne
+chaîne. ClipMaker attend l’arrivée dans YouTube Studio, exporte les cookies nécessaires, puis ferme
+la fenêtre. Il ne lit ni l’adresse e-mail ni le mot de passe.
 
-Relancer ensuite :
+Les données sensibles restent dans `.youtube-browser/`, dossier ignoré par Git. Le fichier de
+cookies donne accès à la session YouTube : ne jamais le partager, le publier ou le commiter. Pour
+révoquer la session locale, se déconnecter du compte puis supprimer ce dossier.
 
-```powershell
-npm run youtube:doctor
-```
+## 3. Tester puis activer l’envoi réel
 
-## 4. Premier upload réel et privé
-
-Dans `.youtube-agent/.env` :
+Le mode simulation est actif par défaut. Ajouter d’abord dans `web/.env.local` :
 
 ```dotenv
-YOUTUBE_DRY_RUN=false
-YOUTUBE_PRIVACY_STATUS=private
+YOUTUBE_BROWSER_DRY_RUN=true
+YOUTUBE_BROWSER_HEADLESS=true
+YOUTUBE_ALLOW_PUBLIC_UPLOAD=false
+CLIPMAKER_UPLOAD_TOKEN=une-longue-valeur-aleatoire
 ```
 
-Créer un jeton d'administration aléatoire et placer la même valeur dans `web/.env.local` :
+Générer une valeur sûre sous PowerShell :
 
 ```powershell
 $bytes = [byte[]]::new(32)
 [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$token = [Convert]::ToHexString($bytes).ToLowerInvariant()
-Add-Content .env.local "CLIPMAKER_UPLOAD_TOKEN=$token"
+[Convert]::ToHexString($bytes).ToLowerInvariant()
 ```
 
-Redémarrer ClipMaker, générer la vidéo, ouvrir le panneau **YouTube Shorts**, saisir ce jeton puis envoyer la vidéo en **Privée**. Vérifier le résultat dans YouTube Studio avant toute publication.
-
-`YOUTUBE_ALLOW_PUBLIC_UPLOAD=false` doit rester dans `web/.env.local`. L'interface ne propose volontairement que `private` et `unlisted`.
+Redémarrer ClipMaker, générer un rendu et lancer une simulation depuis le panneau YouTube Shorts.
+Quand elle passe, définir `YOUTUBE_BROWSER_DRY_RUN=false`, redémarrer, saisir le jeton dans le
+panneau et envoyer la première vidéo en **Privée**. Vérifier le résultat dans YouTube Studio.
 
 ## Docker
 
-Le conteneur existant suffit. Le dépôt est monté dans `/repo`, donc `/repo/.youtube-agent` conserve la configuration OAuth. Effectuer l'autorisation OAuth sur l'hôte avant de démarrer le conteneur :
+L’image contient Chromium et le dépôt est monté dans `/repo`, donc le fichier de cookies de
+`.youtube-browser/` reste persistant. Faire la connexion initiale sur l’hôte, puis lancer :
 
 ```powershell
 docker compose up --build
 ```
 
-## Commandes de contrôle
+Dans le conteneur, Chromium est détecté à `/usr/bin/chromium`. Le profil Chrome chiffré n’est pas
+réutilisé entre Windows et Linux; c’est le fichier de cookies exporté qui rend le flux portable.
+
+## Contrôles
 
 ```powershell
 Set-Location web
+npm run youtube:doctor
 npm run lint
 npm run build
 npm audit --omit=dev
-npm run youtube:doctor
 ```

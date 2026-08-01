@@ -33,5 +33,5 @@ web/public/music/*.aac
 web/data/youtube_cookies.txt
 youtube_cookies.txt
 
-# YouTube OAuth tokens and local agent state
-.youtube-agent/
+# YouTube browser profile and exported session cookies
+.youtube-browser/

@@ -67,7 +67,7 @@ export async function POST(req: Request) {
     const status = await getYouTubeDoctorStatus();
     if (!status.dry_run) {
       if (!status.ready_for_live_upload) {
-        return NextResponse.json({ ok: false, error: 'OAuth YouTube incomplet; lance npm run youtube:doctor' }, { status: 503 });
+        return NextResponse.json({ ok: false, error: 'Session YouTube absente ou expirée; lance npm run youtube:auth' }, { status: 503 });
       }
       if (!hasValidAdminToken(req)) {
         return NextResponse.json({ ok: false, error: "Jeton d'administration requis pour un upload réel" }, { status: 401 });

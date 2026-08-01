@@ -2,17 +2,19 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
-import { YOUTUBE_AGENT_CONFIG_DIR } from './server-paths';
+import { YOUTUBE_BROWSER_DATA_DIR } from './server-paths';
 
 export type YouTubeDoctorStatus = {
   ok: boolean;
   dry_run: boolean;
+  provider: 'browser-session';
   configured: {
-    client_credentials: 'configured' | 'missing';
-    access_token: 'configured' | 'missing';
-    refresh_token: 'configured' | 'missing';
+    browser: 'configured' | 'missing';
+    cookies: 'configured' | 'missing';
+    authenticated: 'configured' | 'missing';
+    package: 'configured' | 'missing';
   };
-  missing_count: number;
+  browser_path: string | null;
   ready_for_live_upload: boolean;
   next_steps: string[];
 };
@@ -28,22 +30,21 @@ export type YouTubeUploadResult = {
   };
 };
 
-const AGENT_PACKAGE_DIR = path.join(process.cwd(), 'node_modules', 'youtube-shorts-agent');
-const CLI_PATH = path.join(AGENT_PACKAGE_DIR, 'src', 'cli.js');
+const CLI_PATH = path.join(process.cwd(), 'scripts', 'youtube-agent.mjs');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 async function runAgent<T>(args: string[], timeoutMs = 10 * 60 * 1000): Promise<T> {
-  await fs.mkdir(YOUTUBE_AGENT_CONFIG_DIR, { recursive: true });
+  await fs.mkdir(YOUTUBE_BROWSER_DATA_DIR, { recursive: true });
   await fs.access(CLI_PATH).catch(() => {
-    throw new Error('youtube-shorts-agent is not installed; run npm install in web/');
+    throw new Error('Le script de session YouTube est introuvable.');
   });
 
   return new Promise<T>((resolve, reject) => {
     const proc = spawn(process.execPath, [CLI_PATH, ...args], {
-      cwd: YOUTUBE_AGENT_CONFIG_DIR,
+      cwd: process.cwd(),
       env: {
         ...process.env,
-        YOUTUBE_AGENT_DATA_DIR: path.join(YOUTUBE_AGENT_CONFIG_DIR, '.agent-data')
+        YOUTUBE_BROWSER_DATA_DIR
       },
       windowsHide: true
     });

@@ -9,9 +9,10 @@ type Status = {
   dryRun: boolean;
   readyForLiveUpload: boolean;
   configured: {
-    client_credentials: 'configured' | 'missing';
-    access_token: 'configured' | 'missing';
-    refresh_token: 'configured' | 'missing';
+    browser: 'configured' | 'missing';
+    cookies: 'configured' | 'missing';
+    authenticated: 'configured' | 'missing';
+    package: 'configured' | 'missing';
   };
   error?: string;
 };
@@ -46,9 +47,10 @@ export function YoutubePublisher({
         dryRun: true,
         readyForLiveUpload: false,
         configured: {
-          client_credentials: 'missing',
-          access_token: 'missing',
-          refresh_token: 'missing'
+          browser: 'missing',
+          cookies: 'missing',
+          authenticated: 'missing',
+          package: 'missing'
         },
         error: String(error)
       }));
@@ -150,7 +152,7 @@ export function YoutubePublisher({
 
       {status && !status.ok && <p className="text-xs text-red-300">{status.error || 'Uploader YouTube indisponible'}</p>}
       {liveMode && !status.readyForLiveUpload && (
-        <p className="text-xs text-amber-300">OAuth incomplet. Lance <code>npm run youtube:doctor</code> puis <code>npm run youtube:auth</code> dans <code>web/</code>.</p>
+        <p className="text-xs text-amber-300">Session YouTube absente ou expirée. Lance <code>npm run youtube:auth</code> dans <code>web/</code>, puis connecte-toi dans la fenêtre Chrome.</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -166,7 +168,7 @@ export function YoutubePublisher({
       </div>
 
       <p className="text-[11px] text-ink-400">
-        La simulation valide le fichier, sa durée, son format vertical et les métadonnées sans contacter YouTube. Les publications publiques restent désactivées.
+        La simulation valide le fichier sans publier. En mode réel, ClipMaker réutilise uniquement la session Chrome locale; aucun mot de passe Google n’est stocké. Les publications publiques restent désactivées.
       </p>
       {message && <p className="text-sm text-ink-200 whitespace-pre-wrap">{message}</p>}
     </section>
