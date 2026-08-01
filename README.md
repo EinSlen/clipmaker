@@ -1,6 +1,10 @@
-# 🎬 Twitch Clip Compiler - Auto TikTok Uploader
+# 🎬 ClipMaker — jeux, TikTok et YouTube Shorts
 
-Compilation automatique de clips Twitch en vidéos TikTok/Shorts avec upload automatisé.
+Génération de jeux hypnotiques et compilation de vidéos verticales, avec publication automatisée
+sur TikTok et YouTube Shorts.
+
+Le nouveau studio **Ball Escape** produit des variantes originales en 1080×1920 avec audio
+synchronisé. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md) et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
 
 ## ✨ Fonctionnalités
 

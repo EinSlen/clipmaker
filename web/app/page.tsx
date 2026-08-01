@@ -2,20 +2,21 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Library, Youtube, Trash2, Loader2, Wand2 } from 'lucide-react';
+import { Gamepad2, Library, Youtube, Trash2, Loader2, Wand2 } from 'lucide-react';
 import { TopBar } from '@/components/TopBar';
 import { Dropzone } from '@/components/Dropzone';
 import { YoutubePanel } from '@/components/YoutubePanel';
+import { GameStudio } from '@/components/GameStudio';
 import { Button } from '@/components/Button';
 import { listVideos, putVideo, deleteVideo, probeVideo } from '@/lib/db';
 import { randomId } from '@/lib/utils';
 import type { LibraryVideo } from '@/lib/types';
 
-type Tab = 'upload' | 'library' | 'youtube';
+type Tab = 'game' | 'upload' | 'library' | 'youtube';
 
 export default function Home() {
   const router = useRouter();
-  const [tab, setTab] = React.useState<Tab>('upload');
+  const [tab, setTab] = React.useState<Tab>('game');
   const [items, setItems] = React.useState<LibraryVideo[]>([]);
   const [uploading, setUploading] = React.useState(false);
 
@@ -102,16 +103,17 @@ export default function Home() {
           <div className="flex items-start gap-3">
             <Wand2 className="size-5 text-accent mt-1" />
             <div>
-              <h1 className="text-lg font-semibold leading-tight">Studio sad/philo TikTok</h1>
+              <h1 className="text-lg font-semibold leading-tight">Usine à TikTok & Shorts</h1>
               <p className="text-ink-400 text-sm">
-                Importe une vidéo, ajoute du texte mélancolique, choisis ta musique triste, et publie sur TikTok depuis un de tes comptes.
+                Génère un jeu hypnotique original ou monte une vidéo, puis publie-la sur TikTok et YouTube.
               </p>
             </div>
           </div>
         </section>
 
-        <nav className="grid grid-cols-3 gap-2 sticky top-14 z-20 bg-ink-900/85 backdrop-blur -mx-4 px-4 py-2 border-b border-white/5">
+        <nav className="grid grid-cols-4 gap-2 sticky top-14 z-20 bg-ink-900/85 backdrop-blur -mx-4 px-4 py-2 border-b border-white/5">
           {([
+            { id: 'game', label: 'Jeu auto', Icon: Gamepad2 },
             { id: 'upload', label: 'Importer', Icon: Wand2 },
             { id: 'library', label: 'Bibliothèque', Icon: Library },
             { id: 'youtube', label: 'YouTube', Icon: Youtube }
@@ -127,6 +129,8 @@ export default function Home() {
             </button>
           ))}
         </nav>
+
+        {tab === 'game' && <GameStudio />}
 
         {tab === 'upload' && <Dropzone onFile={handleFile} busy={uploading} />}
 

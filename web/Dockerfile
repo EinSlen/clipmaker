@@ -17,7 +17,7 @@ ENV PORT=3000
 # ffmpeg + python + yt-dlp + chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
-      python3 python3-pip python3-venv \
+      python3 python3-pip python3-venv python3-pil \
       chromium chromium-driver \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
