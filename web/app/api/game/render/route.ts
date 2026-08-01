@@ -121,7 +121,7 @@ export async function POST(request: Request) {
         } else {
           musicNote ||= process.env.JAMENDO_CLIENT_ID
             ? 'No eligible CC BY track was found; the original generated soundtrack was used.'
-            : 'Add JAMENDO_CLIENT_ID or upload licensed tracks to enable automatic music discovery.';
+            : 'Online discovery needs JAMENDO_CLIENT_ID; ClipMaker generated a new original electronic track instead.';
         }
       }
     } else if (requestedMusic === '__auto__') {
@@ -157,14 +157,17 @@ export async function POST(request: Request) {
       '--theme', theme,
       '--sound-pack', soundPack,
       '--title', title,
+      '--music-volume', String(musicVolume),
+      '--music-mode', musicMode,
     ];
-    if (musicPath) rendererArgs.push('--music', musicPath, '--music-volume', String(musicVolume), '--music-mode', musicMode);
+    if (musicPath) rendererArgs.push('--music', musicPath);
     const renderer = await runRenderer(rendererArgs);
-    let rendererMetadata: { sound_pack?: string; duration?: number; music_mode?: string; music_hits?: number } = {};
+    let rendererMetadata: { sound_pack?: string; duration?: number; music?: string; music_generated?: boolean; music_mode?: string; music_hits?: number } = {};
     try {
       const lastLine = renderer.stdout.trim().split(/\r?\n/).at(-1);
       if (lastLine) rendererMetadata = JSON.parse(lastLine);
     } catch {}
+    if (!musicTitle && rendererMetadata.music_generated) musicTitle = rendererMetadata.music || 'Original generated track';
     const stat = await fs.stat(output);
     const captionBase = `${title} Run #${seed}. Did you think it would make it out?`;
     return NextResponse.json({
@@ -176,9 +179,9 @@ export async function POST(request: Request) {
       rings,
       theme,
       soundPack: rendererMetadata.sound_pack || soundPack,
-      musicMode: rendererMetadata.music_mode || (musicPath ? musicMode : 'original'),
+      musicMode: rendererMetadata.music_mode || musicMode,
       musicHits: rendererMetadata.music_hits || 0,
-      musicUsed: musicPath ? path.basename(musicPath) : null,
+      musicUsed: musicPath ? path.basename(musicPath) : rendererMetadata.music || null,
       musicTitle,
       musicSource,
       musicCredit,

@@ -156,10 +156,96 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
         wav.writeframes(pcm.tobytes())
 
 
+def synth_original_music(output: Path, seed: int, duration: float = 48.0) -> None:
+    """Create a copyright-safe electronic song used when no track is supplied."""
+    rate = 44_100
+    samples = array("f", [0.0]) * (math.ceil(duration * rate) + 1)
+    rng = random.Random(seed ^ 0x51A6B17)
+
+    def add_note(start: float, frequency: float, length: float, strength: float, color: str = "lead") -> None:
+        start_index = int(start * rate)
+        sample_count = min(int(length * rate), len(samples) - start_index)
+        if sample_count <= 0:
+            return
+        for index in range(sample_count):
+            elapsed = index / rate
+            attack = min(1.0, elapsed / (0.006 if color == "bass" else 0.012))
+            release = min(1.0, max(0.0, length - elapsed) / (0.10 if color == "pad" else 0.055))
+            envelope = attack * release
+            phase = 2 * math.pi * frequency * elapsed
+            if color == "bass":
+                tone = math.sin(phase) + 0.22 * math.sin(phase * 2.0)
+            elif color == "pad":
+                tone = math.sin(phase) + 0.20 * math.sin(phase * 1.005) + 0.13 * math.sin(phase * 2.0)
+            else:
+                tone = math.sin(phase) + 0.30 * math.sin(phase * 2.0) + 0.09 * math.sin(phase * 3.0)
+            samples[start_index + index] += tone * envelope * strength
+
+    def add_kick(start: float, strength: float = 0.72) -> None:
+        start_index = int(start * rate)
+        length = min(int(0.24 * rate), len(samples) - start_index)
+        phase = 0.0
+        for index in range(max(0, length)):
+            elapsed = index / rate
+            frequency = 48.0 + 118.0 * math.exp(-elapsed * 19.0)
+            phase += 2 * math.pi * frequency / rate
+            envelope = math.exp(-elapsed * 13.0) * min(1.0, elapsed * 100.0)
+            samples[start_index + index] += math.sin(phase) * envelope * strength
+
+    def add_noise(start: float, length: float, strength: float, salt: int) -> None:
+        start_index = int(start * rate)
+        sample_count = min(int(length * rate), len(samples) - start_index)
+        state = (seed ^ salt ^ 0x9E3779B9) & 0xFFFFFFFF
+        previous = 0.0
+        for index in range(max(0, sample_count)):
+            state = (1664525 * state + 1013904223) & 0xFFFFFFFF
+            raw = state / 0xFFFFFFFF * 2.0 - 1.0
+            bright = raw - previous * 0.72
+            previous = raw
+            elapsed = index / rate
+            envelope = math.exp(-elapsed * (45.0 if length < 0.10 else 18.0))
+            samples[start_index + index] += bright * envelope * strength
+
+    bpm = 148.0 + (seed % 5) * 2.0
+    beat = 60.0 / bpm
+    step_length = beat / 2.0
+    chord_roots = (220.0, 174.61, 130.81, 196.0)  # Am, F, C, G
+    melody_steps = (12, 7, 10, 7, 15, 12, 10, 7, 12, 7, 10, 5, 7, 10, 12, 15)
+    step_count = math.ceil(duration / step_length)
+
+    for step in range(step_count):
+        start = step * step_length
+        bar = step // 8
+        root = chord_roots[bar % len(chord_roots)]
+        if step % 8 == 0:
+            for interval in (1.0, 1.189207, 1.498307):
+                add_note(start, root * interval, beat * 1.85, 0.055, "pad")
+        if step % 2 == 0:
+            add_kick(start, 0.68 if step % 8 else 0.82)
+            add_note(start, root / 2.0, beat * 0.72, 0.25, "bass")
+        if step % 4 == 2:
+            add_noise(start, 0.18, 0.11, step * 17)
+        add_noise(start, 0.055, 0.036 if step % 2 else 0.026, step * 31)
+
+        melody_offset = melody_steps[(step + seed) % len(melody_steps)]
+        melody_frequency = 220.0 * (2.0 ** (melody_offset / 12.0))
+        if step % 4 != 3 or rng.random() > 0.32:
+            add_note(start, melody_frequency, step_length * 0.82, 0.105, "lead")
+
+    peak = max(0.001, max(abs(sample) for sample in samples))
+    gain = min(0.92 / peak, 1.0)
+    pcm = array("h", (round(clamp(sample * gain, -1.0, 1.0) * 32767) for sample in samples))
+    with wave.open(str(output), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm.tobytes())
+
+
 def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: float, seed: int) -> str:
     """Build a sequential sampler: every collision unlocks the next music slice."""
     selected: list[float] = []
-    for hit_time in sorted(hit_times):
+    for hit_time in sorted([0.0, *hit_times]):
         bounded = clamp(hit_time, 0.0, max(0.0, duration - 0.04))
         if not selected or bounded - selected[-1] >= 0.075:
             selected.append(bounded)
@@ -227,7 +313,10 @@ class BallEscape:
         self.last_clear = 0.0
         self.completed_at: float | None = None
         self.position = [self.cx + 4, self.cy + 4]
-        start_angle = self.rng.uniform(0, math.tau)
+        # Always launch upward first so gravity visibly bends the trajectory
+        # into an arc instead of looking like random linear movement.
+        launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
+        start_angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
         speed = width * 0.50
         self.velocity = [math.cos(start_angle) * speed, math.sin(start_angle) * speed]
         self.trail: list[tuple[float, float]] = []
@@ -236,6 +325,7 @@ class BallEscape:
         self.flash = 0.0
         self.impact_squash = 0.0
         self.max_speed_ratio = 1.0
+        self.gravity_g = 1.0
         self.events: list[tuple[float, float, float, str]] = []
         self.music_hits: list[float] = []
         self.last_collision = -1.0
@@ -285,7 +375,8 @@ class BallEscape:
         self.last_clear = time_sec
         self.completed_at = None
         self.position = [self.cx, self.cy]
-        angle = self.rng.uniform(0, math.tau)
+        launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
+        angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
         speed = self.width * 0.54
         self.velocity = [math.cos(angle) * speed, math.sin(angle) * speed]
         self.base_gaps = [(gap + self.rng.uniform(70, 210)) % 360 for gap in self.base_gaps]
@@ -322,7 +413,8 @@ class BallEscape:
         # Real downward gravity creates visible parabolic falls. A small,
         # continuous energy gain plus the progress floor makes every run speed
         # up from roughly 1x to 3x-5x instead of staying mechanically constant.
-        gravity = self.height * (0.30 + progress * 0.22 + time_progress * 0.12)
+        self.gravity_g = 1.0 + progress * 0.75 + time_progress * 0.45
+        gravity = self.height * self.gravity_g
         self.velocity[1] += gravity * dt
         continuous_boost = 1.0 + dt * (0.035 + progress * 0.045 + time_progress * 0.075)
         self.velocity[0] *= continuous_boost
@@ -349,7 +441,7 @@ class BallEscape:
                 target_y = self.cy + math.sin(gap_angle) * self.radii[self.active]
                 target_angle = math.atan2(target_y - self.position[1], target_x - self.position[0])
                 current_speed = math.hypot(*self.velocity)
-                blend = clamp((stalled - 0.42) * 0.11, 0.0, 0.16)
+                blend = clamp((stalled - 0.42) * 0.085, 0.0, 0.11)
                 self.velocity[0] = self.velocity[0] * (1 - blend) + math.cos(target_angle) * current_speed * blend
                 self.velocity[1] = self.velocity[1] * (1 - blend) + math.sin(target_angle) * current_speed * blend
 
@@ -554,6 +646,7 @@ class BallEscape:
         draw.text((left_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), f"{speed_ratio:.1f}X", font=value_font, fill=accent, anchor="rm")
         draw.text((right_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "RINGS", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
         draw.text((right_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), str(remaining), font=value_font, fill=(255, 255, 255, 255), anchor="rm")
+        draw_centered(draw, (self.cx, self.height * 0.205), f"GRAVITY {self.gravity_g:.1f}G  •  ACCELERATING", label_font, accent)
 
         victory_pulse = 1.0 + (0.11 * math.sin(time_sec * 12.0) if self.completed_at is not None else 0.0)
         counter_font = font(max(32, round(self.width * 0.072 * victory_pulse)), bold=True)
@@ -584,11 +677,12 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     game = BallEscape(width, height, fps, args.duration, args.rings, args.seed, args.theme, args.title)
     ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg")
-    music_file = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
+    external_music_file = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-game-", dir=str(output.parent)) as temp_dir:
         silent = Path(temp_dir) / "silent.mp4"
         audio = Path(temp_dir) / "effects.wav"
+        generated_music = Path(temp_dir) / "original-generated-track.wav"
         encode = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
@@ -618,23 +712,23 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         else:
             selected_sound_pack = args.sound_pack
         actual_duration = rendered_frames / fps
-        synth_audio(actual_duration, game.events, audio, args.seed, selected_sound_pack, include_bed=music_file is None)
-        if music_file:
-            if args.music_mode == "hit-reveal":
-                audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
-            else:
-                audio_filter = f"[1:a]volume=0.80[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
-            mux = [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(audio),
-                "-stream_loop", "-1", "-i", str(music_file),
-                "-filter_complex", audio_filter,
-                "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
-            ]
+        synth_audio(actual_duration, game.events, audio, args.seed, selected_sound_pack, include_bed=False)
+        if external_music_file:
+            music_source = external_music_file
         else:
-            mux = [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(audio),
-                "-c:v", "copy", "-af", "loudnorm=I=-14:TP=-1.5:LRA=9", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
-            ]
+            synth_original_music(generated_music, args.seed)
+            music_source = generated_music
+
+        if args.music_mode == "hit-reveal":
+            audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
+        else:
+            audio_filter = f"[1:a]volume=0.80[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
+        mux = [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(audio),
+            "-stream_loop", "-1", "-i", str(music_source),
+            "-filter_complex", audio_filter,
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
+        ]
         subprocess.run(mux, check=True)
 
     return {
@@ -646,8 +740,9 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "theme": args.theme,
         "sound_pack": selected_sound_pack,
         "sound_mode": args.sound_pack,
-        "music": music_file.name if music_file else None,
-        "music_mode": args.music_mode if music_file else "original",
+        "music": external_music_file.name if external_music_file else "Original generated track",
+        "music_generated": external_music_file is None,
+        "music_mode": args.music_mode,
         "music_hits": len(game.music_hits),
         "events": len(game.events),
         "levels_completed": game.level - 1,
@@ -666,7 +761,7 @@ def main() -> None:
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact"), default="auto")
     parser.add_argument("--music")
     parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
-    parser.add_argument("--music-volume", type=float, default=0.24)
+    parser.add_argument("--music-volume", type=float, default=0.62)
     parser.add_argument("--title", default="WILL THE BALL ESCAPE?")
     parser.add_argument("--width", type=int, default=720)
     parser.add_argument("--height", type=int, default=1280)

@@ -237,7 +237,7 @@ export function GameStudio() {
               <div className="flex gap-2">
                 <select value={musicFile} onChange={(event) => setMusicFile(event.target.value)} className="min-w-0 flex-1 bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
                   <option value="__discover__">Auto Discovery — fresh licensed track</option>
-                  <option value="">Original loop only</option>
+                  <option value="">Original generated electronic track</option>
                   {musicTracks.length > 0 && <option value="__auto__">Auto — rotate my audio library</option>}
                   {musicTracks.map((track) => <option key={track.id} value={track.file}>{track.title}</option>)}
                 </select>
@@ -262,7 +262,7 @@ export function GameStudio() {
                 </label>
               </div>
             )}
-            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Add a Jamendo client ID on the server, or it safely falls back to your licensed library/original soundtrack.</p>
+            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Without one, ClipMaker composes a new original electronic song and still reveals it one hit at a time.</p>
           </div>
 
           <label className="text-xs text-ink-400 space-y-1 block">
