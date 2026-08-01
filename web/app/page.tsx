@@ -103,9 +103,9 @@ export default function Home() {
           <div className="flex items-start gap-3">
             <Wand2 className="size-5 text-accent mt-1" />
             <div>
-              <h1 className="text-lg font-semibold leading-tight">Usine à TikTok & Shorts</h1>
+              <h1 className="text-lg font-semibold leading-tight">TikTok & Shorts Factory</h1>
               <p className="text-ink-400 text-sm">
-                Génère un jeu hypnotique original ou monte une vidéo, puis publie-la sur TikTok et YouTube.
+                Generate an original hypnotic game or edit a video, then publish it to TikTok and YouTube.
               </p>
             </div>
           </div>
@@ -113,9 +113,9 @@ export default function Home() {
 
         <nav className="grid grid-cols-4 gap-2 sticky top-14 z-20 bg-ink-900/85 backdrop-blur -mx-4 px-4 py-2 border-b border-white/5">
           {([
-            { id: 'game', label: 'Jeu auto', Icon: Gamepad2 },
-            { id: 'upload', label: 'Importer', Icon: Wand2 },
-            { id: 'library', label: 'Bibliothèque', Icon: Library },
+            { id: 'game', label: 'Auto Game', Icon: Gamepad2 },
+            { id: 'upload', label: 'Import', Icon: Wand2 },
+            { id: 'library', label: 'Library', Icon: Library },
             { id: 'youtube', label: 'YouTube', Icon: Youtube }
           ] as const).map(({ id, label, Icon }) => (
             <button

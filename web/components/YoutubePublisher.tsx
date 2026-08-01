@@ -84,17 +84,17 @@ export function YoutubePublisher({
       });
       const data = await response.json();
       if (!data.ok) {
-        setMessage(`❌ ${data.error || 'Échec de l’envoi YouTube'}`);
+        setMessage(`Upload failed: ${data.error || 'YouTube rejected the upload'}`);
         return;
       }
       if (data.dryRun) {
-        setMessage(`✅ Simulation validée · ${Math.round(data.media.duration)} s · ${data.media.width}×${data.media.height} · aucun upload effectué`);
+        setMessage(`Dry run passed · ${Math.round(data.media.duration)} s · ${data.media.width}×${data.media.height} · nothing was uploaded`);
       } else {
-        setMessage(`✅ Short envoyé sur YouTube en mode ${privacy}`);
+        setMessage(`Short uploaded to YouTube as ${privacy}`);
         if (data.upload?.releaseUrl) setReleaseUrl(data.upload.releaseUrl);
       }
     } catch (error) {
-      setMessage(`❌ ${String(error)}`);
+      setMessage(`Upload failed: ${String(error)}`);
     } finally {
       setUploading(false);
     }
@@ -110,36 +110,36 @@ export function YoutubePublisher({
           <Youtube className="size-4 text-red-500" /> YouTube Shorts
         </h3>
         <span className={`text-[11px] rounded-full px-2 py-1 ${liveMode ? 'bg-red-500/15 text-red-200' : 'bg-emerald-500/15 text-emerald-200'}`}>
-          {status ? (liveMode ? 'upload réel' : 'simulation') : 'vérification…'}
+          {status ? (liveMode ? 'live upload' : 'dry run') : 'checking...'}
         </span>
       </div>
 
       <label className="text-xs text-ink-400 space-y-1 block">
-        <span>Titre</span>
+        <span>Title</span>
         <input
           value={title}
           onChange={(event) => setTitle(event.target.value.slice(0, 100))}
           className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
-          placeholder="Titre du Short"
+          placeholder="Short title"
         />
-        <span className="block text-[10px] text-ink-500">{title.length}/100 caractères</span>
+        <span className="block text-[10px] text-ink-500">{title.length}/100 characters</span>
       </label>
 
       <label className="text-xs text-ink-400 space-y-1 block">
-        <span>Visibilité initiale</span>
+        <span>Initial visibility</span>
         <select
           value={privacy}
           onChange={(event) => setPrivacy(event.target.value as 'private' | 'unlisted')}
           className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
         >
-          <option value="private">Privée — recommandée pour vérifier</option>
-          <option value="unlisted">Non répertoriée</option>
+          <option value="private">Private — recommended for review</option>
+          <option value="unlisted">Unlisted</option>
         </select>
       </label>
 
       {liveMode && (
         <label className="text-xs text-ink-400 space-y-1 block">
-          <span>Jeton d’administration ClipMaker</span>
+          <span>ClipMaker admin token</span>
           <input
             type="password"
             value={adminToken}
@@ -150,25 +150,25 @@ export function YoutubePublisher({
         </label>
       )}
 
-      {status && !status.ok && <p className="text-xs text-red-300">{status.error || 'Uploader YouTube indisponible'}</p>}
+      {status && !status.ok && <p className="text-xs text-red-300">{status.error || 'YouTube uploader unavailable'}</p>}
       {liveMode && !status.readyForLiveUpload && (
-        <p className="text-xs text-amber-300">Session YouTube absente ou expirée. Lance <code>npm run youtube:auth</code> dans <code>web/</code>, puis connecte-toi dans la fenêtre Chrome.</p>
+        <p className="text-xs text-amber-300">The YouTube session is missing or expired. Run <code>npm run youtube:auth</code> in <code>web/</code>, then sign in through the Chrome window.</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={upload} disabled={disabled}>
           {uploading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-          {liveMode ? 'Envoyer sur YouTube' : 'Tester l’envoi YouTube'}
+          {liveMode ? 'Upload to YouTube' : 'Test YouTube upload'}
         </Button>
         {releaseUrl && (
           <a href={releaseUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-ink-200 hover:text-white">
-            Voir la vidéo <ExternalLink className="size-3" />
+            View video <ExternalLink className="size-3" />
           </a>
         )}
       </div>
 
       <p className="text-[11px] text-ink-400">
-        La simulation valide le fichier sans publier. En mode réel, ClipMaker réutilise uniquement la session Chrome locale; aucun mot de passe Google n’est stocké. Les publications publiques restent désactivées.
+        A dry run validates the file without publishing it. In live mode, ClipMaker only reuses the local Chrome session; it never stores a Google password. Public uploads remain disabled.
       </p>
       {message && <p className="text-sm text-ink-200 whitespace-pre-wrap">{message}</p>}
     </section>

@@ -71,7 +71,7 @@ def draw_centered(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str,
     draw.text(xy, text, font=text_font, fill=fill, anchor="mm", stroke_width=stroke, stroke_fill=(0, 0, 0, 220))
 
 
-def synth_audio(duration: float, events: list[tuple[float, float, float]], output: Path, seed: int, sound_pack: str) -> None:
+def synth_audio(duration: float, events: list[tuple[float, float, float, str]], output: Path, seed: int, sound_pack: str, include_bed: bool = True) -> None:
     rate = 44_100
     samples = array("f", [0.0]) * (math.ceil(duration * rate) + 1)
 
@@ -82,16 +82,25 @@ def synth_audio(duration: float, events: list[tuple[float, float, float]], outpu
         start_index = int(start * rate)
         for i in range(length):
             elapsed = i / rate
-            envelope = math.exp(-elapsed * (20.0 if kind == "funny" else 27.0)) * min(1.0, elapsed * 90.0)
-            if kind == "funny":
+            if kind == "meow":
+                progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
+                envelope = min(1.0, elapsed * 34.0) * max(0.0, 1.0 - progress) ** 1.25
+                bent_frequency = frequency * (0.72 + 0.68 * math.sin(math.pi * progress))
+                tone = math.sin(2 * math.pi * bent_frequency * elapsed)
+                tone += 0.38 * math.sin(2 * math.pi * bent_frequency * 2.02 * elapsed)
+                tone += 0.13 * math.sin(2 * math.pi * bent_frequency * 3.03 * elapsed)
+            elif kind == "funny":
+                envelope = math.exp(-elapsed * 20.0) * min(1.0, elapsed * 90.0)
                 bent_frequency = frequency * (1.0 + 0.22 * math.sin(2 * math.pi * 13 * elapsed)) * (1.0 - elapsed * 0.7)
                 tone = math.sin(2 * math.pi * bent_frequency * elapsed)
                 tone += 0.28 * math.sin(2 * math.pi * bent_frequency * 1.5 * elapsed)
             elif kind == "impact":
+                envelope = math.exp(-elapsed * 27.0) * min(1.0, elapsed * 90.0)
                 bent_frequency = max(45.0, frequency * 0.42 * (1.0 - elapsed * 2.4))
                 tone = math.sin(2 * math.pi * bent_frequency * elapsed)
                 tone += 0.18 * math.sin(2 * math.pi * bent_frequency * 0.51 * elapsed)
             else:
+                envelope = math.exp(-elapsed * 27.0) * min(1.0, elapsed * 90.0)
                 tone = math.sin(2 * math.pi * frequency * elapsed)
                 tone += 0.32 * math.sin(2 * math.pi * frequency * 2.01 * elapsed)
             samples[start_index + i] += tone * envelope * strength
@@ -106,16 +115,36 @@ def synth_audio(duration: float, events: list[tuple[float, float, float]], outpu
     # Three-note hook in the first half-second: useful before viewers can swipe.
     for hook_time, hook_note in ((0.0, 392.0), (0.14, 523.25), (0.30, 783.99)):
         add_tone(hook_time, hook_note, 0.14, 0.22, "arcade")
-    while time_sec < duration:
-        note = scale[beat_index % len(scale)] * (1.0 + audio_rng.uniform(-0.002, 0.002))
-        add_tone(time_sec, note, 0.055, 0.17, "arcade")
-        if beat_index % 2 == 0:
-            add_tone(time_sec, 92.0, 0.09, 0.18, "impact")
-        time_sec += beat / 2
-        beat_index += 1
+    if include_bed:
+        while time_sec < duration:
+            note = scale[beat_index % len(scale)] * (1.0 + audio_rng.uniform(-0.002, 0.002))
+            add_tone(time_sec, note, 0.055, 0.17, "arcade")
+            if beat_index % 2 == 0:
+                add_tone(time_sec, 92.0, 0.09, 0.18, "impact")
+            time_sec += beat / 2
+            beat_index += 1
 
-    for start, frequency, strength in events:
-        add_tone(start, frequency, strength, 0.24 if sound_pack == "funny" else 0.18, sound_pack)
+    for event_index, (start, frequency, strength, event_kind) in enumerate(events):
+        event_sound = sound_pack
+        event_frequency = frequency
+        event_strength = strength
+        event_length = 0.18
+        if sound_pack == "meme":
+            if event_kind == "bounce" and (event_index + seed) % 5 in (0, 3):
+                event_sound = "meow"
+                event_frequency = 380.0 + ((event_index + seed) % 4) * 42.0
+                event_strength = min(0.55, strength * 0.82)
+                event_length = 0.31
+            elif event_kind == "bounce":
+                event_sound = "funny"
+                event_frequency = 290.0 + ((event_index + seed) % 5) * 54.0
+                event_length = 0.22
+            else:
+                event_sound = "arcade"
+                event_length = 0.18
+        elif sound_pack == "funny":
+            event_length = 0.24
+        add_tone(start, event_frequency, event_strength, event_length, event_sound)
 
     peak = max(0.001, max(abs(sample) for sample in samples))
     gain = min(0.88 / peak, 1.0)
@@ -127,6 +156,49 @@ def synth_audio(duration: float, events: list[tuple[float, float, float]], outpu
         wav.writeframes(pcm.tobytes())
 
 
+def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: float, seed: int) -> str:
+    """Build a sequential sampler: every collision unlocks the next music slice."""
+    selected: list[float] = []
+    for hit_time in sorted(hit_times):
+        bounded = clamp(hit_time, 0.0, max(0.0, duration - 0.04))
+        if not selected or bounded - selected[-1] >= 0.075:
+            selected.append(bounded)
+    selected = selected[:96]
+    if not selected:
+        return f"[1:a]volume=0.80[fx];[2:a]volume={volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
+
+    split_outputs = "".join(f"[source{index}]" for index in range(len(selected)))
+    filters = [
+        "[1:a]volume=0.72[fx]",
+        f"[2:a]aresample=48000,asplit={len(selected)}{split_outputs}",
+    ]
+    labels: list[str] = []
+    source_cursor = (seed % 900) / 100.0
+    for index, hit_time in enumerate(selected):
+        next_hit = selected[index + 1] if index + 1 < len(selected) else duration
+        fragment = clamp(next_hit - hit_time + 0.025, 0.12, 0.36)
+        if index == len(selected) - 1:
+            fragment = clamp(duration - hit_time, 0.20, 0.90)
+        fade_out_at = max(0.04, fragment - 0.045)
+        delay_ms = max(0, round(hit_time * 1000))
+        label = f"slice{index}"
+        filters.append(
+            f"[source{index}]atrim=start={source_cursor:.3f}:duration={fragment:.3f},"
+            f"asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.012,"
+            f"afade=t=out:st={fade_out_at:.3f}:d=0.045,adelay={delay_ms}:all=1[{label}]"
+        )
+        labels.append(f"[{label}]")
+        source_cursor += fragment
+
+    filters.append(
+        f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+        f"volume={volume:.3f}[reveal]"
+    )
+    filters.append("[fx][reveal]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix]")
+    filters.append("[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]")
+    return ";".join(filters)
+
+
 class BallEscape:
     def __init__(self, width: int, height: int, fps: int, duration: float, rings: int, seed: int, theme: str, title: str):
         self.width = width
@@ -136,38 +208,72 @@ class BallEscape:
         self.ring_count = rings
         self.seed = seed
         self.theme = theme
-        self.title = title.strip().upper()[:52] or "LA BALLE VA-T-ELLE S'ÉCHAPPER ?"
+        self.title = title.strip().upper()[:52] or "WILL THE BALL ESCAPE?"
         self.rng = random.Random(seed)
         self.cx = width / 2
         self.cy = height * 0.55
         self.ball_radius = max(9, round(width * 0.017))
-        inner = width * 0.125
+        inner = width * 0.075
         outer = width * 0.455
         self.radii = [inner + (outer - inner) * i / max(1, rings - 1) for i in range(rings)]
-        self.base_gaps = [self.rng.uniform(0, 360) for _ in range(rings)]
-        self.rotations = [self.rng.choice((-1, 1)) * self.rng.uniform(22, 52) for _ in range(rings)]
-        self.gap_widths = [self.rng.uniform(30, 42) for _ in range(rings)]
+        spiral_start = self.rng.uniform(0, 360)
+        spiral_step = self.rng.choice((-1, 1)) * self.rng.uniform(0.8, 1.8)
+        global_rotation = self.rng.choice((-1, 1)) * self.rng.uniform(24, 42)
+        self.base_gaps = [(spiral_start + index * spiral_step + self.rng.uniform(-2.5, 2.5)) % 360 for index in range(rings)]
+        self.rotations = [global_rotation + self.rng.uniform(-4, 4) for _ in range(rings)]
+        self.gap_widths = [self.rng.uniform(25, 34) for _ in range(rings)]
         self.active = 0
         self.level = 1
         self.last_clear = 0.0
         self.completed_at: float | None = None
         self.position = [self.cx + 4, self.cy + 4]
         start_angle = self.rng.uniform(0, math.tau)
-        speed = width * 0.38
+        speed = width * 0.50
         self.velocity = [math.cos(start_angle) * speed, math.sin(start_angle) * speed]
         self.trail: list[tuple[float, float]] = []
         self.particles: list[dict[str, float | tuple[int, int, int]]] = []
-        self.events: list[tuple[float, float, float]] = []
+        self.pulses: list[dict[str, float | tuple[int, int, int]]] = []
+        self.flash = 0.0
+        self.events: list[tuple[float, float, float, str]] = []
+        self.music_hits: list[float] = []
         self.last_collision = -1.0
+        self.streak = 0
+        self.last_streak_at = 0.0
+        self.stars = [
+            (
+                self.rng.uniform(0, width),
+                self.rng.uniform(0, height),
+                self.rng.uniform(0.7, 2.2),
+                self.rng.uniform(0, math.tau),
+                self.rng.uniform(4, 18),
+            )
+            for _ in range(64)
+        ]
+        self.background = self.make_background()
+
+    def record_music_hit(self, time_sec: float) -> None:
+        if not self.music_hits or time_sec - self.music_hits[-1] >= 0.075:
+            self.music_hits.append(time_sec)
+
+    def make_background(self) -> Image.Image:
+        base = THEMES[self.theme][0]
+        background = Image.new("RGB", (self.width, self.height), base)
+        draw = ImageDraw.Draw(background)
+        for y in range(self.height):
+            center_distance = abs(y - self.cy) / max(1, self.height)
+            glow = round(max(0.0, 1.0 - center_distance * 2.1) * 7)
+            line = tuple(min(255, channel + glow) for channel in base)
+            draw.line((0, y, self.width, y), fill=line)
+        return background
 
     def ring_gap(self, index: int, time_sec: float) -> float:
         natural = (self.base_gaps[index] + self.rotations[index] * time_sec) % 360
         if index == self.active and self.completed_at is None:
             stalled = time_sec - self.last_clear
-            if stalled > 1.0:
+            if stalled > 0.34:
                 dx, dy = self.position[0] - self.cx, self.position[1] - self.cy
                 ball_angle = math.degrees(math.atan2(dy, dx)) % 360
-                follow = clamp((stalled - 1.0) / 0.8, 0.0, 1.0)
+                follow = clamp((stalled - 0.34) / 0.26, 0.0, 1.0)
                 return (natural + angle_delta(ball_angle, natural) * follow) % 360
         return natural
 
@@ -178,9 +284,10 @@ class BallEscape:
         self.completed_at = None
         self.position = [self.cx, self.cy]
         angle = self.rng.uniform(0, math.tau)
-        speed = self.width * 0.40
+        speed = self.width * 0.54
         self.velocity = [math.cos(angle) * speed, math.sin(angle) * speed]
         self.base_gaps = [(gap + self.rng.uniform(70, 210)) % 360 for gap in self.base_gaps]
+        self.streak = 0
 
     def add_particles(self, angle: float, color: tuple[int, int, int]) -> None:
         for _ in range(18):
@@ -193,14 +300,25 @@ class BallEscape:
                 "color": color,
             })
 
+    def add_victory_particles(self) -> None:
+        for index in range(90):
+            angle = math.tau * index / 90 + self.rng.uniform(-0.08, 0.08)
+            speed = self.rng.uniform(90, 330)
+            color = color_for(self.theme, index, 90, self.level * 0.02)
+            self.particles.append({
+                "x": self.cx, "y": self.cy,
+                "vx": math.cos(angle) * speed, "vy": math.sin(angle) * speed,
+                "life": self.rng.uniform(0.7, 1.45), "max_life": 1.45,
+                "color": color,
+            })
+
     def update(self, time_sec: float) -> None:
         dt = 1.0 / self.fps
-        if self.completed_at is not None and time_sec - self.completed_at > 1.8:
-            self.reset_level(time_sec)
-
         self.velocity[1] += self.height * 0.052 * dt
         speed = math.hypot(*self.velocity)
-        min_speed, max_speed = self.width * 0.31, self.width * 0.62
+        progress = self.active / max(1, self.ring_count)
+        min_speed = self.width * (0.46 + progress * 0.72)
+        max_speed = self.width * (0.72 + progress * 1.08)
         if speed < min_speed:
             scale = min_speed / max(speed, 0.001)
             self.velocity[0] *= scale
@@ -212,13 +330,13 @@ class BallEscape:
 
         if self.active < self.ring_count:
             stalled = time_sec - self.last_clear
-            if stalled > 1.1:
+            if stalled > 0.42:
                 gap_angle = math.radians(self.ring_gap(self.active, time_sec))
                 target_x = self.cx + math.cos(gap_angle) * self.radii[self.active]
                 target_y = self.cy + math.sin(gap_angle) * self.radii[self.active]
                 target_angle = math.atan2(target_y - self.position[1], target_x - self.position[0])
                 current_speed = math.hypot(*self.velocity)
-                blend = clamp((stalled - 1.1) * 0.045, 0.0, 0.09)
+                blend = clamp((stalled - 0.42) * 0.11, 0.0, 0.16)
                 self.velocity[0] = self.velocity[0] * (1 - blend) + math.cos(target_angle) * current_speed * blend
                 self.velocity[1] = self.velocity[1] * (1 - blend) + math.sin(target_angle) * current_speed * blend
 
@@ -233,7 +351,7 @@ class BallEscape:
             outward_speed = self.velocity[0] * nx + self.velocity[1] * ny
             ball_angle = math.degrees(math.atan2(dy, dx)) % 360
             stalled = time_sec - self.last_clear
-            widened_gap = min(165.0, self.gap_widths[self.active] + max(0.0, stalled - 1.1) * 58.0)
+            widened_gap = min(150.0, self.gap_widths[self.active] + max(0.0, stalled - 0.42) * 95.0)
             in_gap = abs(angle_delta(ball_angle, self.ring_gap(self.active, time_sec))) <= widened_gap / 2
 
             if distance + self.ball_radius >= radius and outward_speed > 0:
@@ -241,15 +359,29 @@ class BallEscape:
                     if distance >= radius + self.ball_radius * 0.75:
                         color = color_for(self.theme, self.active, self.ring_count)
                         self.add_particles(math.atan2(dy, dx), color)
-                        self.events.append((time_sec, 620 + self.active * 18, 0.52))
-                        self.active += 1
+                        self.pulses.append({"radius": radius, "life": 0.42, "max_life": 0.42, "color": color})
+                        self.flash = max(self.flash, 0.18)
+                        self.events.append((time_sec, 620 + self.active * 2.2, 0.52, "clear"))
+                        self.record_music_hit(time_sec)
+                        clear_batch = max(1, math.ceil(self.ring_count / max(12.0, self.duration * 1.30)))
+                        self.active = min(self.ring_count, self.active + clear_batch)
+                        if time_sec - self.last_streak_at < 0.34:
+                            self.streak += clear_batch
+                        else:
+                            self.streak = clear_batch
+                        self.last_streak_at = time_sec
+                        acceleration = min(1.035, 1.006 + self.active / max(1, self.ring_count) * 0.018)
+                        self.velocity[0] *= acceleration
+                        self.velocity[1] *= acceleration
                         self.last_clear = time_sec
                         if self.active >= self.ring_count:
                             self.completed_at = time_sec
+                            self.add_victory_particles()
+                            self.flash = 0.72
                             self.events.extend([
-                                (time_sec + 0.06, 783.99, 0.58),
-                                (time_sec + 0.18, 987.77, 0.62),
-                                (time_sec + 0.32, 1318.51, 0.70),
+                                (time_sec + 0.06, 783.99, 0.58, "victory"),
+                                (time_sec + 0.18, 987.77, 0.62, "victory"),
+                                (time_sec + 0.32, 1318.51, 0.70, "victory"),
                             ])
                 else:
                     self.position[0] = self.cx + nx * (radius - self.ball_radius - 1)
@@ -260,7 +392,13 @@ class BallEscape:
                     self.velocity[0] += -ny * tangent_push
                     self.velocity[1] += nx * tangent_push
                     if time_sec - self.last_collision > 0.055:
-                        self.events.append((time_sec, 260 + self.active * 16, 0.34))
+                        if time_sec - self.last_streak_at > 0.34:
+                            self.streak = 0
+                        self.events.append((time_sec, 260 + self.active * 16, 0.34, "bounce"))
+                        self.record_music_hit(time_sec)
+                        color = color_for(self.theme, self.active, self.ring_count)
+                        self.pulses.append({"radius": radius, "life": 0.18, "max_life": 0.18, "color": color})
+                        self.flash = max(self.flash, 0.07)
                         self.last_collision = time_sec
 
         self.trail.append((self.position[0], self.position[1]))
@@ -275,10 +413,24 @@ class BallEscape:
             if float(particle["life"]) > 0:
                 next_particles.append(particle)
         self.particles = next_particles
+        next_pulses = []
+        for pulse in self.pulses:
+            pulse["radius"] = float(pulse["radius"]) + self.width * 0.06 * dt
+            pulse["life"] = float(pulse["life"]) - dt
+            if float(pulse["life"]) > 0:
+                next_pulses.append(pulse)
+        self.pulses = next_pulses
+        self.flash = max(0.0, self.flash - dt * 1.8)
 
     def frame(self, time_sec: float) -> Image.Image:
-        background = THEMES[self.theme][0]
-        image = Image.new("RGB", (self.width, self.height), background)
+        image = self.background.copy()
+        atmosphere = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        atmosphere_draw = ImageDraw.Draw(atmosphere)
+        for x, base_y, radius, phase, speed in self.stars:
+            y = (base_y + time_sec * speed) % self.height
+            alpha = round(45 + 65 * (0.5 + 0.5 * math.sin(time_sec * 1.7 + phase)))
+            atmosphere_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(170, 200, 255, alpha))
+        image = Image.alpha_composite(image.convert("RGBA"), atmosphere)
         rings_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         rings_draw = ImageDraw.Draw(rings_layer)
         glow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -291,12 +443,17 @@ class BallEscape:
             start = gap + gap_width / 2
             end = gap + 360 - gap_width / 2
             color = color_for(self.theme, index, self.ring_count, self.level * 0.015)
-            for offset, alpha in ((-3, 125), (0, 255), (3, 125)):
+            active_pulse = 1.0 + (0.22 * (0.5 + 0.5 * math.sin(time_sec * 6.5)) if index == self.active else 0.0)
+            dense = self.ring_count > 80
+            strokes = ((0, 255),) if dense else ((-3, 125), (0, 255), (3, 125))
+            for offset, alpha in strokes:
                 current = radius + offset
                 bbox = (self.cx - current, self.cy - current, self.cx + current, self.cy + current)
-                rings_draw.arc(bbox, start=start, end=end, fill=(*color, alpha), width=2 if offset else 4)
+                base_width = 1 if self.ring_count > 180 else 2 if dense else 4
+                rings_draw.arc(bbox, start=start, end=end, fill=(*color, alpha), width=max(1, round(base_width * active_pulse)) if not offset else 2)
             bbox = (self.cx - radius, self.cy - radius, self.cx + radius, self.cy + radius)
-            glow_draw.arc(bbox, start=start, end=end, fill=(*color, 145), width=12)
+            if not dense or index == self.active or index % 12 == 0:
+                glow_draw.arc(bbox, start=start, end=end, fill=(*color, 145 if index == self.active else 55), width=10 if index == self.active else 5)
 
         blurred = glow_layer.filter(ImageFilter.GaussianBlur(radius=9))
         image = Image.alpha_composite(image.convert("RGBA"), blurred)
@@ -315,6 +472,15 @@ class BallEscape:
             color = particle["color"]
             x, y = float(particle["x"]), float(particle["y"])
             effects_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*color, round(255 * life)))
+        for pulse in self.pulses:
+            life = clamp(float(pulse["life"]) / float(pulse["max_life"]), 0.0, 1.0)
+            radius = float(pulse["radius"])
+            color = pulse["color"]
+            effects_draw.ellipse(
+                (self.cx - radius, self.cy - radius, self.cx + radius, self.cy + radius),
+                outline=(*color, round(190 * life)),
+                width=max(2, round(7 * life)),
+            )
         bx, by = self.position
         effects_draw.ellipse((bx - self.ball_radius * 2.1, by - self.ball_radius * 2.1, bx + self.ball_radius * 2.1, by + self.ball_radius * 2.1), fill=(*ball_color, 100))
         image = Image.alpha_composite(image, effects.filter(ImageFilter.GaussianBlur(radius=5)))
@@ -323,36 +489,57 @@ class BallEscape:
         draw.ellipse((bx - self.ball_radius, by - self.ball_radius, bx + self.ball_radius, by + self.ball_radius), fill=(245, 250, 255, 255), outline=(*ball_color, 255), width=3)
         draw.ellipse((bx - self.ball_radius * 0.45, by - self.ball_radius * 0.55, bx - self.ball_radius * 0.05, by - self.ball_radius * 0.15), fill=(255, 255, 255, 220))
 
-        title_font = fitted_font(
-            self.title,
-            preferred_size=max(18, round(self.width * 0.048)),
-            minimum_size=max(12, round(self.width * 0.027)),
-            maximum_width=round(self.width * 0.90),
-            bold=True,
-        )
-        small_font = font(max(12, round(self.width * 0.023)), bold=True)
-        meta_text = f"NIVEAU {self.level:02d}  •  GRAINE {self.seed}"
-        meta_font = fitted_font(meta_text, max(12, round(self.width * 0.023)), max(9, round(self.width * 0.018)), round(self.width * 0.88), bold=True)
-        cta_text = "ABONNE-TOI POUR LE PROCHAIN NIVEAU"
-        cta_font = fitted_font(cta_text, max(12, round(self.width * 0.023)), max(9, round(self.width * 0.017)), round(self.width * 0.88), bold=True)
-        counter_font = font(max(34, round(self.width * 0.075)), bold=True)
-        draw_centered(draw, (self.cx, self.height * 0.095), self.title, title_font, (255, 255, 255, 255), stroke=2)
-        draw_centered(draw, (self.cx, self.height * 0.138), meta_text, meta_font, (165, 180, 215, 255))
+        if self.flash > 0:
+            flash_alpha = round(clamp(self.flash, 0.0, 1.0) * 45)
+            flash_layer = Image.new("RGBA", image.size, (255, 255, 255, flash_alpha))
+            image = Image.alpha_composite(image, flash_layer)
+            draw = ImageDraw.Draw(image)
 
+        title_font = fitted_font(self.title, max(20, round(self.width * 0.052)), max(13, round(self.width * 0.029)), round(self.width * 0.90), bold=True)
+        label_font = font(max(10, round(self.width * 0.018)), bold=True)
+        value_font = font(max(16, round(self.width * 0.032)), bold=True)
+        small_font = font(max(11, round(self.width * 0.022)), bold=True)
+        cta_text = "FOLLOW FOR THE NEXT RUN"
+        cta_font = fitted_font(cta_text, max(13, round(self.width * 0.024)), max(10, round(self.width * 0.018)), round(self.width * 0.80), bold=True)
+        accent = (*ball_color, 255)
+
+        # Purpose-built mobile-game HUD: no development metadata is rendered.
+        header_y = self.height * 0.052
+        draw.line((self.width * 0.08, header_y, self.width * 0.31, header_y), fill=(*ball_color, 150), width=2)
+        draw.line((self.width * 0.69, header_y, self.width * 0.92, header_y), fill=(*ball_color, 150), width=2)
+        draw_centered(draw, (self.cx, header_y), "BALL ESCAPE", label_font, accent)
+        draw_centered(draw, (self.cx, self.height * 0.095), self.title, title_font, (255, 255, 255, 255), stroke=2)
+
+        panel_y1, panel_y2 = self.height * 0.135, self.height * 0.184
+        left_panel = (self.width * 0.08, panel_y1, self.width * 0.46, panel_y2)
+        right_panel = (self.width * 0.54, panel_y1, self.width * 0.92, panel_y2)
+        for panel in (left_panel, right_panel):
+            draw.rounded_rectangle(panel, radius=max(6, round(self.width * 0.012)), fill=(3, 6, 12, 220), outline=(*ball_color, 120), width=2)
+        speed_ratio = math.hypot(*self.velocity) / max(1.0, self.width * 0.50)
         remaining = max(0, self.ring_count - self.active)
-        center_text = "LIBRE !" if self.completed_at is not None else str(remaining)
-        center_color = (255, 255, 255, 255) if remaining else (*ball_color, 255)
+        draw.text((left_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "SPEED", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
+        draw.text((left_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), f"{speed_ratio:.1f}X", font=value_font, fill=accent, anchor="rm")
+        draw.text((right_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "RINGS", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
+        draw.text((right_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), str(remaining), font=value_font, fill=(255, 255, 255, 255), anchor="rm")
+
+        victory_pulse = 1.0 + (0.11 * math.sin(time_sec * 12.0) if self.completed_at is not None else 0.0)
+        counter_font = font(max(32, round(self.width * 0.072 * victory_pulse)), bold=True)
+        center_text = "ESCAPED!" if self.completed_at is not None else str(remaining)
+        center_color = (255, 255, 255, 255) if remaining else accent
         draw_centered(draw, (self.cx, self.cy), center_text, counter_font, center_color, stroke=2)
         if remaining:
-            draw_centered(draw, (self.cx, self.cy + self.height * 0.043), "ANNEAUX", small_font, (150, 165, 195, 230))
+            draw_centered(draw, (self.cx, self.cy + self.height * 0.040), "RINGS LEFT", label_font, (150, 165, 195, 230))
 
-        progress_left, progress_right = self.width * 0.12, self.width * 0.88
-        progress_y = self.height * 0.925
-        draw.rounded_rectangle((progress_left, progress_y, progress_right, progress_y + 8), radius=4, fill=(255, 255, 255, 35))
-        progress = self.active / max(1, self.ring_count)
-        if progress > 0:
-            draw.rounded_rectangle((progress_left, progress_y, progress_left + (progress_right - progress_left) * progress, progress_y + 8), radius=4, fill=(*ball_color, 255))
-        draw_centered(draw, (self.cx, self.height * 0.962), cta_text, cta_font, (205, 215, 240, 255), stroke=1)
+        footer_y1, footer_y2 = self.height * 0.885, self.height * 0.935
+        footer = (self.width * 0.08, footer_y1, self.width * 0.92, footer_y2)
+        draw.rounded_rectangle(footer, radius=max(6, round(self.width * 0.012)), fill=(3, 6, 12, 225), outline=(255, 255, 255, 40), width=2)
+        time_left = max(0, math.ceil(self.duration - time_sec))
+        clock = f"{time_left // 60:02d}:{time_left % 60:02d}"
+        draw.text((footer[0] + self.width * 0.025, (footer_y1 + footer_y2) / 2), "TIME LEFT", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
+        draw.text((self.width * 0.38, (footer_y1 + footer_y2) / 2), clock, font=value_font, fill=(255, 255, 255, 255), anchor="mm")
+        streak_text = f"STREAK ×{self.streak}" if self.streak >= 2 else "NO MISSES"
+        draw.text((footer[2] - self.width * 0.025, (footer_y1 + footer_y2) / 2), streak_text, font=small_font, fill=accent, anchor="rm")
+        draw_centered(draw, (self.cx, self.height * 0.965), cta_text, cta_font, (210, 220, 245, 255), stroke=1)
         return image.convert("RGB")
 
 
@@ -364,6 +551,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     game = BallEscape(width, height, fps, args.duration, args.rings, args.seed, args.theme, args.title)
     ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg")
+    music_file = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-game-", dir=str(output.parent)) as temp_dir:
         silent = Path(temp_dir) / "silent.mp4"
@@ -378,10 +566,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         assert process.stdin is not None
         try:
             frame_count = round(args.duration * fps)
+            rendered_frames = frame_count
             for frame_index in range(frame_count):
                 time_sec = frame_index / fps
                 game.update(time_sec)
                 process.stdin.write(game.frame(time_sec).tobytes())
+                if game.completed_at is not None and time_sec - game.completed_at >= 1.6:
+                    rendered_frames = frame_index + 1
+                    break
         finally:
             process.stdin.close()
         if process.wait() != 0:
@@ -389,15 +581,20 @@ def render(args: argparse.Namespace) -> dict[str, object]:
 
         if args.sound_pack == "auto":
             selector = args.seed % 10
-            selected_sound_pack = "funny" if selector < 5 else "arcade" if selector < 8 else "impact"
+            selected_sound_pack = "meme" if selector < 6 else "funny" if selector < 8 else "arcade" if selector < 9 else "impact"
         else:
             selected_sound_pack = args.sound_pack
-        synth_audio(args.duration, game.events, audio, args.seed, selected_sound_pack)
-        if args.music and Path(args.music).is_file():
+        actual_duration = rendered_frames / fps
+        synth_audio(actual_duration, game.events, audio, args.seed, selected_sound_pack, include_bed=music_file is None)
+        if music_file:
+            if args.music_mode == "hit-reveal":
+                audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
+            else:
+                audio_filter = f"[1:a]volume=0.80[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
             mux = [
                 ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(audio),
-                "-stream_loop", "-1", "-i", str(Path(args.music).resolve()),
-                "-filter_complex", f"[1:a]volume=0.95[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]",
+                "-stream_loop", "-1", "-i", str(music_file),
+                "-filter_complex", audio_filter,
                 "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
             ]
         else:
@@ -410,13 +607,15 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     return {
         "ok": True,
         "output": output.name,
-        "duration": args.duration,
+        "duration": round(actual_duration, 3),
         "seed": args.seed,
         "rings": args.rings,
         "theme": args.theme,
         "sound_pack": selected_sound_pack,
         "sound_mode": args.sound_pack,
-        "music": Path(args.music).name if args.music else None,
+        "music": music_file.name if music_file else None,
+        "music_mode": args.music_mode if music_file else "original",
+        "music_hits": len(game.music_hits),
         "events": len(game.events),
         "levels_completed": game.level - 1,
         "rings_cleared_current_level": game.active,
@@ -428,18 +627,19 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration", type=float, default=45.0)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--rings", type=int, default=18)
+    parser.add_argument("--rings", type=int, default=240)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
-    parser.add_argument("--sound-pack", choices=("auto", "funny", "arcade", "impact"), default="auto")
+    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact"), default="auto")
     parser.add_argument("--music")
+    parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
     parser.add_argument("--music-volume", type=float, default=0.24)
-    parser.add_argument("--title", default="LA BALLE VA-T-ELLE S'ÉCHAPPER ?")
+    parser.add_argument("--title", default="WILL THE BALL ESCAPE?")
     parser.add_argument("--width", type=int, default=720)
     parser.add_argument("--height", type=int, default=1280)
     parser.add_argument("--fps", type=int, default=30)
     args = parser.parse_args()
     args.duration = clamp(args.duration, 5.0, 60.0)
-    args.rings = round(clamp(args.rings, 8, 32))
+    args.rings = round(clamp(args.rings, 40, 300))
     args.music_volume = clamp(args.music_volume, 0.0, 1.0)
     print(json.dumps(render(args), ensure_ascii=False), flush=True)
 

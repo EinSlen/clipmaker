@@ -8,7 +8,8 @@ import { YoutubePublisher } from './YoutubePublisher';
 import type { MusicTrack } from '@/lib/types';
 
 type Theme = 'neon' | 'sunset' | 'ice';
-type SoundPack = 'auto' | 'funny' | 'arcade' | 'impact';
+type SoundPack = 'auto' | 'meme' | 'funny' | 'arcade' | 'impact';
+type MusicMode = 'hit-reveal' | 'continuous';
 
 type GameResult = {
   filename: string;
@@ -18,7 +19,13 @@ type GameResult = {
   rings: number;
   theme: Theme;
   soundPack: SoundPack;
+  musicMode: MusicMode | 'original';
+  musicHits: number;
   musicUsed: string | null;
+  musicTitle: string | null;
+  musicSource: 'jamendo' | 'library' | 'original';
+  musicCredit: string | null;
+  musicNote: string | null;
   title: string;
   youtubeTitle: string;
   caption: string;
@@ -26,22 +33,23 @@ type GameResult = {
 };
 
 const themes: { id: Theme; label: string; colors: string }[] = [
-  { id: 'neon', label: 'Arc-en-ciel', colors: 'from-fuchsia-500 via-cyan-400 to-lime-400' },
+  { id: 'neon', label: 'Rainbow', colors: 'from-fuchsia-500 via-cyan-400 to-lime-400' },
   { id: 'sunset', label: 'Sunset', colors: 'from-orange-500 via-pink-500 to-purple-600' },
-  { id: 'ice', label: 'Glace', colors: 'from-cyan-300 via-blue-400 to-indigo-600' },
+  { id: 'ice', label: 'Ice', colors: 'from-cyan-300 via-blue-400 to-indigo-600' },
 ];
 
 export function GameStudio() {
   const [duration, setDuration] = React.useState(45);
-  const [rings, setRings] = React.useState(18);
+  const [rings, setRings] = React.useState(240);
   const [theme, setTheme] = React.useState<Theme>('neon');
   const [soundPack, setSoundPack] = React.useState<SoundPack>('auto');
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
-  const [musicFile, setMusicFile] = React.useState('');
-  const [musicVolume, setMusicVolume] = React.useState(0.24);
+  const [musicFile, setMusicFile] = React.useState('__discover__');
+  const [musicMode, setMusicMode] = React.useState<MusicMode>('hit-reveal');
+  const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [title, setTitle] = React.useState("La balle va-t-elle s'échapper ?");
+  const [title, setTitle] = React.useState('Will the ball escape?');
   const [seed, setSeed] = React.useState('');
   const [rendering, setRendering] = React.useState(false);
   const [elapsed, setElapsed] = React.useState(0);
@@ -86,13 +94,14 @@ export function GameStudio() {
           theme,
           soundPack,
           musicFile: musicFile || undefined,
+          musicMode,
           musicVolume,
           title,
           seed: seed.trim() ? Number(seed) : undefined,
         }),
       });
       const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'Le rendu a échoué.');
+      if (!data.ok) throw new Error(data.error || 'The render failed.');
       setResult(data);
       setCaption(`${data.caption} ${data.tags.join(' ')}`);
       setSeed(String(data.seed));
@@ -112,12 +121,12 @@ export function GameStudio() {
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('vibe', 'jeu');
+      form.append('vibe', 'game');
       const response = await fetch('/api/music/upload', { method: 'POST', body: form });
       const data = await response.json();
-      if (!data.ok) throw new Error(data.error || "L'import audio a échoué.");
+      if (!data.ok) throw new Error(data.error || 'The audio upload failed.');
       setMusicFile(data.file);
-      setMusicTracks((tracks) => [{ id: data.file, title: file.name, file: data.file, vibe: ['jeu'] }, ...tracks.filter((track) => track.file !== data.file)]);
+      setMusicTracks((tracks) => [{ id: data.file, title: file.name, file: data.file, vibe: ['game'] }, ...tracks.filter((track) => track.file !== data.file)]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -141,7 +150,7 @@ export function GameStudio() {
         }),
       });
       const data = await response.json();
-      setUploadMessage(data.ok ? `✅ Vidéo envoyée sur @${account}` : `❌ ${data.error || data.stderr || 'Échec TikTok'}`);
+      setUploadMessage(data.ok ? `✅ Video sent to @${account}` : `❌ ${data.error || data.stderr || 'TikTok upload failed'}`);
     } catch (caught) {
       setUploadMessage(`❌ ${String(caught)}`);
     } finally {
@@ -157,13 +166,13 @@ export function GameStudio() {
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-accent/15 p-2.5"><Gamepad2 className="size-5 text-accent" /></div>
             <div>
-              <h2 className="font-semibold">Ball Escape automatique</h2>
-              <p className="text-xs text-ink-400 mt-1">Chaque graine produit une simulation unique, ses effets sonores et une vidéo 1080×1920 prête à publier.</p>
+              <h2 className="font-semibold">Automatic Ball Escape</h2>
+              <p className="text-xs text-ink-400 mt-1">Every seed creates a unique high-speed simulation, synchronized audio and a publish-ready 1080×1920 video.</p>
             </div>
           </div>
 
           <label className="text-xs text-ink-400 space-y-1 block">
-            <span>Question affichée dès la première seconde</span>
+            <span>Hook shown from the first frame</span>
             <input
               value={title}
               maxLength={52}
@@ -174,22 +183,22 @@ export function GameStudio() {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Durée</span>
+              <span>Duration</span>
               <select value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                <option value={15}>15 secondes</option>
-                <option value={30}>30 secondes</option>
-                <option value={45}>45 secondes</option>
-                <option value={60}>60 secondes</option>
+                <option value={15}>15 seconds</option>
+                <option value={30}>30 seconds</option>
+                <option value={45}>45 seconds</option>
+                <option value={60}>60 seconds</option>
               </select>
             </label>
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Anneaux : {rings}</span>
-              <input type="range" min={8} max={32} value={rings} onChange={(event) => setRings(Number(event.target.value))} className="w-full h-10 accent-fuchsia-500" />
+              <span>Rings: {rings}</span>
+              <input type="range" min={40} max={300} step={10} value={rings} onChange={(event) => setRings(Number(event.target.value))} className="w-full h-10 accent-fuchsia-500" />
             </label>
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-xs text-ink-400">Palette</span>
+            <span className="text-xs text-ink-400">Color theme</span>
             <div className="grid grid-cols-3 gap-2">
               {themes.map((item) => (
                 <button
@@ -209,61 +218,72 @@ export function GameStudio() {
             <div className="flex items-center gap-2">
               <Music2 className="size-4 text-cyan-300" />
               <div>
-                <h3 className="text-sm font-medium">Son de la simulation</h3>
-                <p className="text-[11px] text-ink-400">Boucle originale + impacts synchronisés, avec piste de fond optionnelle.</p>
+                <h3 className="text-sm font-medium">Simulation audio</h3>
+                <p className="text-[11px] text-ink-400">Discover a fresh licensed track, then reveal its melody one collision at a time.</p>
               </div>
             </div>
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Effets à chaque rebond</span>
+              <span>Collision sound pack</span>
               <select value={soundPack} onChange={(event) => setSoundPack(event.target.value as SoundPack)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                <option value="auto">Auto Buzz — varie selon la vidéo</option>
-                <option value="funny">Drôle — boing et pop</option>
-                <option value="arcade">Arcade — notes musicales</option>
-                <option value="impact">Impact — rebonds graves</option>
+                <option value="auto">Auto Viral Mix — meme-heavy rotation</option>
+                <option value="meme">Meme Mix — meows, boings and pops</option>
+                <option value="funny">Funny — boings and pops</option>
+                <option value="arcade">Arcade — musical hits</option>
+                <option value="impact">Impact — heavy bounces</option>
               </select>
             </label>
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Vraie piste de fond — optionnelle</span>
+              <span>Music source</span>
               <div className="flex gap-2">
                 <select value={musicFile} onChange={(event) => setMusicFile(event.target.value)} className="min-w-0 flex-1 bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                  <option value="">Boucle originale uniquement</option>
-                  {musicTracks.length > 0 && <option value="__auto__">Auto — rotation de ma bibliothèque</option>}
+                  <option value="__discover__">Auto Discovery — fresh licensed track</option>
+                  <option value="">Original loop only</option>
+                  {musicTracks.length > 0 && <option value="__auto__">Auto — rotate my audio library</option>}
                   {musicTracks.map((track) => <option key={track.id} value={track.file}>{track.title}</option>)}
                 </select>
                 <Button type="button" variant="outline" size="sm" onClick={() => musicInputRef.current?.click()} disabled={uploadingMusic}>
-                  {uploadingMusic ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />} Importer
+                  {uploadingMusic ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />} Upload
                 </Button>
                 <input ref={musicInputRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg" className="hidden" onChange={uploadMusic} />
               </div>
             </label>
             {musicFile && (
-              <label className="text-xs text-ink-400 space-y-1 block">
-                <span>Volume de la piste : {Math.round(musicVolume * 100)}%</span>
-                <input type="range" min={0} max={70} value={Math.round(musicVolume * 100)} onChange={(event) => setMusicVolume(Number(event.target.value) / 100)} className="w-full accent-cyan-400" />
-              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-ink-400 space-y-1 block">
+                  <span>Music behavior</span>
+                  <select value={musicMode} onChange={(event) => setMusicMode(event.target.value as MusicMode)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
+                    <option value="hit-reveal">Hit Reveal — unlock each beat</option>
+                    <option value="continuous">Continuous soundtrack</option>
+                  </select>
+                </label>
+                <label className="text-xs text-ink-400 space-y-1 block">
+                  <span>Track volume: {Math.round(musicVolume * 100)}%</span>
+                  <input type="range" min={10} max={85} value={Math.round(musicVolume * 100)} onChange={(event) => setMusicVolume(Number(event.target.value) / 100)} className="w-full h-10 accent-cyan-400" />
+                </label>
+              </div>
             )}
-            <p className="text-[10px] text-amber-200/80">Pour YouTube, utilise une piste originale ou licenciée. Les sons TikTok officiels s’ajoutent plus bas par URL/ID.</p>
+            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Add a Jamendo client ID on the server, or it safely falls back to your licensed library/original soundtrack.</p>
           </div>
 
           <label className="text-xs text-ink-400 space-y-1 block">
-            <span>Graine — vide = nouvelle variante aléatoire</span>
+            <span>Seed — leave empty for a new random run</span>
             <div className="flex gap-2">
               <input
                 inputMode="numeric"
                 value={seed}
                 onChange={(event) => setSeed(event.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="Aléatoire"
+                placeholder="Random"
                 className="min-w-0 flex-1 bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white"
               />
-              <Button type="button" variant="outline" size="sm" onClick={randomizeSeed} aria-label="Nouvelle graine"><RefreshCw className="size-4" /></Button>
+              <Button type="button" variant="outline" size="sm" onClick={randomizeSeed} aria-label="New seed"><RefreshCw className="size-4" /></Button>
             </div>
           </label>
 
           <Button onClick={generate} disabled={rendering || !title.trim()} className="w-full" size="lg">
             {rendering ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
-            {rendering ? `Simulation et encodage… ${elapsed}s` : 'Générer la vidéo'}
+            {rendering ? `Simulating and encoding… ${elapsed}s` : 'Generate video'}
           </Button>
-          <p className="text-[11px] text-ink-500 text-center">Le rendu reste local sur ton serveur. Aucun contenu tiers n’est utilisé.</p>
+          <p className="text-[11px] text-ink-500 text-center">Rendering stays on your server. No third-party video is used.</p>
           {error && <p className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-200">{error}</p>}
         </div>
       </section>
@@ -278,31 +298,34 @@ export function GameStudio() {
           <section className="rounded-xl bg-ink-700/40 border border-white/10 p-3 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-medium">Variante #{result.seed}</h3>
-                <p className="text-[11px] text-ink-400">{result.duration}s · {result.rings} anneaux · {(result.size / 1024 / 1024).toFixed(1)} Mo{result.musicUsed ? ` · ${result.musicUsed}` : ''}</p>
+                <h3 className="text-sm font-medium">Run #{result.seed}</h3>
+                <p className="text-[11px] text-ink-400">{result.duration}s · {result.rings} rings · {(result.size / 1024 / 1024).toFixed(1)} MB{result.musicTitle ? ` · ${result.musicTitle}` : ''}</p>
+                <p className="text-[10px] text-cyan-200/80 mt-0.5">{result.musicMode === 'hit-reveal' ? `${result.musicHits} collision-triggered music slices` : result.musicMode === 'continuous' ? 'Continuous soundtrack' : 'Original generated soundtrack'}</p>
               </div>
               <a href={`/api/renders/${encodeURIComponent(result.filename)}`} download className="inline-flex h-9 items-center gap-2 rounded-xl bg-white/5 px-3 text-sm hover:bg-white/10">
-                <Download className="size-4" /> Télécharger
+                <Download className="size-4" /> Download
               </a>
             </div>
+            {result.musicNote && <p className="text-[11px] text-amber-200/80">{result.musicNote}</p>}
+            {result.musicCredit && <p className="text-[10px] text-ink-400 break-words">{result.musicCredit}</p>}
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Légende TikTok/Short</span>
+              <span>TikTok / Shorts caption</span>
               <textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={3} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" />
             </label>
             <AccountPicker value={account} onChange={setAccount} />
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Son officiel TikTok — URL ou ID, optionnel</span>
+              <span>Official TikTok sound — optional URL or ID</span>
               <input
                 value={tiktokSound}
                 onChange={(event) => setTiktokSound(event.target.value)}
                 placeholder="https://www.tiktok.com/music/…"
                 className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
               />
-              <span className="block text-[10px] text-ink-500">Permet de rattacher la publication à un son drôle ou tendance sans l’intégrer au fichier YouTube.</span>
+              <span className="block text-[10px] text-ink-500">Attaches the post to a funny or trending sound without embedding it in the YouTube file.</span>
             </label>
             <Button variant="outline" onClick={uploadTikTok} disabled={uploading || !account}>
               {uploading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-              Publier sur TikTok
+              Publish to TikTok
             </Button>
             {uploadMessage && <p className="text-sm text-ink-200 whitespace-pre-wrap">{uploadMessage}</p>}
           </section>

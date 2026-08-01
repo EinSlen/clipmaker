@@ -47,7 +47,7 @@ export function AccountPicker({
         body: JSON.stringify({ username })
       });
       const j = await r.json();
-      if (!j.ok) alert("Échec de l'ajout : " + (j.error || j.stderr || ''));
+      if (!j.ok) alert('Could not add the account: ' + (j.error || j.stderr || ''));
       else {
         setNewName('');
         onChange(username);
@@ -62,13 +62,13 @@ export function AccountPicker({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium flex items-center gap-2">
-          <User className="size-4" /> Compte TikTok
+          <User className="size-4" /> TikTok account
         </h3>
       </div>
 
       {loading ? (
         <div className="py-2 flex items-center gap-2 text-ink-400 text-sm">
-          <Loader2 className="size-4 animate-spin" /> Chargement…
+          <Loader2 className="size-4 animate-spin" /> Loading...
         </div>
       ) : (
         <>
@@ -84,26 +84,25 @@ export function AccountPicker({
                 @{a.username}
               </button>
             ))}
-            {accounts.length === 0 && <p className="text-ink-400 text-xs">Aucun compte connecté.</p>}
+            {accounts.length === 0 && <p className="text-ink-400 text-xs">No connected account.</p>}
           </div>
 
           <details className="rounded-lg border border-white/10 bg-ink-700/40 p-2 open:bg-ink-700/60">
-            <summary className="text-sm cursor-pointer text-ink-200">Ajouter un compte</summary>
+            <summary className="text-sm cursor-pointer text-ink-200">Add an account</summary>
             <div className="pt-2 flex gap-2">
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="username TikTok"
+                placeholder="TikTok username"
                 className="flex-1 h-9 bg-ink-800 border border-white/10 rounded-lg px-3 text-sm"
               />
               <Button size="sm" onClick={add} disabled={adding || !newName.trim()}>
                 {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                connecter
+                Connect
               </Button>
             </div>
             <p className="text-[11px] text-ink-400 mt-2">
-              Lance la commande côté serveur : une fenêtre Chrome s’ouvre, tu te connectes à TikTok manuellement, le cookie est sauvegardé.
-              Sur téléphone, fais-le une fois depuis l’ordi puis utilise l’app librement.
+              Start the server-side login once. Chrome opens so you can sign in manually, then the session is saved for future uploads.
             </p>
             {note && <p className="text-[11px] text-amber-300 mt-1">{note}</p>}
           </details>

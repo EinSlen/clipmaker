@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import { discoverLicensedMusic } from '@/lib/licensed-music';
 import { PUBLIC_MUSIC_DIR, RENDERS_DIR } from '@/lib/server-paths';
 import { randomId } from '@/lib/utils';
 
@@ -15,8 +16,9 @@ type RenderRequest = {
   rings?: number;
   seed?: number;
   theme?: 'neon' | 'sunset' | 'ice';
-  soundPack?: 'auto' | 'funny' | 'arcade' | 'impact';
+  soundPack?: 'auto' | 'meme' | 'funny' | 'arcade' | 'impact';
   musicFile?: string;
+  musicMode?: 'hit-reveal' | 'continuous';
   musicVolume?: number;
   title?: string;
 };
@@ -36,7 +38,7 @@ function runRenderer(args: string[]): Promise<{ stdout: string; stderr: string }
     let stderr = '';
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error('Le rendu a dépassé la limite de 10 minutes.'));
+      reject(new Error('The render exceeded the 10-minute limit.'));
     }, 10 * 60 * 1000);
     child.stdout.on('data', (chunk) => (stdout += chunk.toString()));
     child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
@@ -47,7 +49,7 @@ function runRenderer(args: string[]): Promise<{ stdout: string; stderr: string }
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(stderr.trim() || `Le moteur de jeu s'est arrêté avec le code ${code}.`));
+      else reject(new Error(stderr.trim() || `The game engine stopped with exit code ${code}.`));
     });
   });
 }
@@ -63,41 +65,86 @@ async function listMusicFiles(directory = PUBLIC_MUSIC_DIR): Promise<string[]> {
   return files.sort();
 }
 
+async function listSafeFallbackMusic(): Promise<string[]> {
+  const groups = await Promise.all([
+    listMusicFiles(path.join(PUBLIC_MUSIC_DIR, 'game')),
+    listMusicFiles(path.join(PUBLIC_MUSIC_DIR, 'licensed')),
+  ]);
+  return groups.flat().sort();
+}
+
 export async function POST(request: Request) {
   if (rendering) {
-    return NextResponse.json({ ok: false, error: 'Un rendu de jeu est déjà en cours.' }, { status: 409 });
+    return NextResponse.json({ ok: false, error: 'A game render is already running.' }, { status: 409 });
   }
   rendering = true;
   try {
     const body = (await request.json()) as RenderRequest;
     const duration = numberInRange(body.duration, 45, 15, 60);
-    const rings = numberInRange(body.rings, 18, 8, 32);
+    const rings = numberInRange(body.rings, 240, 40, 300);
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
-    const soundPack = body.soundPack && ['auto', 'funny', 'arcade', 'impact'].includes(body.soundPack) ? body.soundPack : 'auto';
-    const musicVolume = numberInRange(Number(body.musicVolume) * 100, 24, 0, 100) / 100;
-    const title = String(body.title || "La balle va-t-elle s'échapper ?").trim().slice(0, 52);
+    const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact'].includes(body.soundPack) ? body.soundPack : 'auto';
+    const musicMode = body.musicMode === 'continuous' ? 'continuous' : 'hit-reveal';
+    const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
+    const title = String(body.title || 'Will the ball escape?').trim().slice(0, 52);
     const filename = `ball-escape-${seed}-${randomId()}.mp4`;
     const output = path.join(RENDERS_DIR, filename);
     const script = path.join(process.cwd(), 'scripts', 'render-ball-escape.py');
 
     await fs.mkdir(RENDERS_DIR, { recursive: true });
     let musicPath: string | undefined;
-    if (body.musicFile === '__auto__') {
+    let musicTitle: string | null = null;
+    let musicCredit: string | null = null;
+    let musicSource: 'jamendo' | 'library' | 'original' = 'original';
+    let musicNote: string | null = null;
+    const requestedMusic = body.musicFile ?? '__discover__';
+    if (requestedMusic === '__discover__') {
+      try {
+        const discovered = await discoverLicensedMusic(seed);
+        if (discovered) {
+          musicPath = discovered.path;
+          musicTitle = `${discovered.title} — ${discovered.artist}`;
+          musicCredit = discovered.credit;
+          musicSource = discovered.provider;
+        }
+      } catch (error) {
+        musicNote = error instanceof Error ? error.message : String(error);
+      }
+      if (!musicPath) {
+        const candidates = await listSafeFallbackMusic();
+        if (candidates.length) {
+          musicPath = candidates[seed % candidates.length];
+          musicTitle = path.basename(musicPath);
+          musicSource = 'library';
+          musicNote ||= 'Licensed discovery was unavailable, so ClipMaker used the safe local library.';
+        } else {
+          musicNote ||= process.env.JAMENDO_CLIENT_ID
+            ? 'No eligible CC BY track was found; the original generated soundtrack was used.'
+            : 'Add JAMENDO_CLIENT_ID or upload licensed tracks to enable automatic music discovery.';
+        }
+      }
+    } else if (requestedMusic === '__auto__') {
       const candidates = await listMusicFiles();
-      if (candidates.length) musicPath = candidates[seed % candidates.length];
-    } else if (body.musicFile) {
-      const relativeMusic = String(body.musicFile).replace(/^\/?music\//, '');
+      if (candidates.length) {
+        musicPath = candidates[seed % candidates.length];
+        musicTitle = path.basename(musicPath);
+        musicSource = 'library';
+      }
+    } else if (requestedMusic) {
+      const relativeMusic = String(requestedMusic).replace(/^\/?music\//, '');
       const candidate = path.resolve(PUBLIC_MUSIC_DIR, relativeMusic);
       const relativeCheck = path.relative(PUBLIC_MUSIC_DIR, candidate);
       if (relativeCheck.startsWith('..') || path.isAbsolute(relativeCheck)) {
-        return NextResponse.json({ ok: false, error: 'Chemin de piste audio invalide.' }, { status: 400 });
+        return NextResponse.json({ ok: false, error: 'Invalid audio track path.' }, { status: 400 });
       }
       try {
         await fs.access(candidate);
         musicPath = candidate;
+        musicTitle = path.basename(candidate);
+        musicSource = 'library';
       } catch {
-        return NextResponse.json({ ok: false, error: 'La piste audio sélectionnée est introuvable.' }, { status: 400 });
+        return NextResponse.json({ ok: false, error: 'The selected audio track could not be found.' }, { status: 400 });
       }
     }
 
@@ -111,27 +158,34 @@ export async function POST(request: Request) {
       '--sound-pack', soundPack,
       '--title', title,
     ];
-    if (musicPath) rendererArgs.push('--music', musicPath, '--music-volume', String(musicVolume));
+    if (musicPath) rendererArgs.push('--music', musicPath, '--music-volume', String(musicVolume), '--music-mode', musicMode);
     const renderer = await runRenderer(rendererArgs);
-    let rendererMetadata: { sound_pack?: string } = {};
+    let rendererMetadata: { sound_pack?: string; duration?: number; music_mode?: string; music_hits?: number } = {};
     try {
       const lastLine = renderer.stdout.trim().split(/\r?\n/).at(-1);
       if (lastLine) rendererMetadata = JSON.parse(lastLine);
     } catch {}
     const stat = await fs.stat(output);
+    const captionBase = `${title} Run #${seed}. Did you think it would make it out?`;
     return NextResponse.json({
       ok: true,
       filename,
       size: stat.size,
-      duration,
+      duration: rendererMetadata.duration || duration,
       seed,
       rings,
       theme,
       soundPack: rendererMetadata.sound_pack || soundPack,
+      musicMode: rendererMetadata.music_mode || (musicPath ? musicMode : 'original'),
+      musicHits: rendererMetadata.music_hits || 0,
       musicUsed: musicPath ? path.basename(musicPath) : null,
+      musicTitle,
+      musicSource,
+      musicCredit,
+      musicNote,
       title,
       youtubeTitle: `${title} #shorts`,
-      caption: `${title} Niveau généré : ${seed}. Tu pensais qu'elle allait sortir ?`,
+      caption: musicCredit ? `${captionBase}\n${musicCredit}` : captionBase,
       tags: ['#satisfying', '#ballescape', '#simulation', '#hypnotic', '#shorts'],
     });
   } catch (error) {
