@@ -63,7 +63,7 @@ Redémarrer ClipMaker, générer un rendu et lancer une simulation depuis le pan
 Quand elle passe, définir `YOUTUBE_BROWSER_DRY_RUN=false`, redémarrer, saisir le jeton dans le
 panneau et envoyer la première vidéo en **Privée**. Vérifier le résultat dans YouTube Studio.
 
-## Docker
+## Docker local
 
 L’image contient Chromium et le dépôt est monté dans `/repo`, donc le fichier de cookies de
 `.youtube-browser/` reste persistant. Faire la connexion initiale sur l’hôte, puis lancer :
@@ -72,8 +72,36 @@ L’image contient Chromium et le dépôt est monté dans `/repo`, donc le fichi
 docker compose up --build
 ```
 
-Dans le conteneur, Chromium est détecté à `/usr/bin/chromium`. Le profil Chrome chiffré n’est pas
-réutilisé entre Windows et Linux; c’est le fichier de cookies exporté qui rend le flux portable.
+Dans le conteneur, Chromium est détecté à `/usr/bin/chromium`.
+
+## Connexion initiale sur un VPS Linux
+
+Les profils Chrome sont séparés par système (`auth-profile-win32` et `auth-profile-linux`) car leur
+chiffrement n’est pas portable. Sur le VPS, construire l’image puis lancer le service noVNC :
+
+```bash
+docker compose build clipmaker youtube-auth
+docker compose --profile youtube-auth run --rm --service-ports youtube-auth
+```
+
+Depuis le PC local, créer un tunnel SSH vers le VPS :
+
+```bash
+ssh -L 6080:127.0.0.1:6080 utilisateur@adresse-du-vps
+```
+
+Ouvrir ensuite
+`http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale`, se connecter à YouTube dans la
+fenêtre Chromium, puis attendre la fermeture automatique du service. Le port noVNC est lié à
+`127.0.0.1` sur le VPS et n’est donc pas exposé publiquement.
+
+La session Linux est conservée dans le volume monté `/repo/.youtube-browser`. Démarrer enfin
+l’application :
+
+```bash
+docker compose up -d clipmaker
+docker compose exec clipmaker npm run youtube:doctor
+```
 
 ## Contrôles
 

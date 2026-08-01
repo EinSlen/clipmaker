@@ -10,7 +10,12 @@ const repoRoot = path.resolve(webDir, '..');
 const dataDir = process.env.YOUTUBE_BROWSER_DATA_DIR
   ? path.resolve(process.env.YOUTUBE_BROWSER_DATA_DIR)
   : path.join(repoRoot, '.youtube-browser');
-const authProfileDir = path.join(dataDir, 'auth-profile');
+const legacyAuthProfileDir = path.join(dataDir, 'auth-profile');
+const platformAuthProfileDir = path.join(dataDir, `auth-profile-${process.platform}`);
+const authProfileDir = process.platform === 'win32' && fs.existsSync(legacyAuthProfileDir)
+  ? legacyAuthProfileDir
+  : platformAuthProfileDir;
+const profilePlatformFile = path.join(authProfileDir, '.clipmaker-platform.json');
 const cookieDir = path.join(dataDir, 'yt-auth');
 const cookieFile = path.join(cookieDir, 'cookies-profile-local_invalid.json');
 const uploadUrl = 'https://www.youtube.com/upload?persist_gl=1&gl=US&persist_hl=1&hl=en';
@@ -67,6 +72,17 @@ function hasYouTubeSession() {
 
 function isDryRun() {
   return process.env.YOUTUBE_BROWSER_DRY_RUN !== 'false';
+}
+
+function canReuseAuthProfile() {
+  if (!fs.existsSync(authProfileDir)) return false;
+  try {
+    const marker = JSON.parse(fs.readFileSync(profilePlatformFile, 'utf8'));
+    return marker?.platform === process.platform;
+  } catch {
+    // Profiles created by earlier Windows versions of this integration had no marker.
+    return process.platform === 'win32';
+  }
 }
 
 function doctor() {
@@ -139,11 +155,12 @@ async function authenticate() {
     const page = pages[0] || await browser.newPage();
     console.log('Connecte-toi à YouTube dans la fenêtre ouverte. Aucun mot de passe ne sera lu ni enregistré par ClipMaker.');
     await page.goto(uploadUrl, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await page.waitForSelector('button#avatar-btn, #avatar-button, ytcp-button#avatar-button', { timeout: 10 * 60 * 1000 });
+    await page.waitForFunction(() => window.location.hostname === 'studio.youtube.com', { timeout: 10 * 60 * 1000 });
     await page.goto(uploadUrl, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     const cookies = await page.cookies('https://www.youtube.com', 'https://studio.youtube.com', 'https://accounts.google.com');
     const unique = [...new Map(cookies.map((cookie) => [`${cookie.name}|${cookie.domain}|${cookie.path}`, cookie])).values()];
     fs.writeFileSync(cookieFile, JSON.stringify(unique, null, 2), { mode: 0o600 });
+    fs.writeFileSync(profilePlatformFile, JSON.stringify({ platform: process.platform }), { mode: 0o600 });
     if (!hasYouTubeSession()) throw new Error('La fenêtre est ouverte, mais aucune session YouTube valide n’a été détectée.');
     console.log(`Session enregistrée localement dans ${cookieFile}`);
   } finally {
@@ -204,6 +221,7 @@ async function uploadShort(args) {
       }],
       {
         executablePath,
+        ...(canReuseAuthProfile() ? { userDataDir: authProfileDir } : {}),
         headless: process.env.YOUTUBE_BROWSER_HEADLESS !== 'false',
         args: launchArgs()
       },
