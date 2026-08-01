@@ -41,8 +41,13 @@ saturer un petit VPS.
 ```bash
 curl -X POST http://127.0.0.1:3000/api/game/render \
   -H 'Content-Type: application/json' \
-  -d '{"duration":45,"rings":18,"theme":"neon","soundPack":"auto"}'
+  -d '{"duration":45,"rings":240,"theme":"neon","soundPack":"auto","musicFile":"__discover__","musicMode":"hit-reveal"}'
 ```
+
+Le mode `hit-reveal` découpe le morceau dans l'ordre et débloque le fragment
+suivant à chaque collision. `__discover__` recherche un nouveau morceau CC BY
+instrumental via Jamendo lorsque `JAMENDO_CLIENT_ID` est configuré, puis se
+replie sur les pistes licenciées importées ou sur la bande-son originale.
 
 La viralité ne peut pas être garantie. Tester plusieurs graines, questions et durées permet de
 mesurer la rétention réelle avant d'automatiser une cadence plus importante.
