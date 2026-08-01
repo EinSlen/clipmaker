@@ -6,8 +6,9 @@ import { RENDERS_DIR } from '@/lib/server-paths';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: Request, { params }: { params: { file: string } }) {
-  const safe = path.basename(params.file);
+export async function GET(_req: Request, { params }: { params: Promise<{ file: string }> }) {
+  const { file } = await params;
+  const safe = path.basename(file);
   const full = path.join(RENDERS_DIR, safe);
   if (!fs.existsSync(full)) return NextResponse.json({ ok: false }, { status: 404 });
   const stat = fs.statSync(full);
