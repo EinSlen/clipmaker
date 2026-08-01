@@ -167,7 +167,7 @@ export function GameStudio() {
             <div className="rounded-xl bg-accent/15 p-2.5"><Gamepad2 className="size-5 text-accent" /></div>
             <div>
               <h2 className="font-semibold">Automatic Ball Escape</h2>
-              <p className="text-xs text-ink-400 mt-1">Every seed creates a unique high-speed simulation, synchronized audio and a publish-ready 1080×1920 video.</p>
+              <p className="text-xs text-ink-400 mt-1">Every seed creates a gravity-driven run that accelerates after every bounce, with synchronized audio and a publish-ready 1080×1920 video.</p>
             </div>
           </div>
 
