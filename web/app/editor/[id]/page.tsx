@@ -10,6 +10,7 @@ import { TextProposals } from '@/components/TextProposals';
 import { HashtagPanel } from '@/components/HashtagPanel';
 import { MusicPicker } from '@/components/MusicPicker';
 import { AccountPicker } from '@/components/AccountPicker';
+import { YoutubePublisher } from '@/components/YoutubePublisher';
 import { getVideo } from '@/lib/db';
 import type { OverlayBlock } from '@/lib/types';
 import { randomId } from '@/lib/utils';
@@ -290,6 +291,13 @@ export default function EditorPage() {
               </p>
               {uploadLog && <p className="text-sm text-ink-200 whitespace-pre-wrap">{uploadLog}</p>}
             </section>
+
+            <YoutubePublisher
+              filename={renderResult.filename}
+              defaultTitle={overlays.find((overlay) => overlay.text.trim())?.text || extraCaption || 'Nouveau Short'}
+              description={buildCaption()}
+              tags={hashtags}
+            />
           </div>
         )}
       </main>

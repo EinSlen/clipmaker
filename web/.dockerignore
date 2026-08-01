@@ -1,0 +1,15 @@
+node_modules
+.next
+.env
+.env.local
+tsconfig.tsbuildinfo
+npm-debug.log*
+
+uploads/*
+!uploads/.gitkeep
+renders/*
+!renders/.gitkeep
+
+# Runtime music is mounted by docker-compose and generated tracks must stay local.
+public/music/*
+!public/music/README.txt

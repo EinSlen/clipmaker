@@ -1,7 +1,7 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev=false
+RUN npm ci
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
@@ -9,15 +9,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:20-bookworm-slim AS runtime-base
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# ffmpeg + python + yt-dlp + chromium (for the optional vendor TikTok uploader login)
+# ffmpeg + python + yt-dlp + chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
-      python3 python3-pip python3-venv \
+      python3 python3-pip python3-venv python3-pil \
       chromium chromium-driver \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
@@ -28,9 +28,19 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/data ./data
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 # Expects a bind mount of the parent repo at /repo (so vendor/ + uploads/ + renders/ persist)
 ENV PYTHON_BIN=python3
 EXPOSE 3000
 CMD ["npm", "start"]
+
+# Small default runtime used by the long-running application service.
+FROM runtime-base AS runtime
+
+# One-shot interactive image used only to create a YouTube browser session on Linux.
+FROM runtime-base AS youtube-auth
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb x11vnc novnc websockify openbox \
+    && rm -rf /var/lib/apt/lists/*
