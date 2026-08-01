@@ -234,6 +234,8 @@ class BallEscape:
         self.particles: list[dict[str, float | tuple[int, int, int]]] = []
         self.pulses: list[dict[str, float | tuple[int, int, int]]] = []
         self.flash = 0.0
+        self.impact_squash = 0.0
+        self.max_speed_ratio = 1.0
         self.events: list[tuple[float, float, float, str]] = []
         self.music_hits: list[float] = []
         self.last_collision = -1.0
@@ -314,11 +316,21 @@ class BallEscape:
 
     def update(self, time_sec: float) -> None:
         dt = 1.0 / self.fps
-        self.velocity[1] += self.height * 0.052 * dt
-        speed = math.hypot(*self.velocity)
         progress = self.active / max(1, self.ring_count)
-        min_speed = self.width * (0.46 + progress * 0.72)
-        max_speed = self.width * (0.72 + progress * 1.08)
+        time_progress = clamp(time_sec / max(1.0, self.duration), 0.0, 1.0)
+
+        # Real downward gravity creates visible parabolic falls. A small,
+        # continuous energy gain plus the progress floor makes every run speed
+        # up from roughly 1x to 3x-5x instead of staying mechanically constant.
+        gravity = self.height * (0.30 + progress * 0.22 + time_progress * 0.12)
+        self.velocity[1] += gravity * dt
+        continuous_boost = 1.0 + dt * (0.035 + progress * 0.045 + time_progress * 0.075)
+        self.velocity[0] *= continuous_boost
+        self.velocity[1] *= continuous_boost
+
+        speed = math.hypot(*self.velocity)
+        min_speed = self.width * (0.46 + progress * 0.92 + time_progress * 0.32)
+        max_speed = self.width * (0.78 + progress * 1.35 + time_progress * 0.52)
         if speed < min_speed:
             scale = min_speed / max(speed, 0.001)
             self.velocity[0] *= scale
@@ -327,6 +339,7 @@ class BallEscape:
             scale = max_speed / speed
             self.velocity[0] *= scale
             self.velocity[1] *= scale
+        self.max_speed_ratio = max(self.max_speed_ratio, math.hypot(*self.velocity) / max(1.0, self.width * 0.50))
 
         if self.active < self.ring_count:
             stalled = time_sec - self.last_clear
@@ -361,6 +374,7 @@ class BallEscape:
                         self.add_particles(math.atan2(dy, dx), color)
                         self.pulses.append({"radius": radius, "life": 0.42, "max_life": 0.42, "color": color})
                         self.flash = max(self.flash, 0.18)
+                        self.impact_squash = max(self.impact_squash, 0.45)
                         self.events.append((time_sec, 620 + self.active * 2.2, 0.52, "clear"))
                         self.record_music_hit(time_sec)
                         clear_batch = max(1, math.ceil(self.ring_count / max(12.0, self.duration * 1.30)))
@@ -370,7 +384,7 @@ class BallEscape:
                         else:
                             self.streak = clear_batch
                         self.last_streak_at = time_sec
-                        acceleration = min(1.035, 1.006 + self.active / max(1, self.ring_count) * 0.018)
+                        acceleration = min(1.045, 1.015 + self.active / max(1, self.ring_count) * 0.030)
                         self.velocity[0] *= acceleration
                         self.velocity[1] *= acceleration
                         self.last_clear = time_sec
@@ -388,6 +402,9 @@ class BallEscape:
                     self.position[1] = self.cy + ny * (radius - self.ball_radius - 1)
                     self.velocity[0] -= 2 * outward_speed * nx
                     self.velocity[1] -= 2 * outward_speed * ny
+                    bounce_boost = 1.008 + time_progress * 0.008
+                    self.velocity[0] *= bounce_boost
+                    self.velocity[1] *= bounce_boost
                     tangent_push = self.rng.uniform(-18, 18)
                     self.velocity[0] += -ny * tangent_push
                     self.velocity[1] += nx * tangent_push
@@ -399,10 +416,13 @@ class BallEscape:
                         color = color_for(self.theme, self.active, self.ring_count)
                         self.pulses.append({"radius": radius, "life": 0.18, "max_life": 0.18, "color": color})
                         self.flash = max(self.flash, 0.07)
+                        self.impact_squash = 1.0
                         self.last_collision = time_sec
 
         self.trail.append((self.position[0], self.position[1]))
-        self.trail = self.trail[-24:]
+        speed_ratio = self.max_speed_ratio
+        trail_limit = round(18 + clamp(speed_ratio, 1.0, 5.0) * 9)
+        self.trail = self.trail[-trail_limit:]
         next_particles = []
         for particle in self.particles:
             particle["x"] = float(particle["x"]) + float(particle["vx"]) * dt
@@ -421,6 +441,7 @@ class BallEscape:
                 next_pulses.append(pulse)
         self.pulses = next_pulses
         self.flash = max(0.0, self.flash - dt * 1.8)
+        self.impact_squash = max(0.0, self.impact_squash - dt * 5.5)
 
     def frame(self, time_sec: float) -> Image.Image:
         image = self.background.copy()
@@ -482,12 +503,24 @@ class BallEscape:
                 width=max(2, round(7 * life)),
             )
         bx, by = self.position
+        ball_speed = math.hypot(*self.velocity)
+        speed_ratio = ball_speed / max(1.0, self.width * 0.50)
+        if ball_speed > 0:
+            streak_length = self.ball_radius * clamp(speed_ratio * 1.65, 1.4, 6.0)
+            ux, uy = self.velocity[0] / ball_speed, self.velocity[1] / ball_speed
+            effects_draw.line(
+                (bx - ux * streak_length, by - uy * streak_length, bx, by),
+                fill=(*ball_color, round(80 + 22 * clamp(speed_ratio, 1.0, 5.0))),
+                width=max(3, round(self.ball_radius * 0.95)),
+            )
         effects_draw.ellipse((bx - self.ball_radius * 2.1, by - self.ball_radius * 2.1, bx + self.ball_radius * 2.1, by + self.ball_radius * 2.1), fill=(*ball_color, 100))
         image = Image.alpha_composite(image, effects.filter(ImageFilter.GaussianBlur(radius=5)))
         image = Image.alpha_composite(image, effects)
         draw = ImageDraw.Draw(image)
-        draw.ellipse((bx - self.ball_radius, by - self.ball_radius, bx + self.ball_radius, by + self.ball_radius), fill=(245, 250, 255, 255), outline=(*ball_color, 255), width=3)
-        draw.ellipse((bx - self.ball_radius * 0.45, by - self.ball_radius * 0.55, bx - self.ball_radius * 0.05, by - self.ball_radius * 0.15), fill=(255, 255, 255, 220))
+        ball_rx = self.ball_radius * (1.0 + self.impact_squash * 0.22)
+        ball_ry = self.ball_radius * (1.0 - self.impact_squash * 0.16)
+        draw.ellipse((bx - ball_rx, by - ball_ry, bx + ball_rx, by + ball_ry), fill=(245, 250, 255, 255), outline=(*ball_color, 255), width=3)
+        draw.ellipse((bx - ball_rx * 0.45, by - ball_ry * 0.55, bx - ball_rx * 0.05, by - ball_ry * 0.15), fill=(255, 255, 255, 220))
 
         if self.flash > 0:
             flash_alpha = round(clamp(self.flash, 0.0, 1.0) * 45)
@@ -515,7 +548,7 @@ class BallEscape:
         right_panel = (self.width * 0.54, panel_y1, self.width * 0.92, panel_y2)
         for panel in (left_panel, right_panel):
             draw.rounded_rectangle(panel, radius=max(6, round(self.width * 0.012)), fill=(3, 6, 12, 220), outline=(*ball_color, 120), width=2)
-        speed_ratio = math.hypot(*self.velocity) / max(1.0, self.width * 0.50)
+        speed_ratio = self.max_speed_ratio
         remaining = max(0, self.ring_count - self.active)
         draw.text((left_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "SPEED", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
         draw.text((left_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), f"{speed_ratio:.1f}X", font=value_font, fill=accent, anchor="rm")
@@ -619,6 +652,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "events": len(game.events),
         "levels_completed": game.level - 1,
         "rings_cleared_current_level": game.active,
+        "max_speed_x": round(game.max_speed_ratio, 2),
     }
 
 
