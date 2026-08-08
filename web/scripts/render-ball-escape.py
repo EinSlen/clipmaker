@@ -311,12 +311,12 @@ def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: flo
             selected.append(bounded)
     selected = selected[:96]
     if not selected:
-        return f"[1:a]volume=0.80[fx];[2:a]volume={volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
+        return f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.80[fx];[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
 
     split_outputs = "".join(f"[source{index}]" for index in range(len(selected)))
     filters = [
-        "[1:a]volume=0.72[fx]",
-        f"[2:a]aresample=48000,asplit={len(selected)}{split_outputs}",
+        "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.72[fx]",
+        f"[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={len(selected)}{split_outputs}",
     ]
     labels: list[str] = []
     source_cursor = (seed % 900) / 100.0
@@ -358,16 +358,15 @@ class BallEscape:
         self.rng = random.Random(seed)
         self.cx = width / 2
         self.cy = height * 0.55
-        self.ball_radius = max(9, round(width * 0.017))
-        inner = width * 0.075
+        self.ball_radius = max(7, round(width * 0.015))
+        inner = width * 0.140
         outer = width * 0.455
         self.radii = [inner + (outer - inner) * i / max(1, rings - 1) for i in range(rings)]
         spiral_start = self.rng.uniform(0, 360)
-        spiral_step = self.rng.choice((-1, 1)) * self.rng.uniform(0.8, 1.8)
-        global_rotation = self.rng.choice((-1, 1)) * self.rng.uniform(24, 42)
-        self.base_gaps = [(spiral_start + index * spiral_step + self.rng.uniform(-2.5, 2.5)) % 360 for index in range(rings)]
-        self.rotations = [global_rotation + self.rng.uniform(-4, 4) for _ in range(rings)]
-        self.gap_widths = [self.rng.uniform(25, 34) for _ in range(rings)]
+        spiral_step = self.rng.choice((-1, 1)) * self.rng.uniform(9.0, 19.0)
+        self.base_gaps = [(spiral_start + index * spiral_step + self.rng.uniform(-11.0, 11.0)) % 360 for index in range(rings)]
+        self.rotations = [self.rng.choice((-1, 1)) * self.rng.uniform(18.0, 46.0) for _ in range(rings)]
+        self.gap_widths = [self.rng.uniform(62.0, 74.0) for _ in range(rings)]
         self.active = 0
         self.level = 1
         self.last_clear = 0.0
@@ -391,6 +390,12 @@ class BallEscape:
         self.last_collision = -1.0
         self.streak = 0
         self.last_streak_at = 0.0
+        self.will_escape = seed % 4 != 0
+        self.final_unlock = duration * (0.850 + (seed % 5) * 0.006)
+        self.failed_at: float | None = None
+        self.simulation_time = 0.0
+        self.level_started_at = 0.0
+        self.min_clear_interval = max(0.22, duration * 0.033)
         self.stars = [
             (
                 self.rng.uniform(0, width),
@@ -422,15 +427,31 @@ class BallEscape:
         natural = (self.base_gaps[index] + self.rotations[index] * time_sec) % 360
         if index == self.active and self.completed_at is None:
             stalled = time_sec - self.last_clear
-            if stalled > 0.34:
+            final_ring = index == self.ring_count - 1
+            late_chase = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0)
+            schedule_pressure = 0.0 if final_ring else clamp(
+                (time_sec - self.ring_deadline(index)) / max(0.20, self.duration * 0.035), 0.0, 1.0
+            )
+            help_after = 0.25 if final_ring and time_sec >= self.final_unlock else 0.58 - late_chase * 0.48
+            if stalled > help_after or schedule_pressure > 0.0:
                 dx, dy = self.position[0] - self.cx, self.position[1] - self.cy
                 ball_angle = math.degrees(math.atan2(dy, dx)) % 360
-                follow = clamp((stalled - 0.34) / 0.26, 0.0, 1.0)
+                maximum_follow = 0.98 if final_ring and time_sec >= self.final_unlock and self.will_escape else 0.62 + late_chase * 0.38
+                follow = clamp((stalled - help_after) / 1.25, 0.0, maximum_follow)
+                follow = max(follow, schedule_pressure * 0.985)
                 return (natural + angle_delta(ball_angle, natural) * follow) % 360
         return natural
 
+    def ring_deadline(self, index: int) -> float:
+        if index >= self.ring_count - 1:
+            return self.final_unlock
+        pre_final_rings = max(1, self.ring_count - 1)
+        paced_progress = 0.04 + 0.70 * (index + 1) / pre_final_rings
+        return self.level_started_at + self.duration * paced_progress
+
     def reset_level(self, time_sec: float) -> None:
         self.level += 1
+        self.level_started_at = time_sec
         self.active = 0
         self.last_clear = time_sec
         self.completed_at = None
@@ -441,6 +462,9 @@ class BallEscape:
         self.velocity = [math.cos(angle) * speed, math.sin(angle) * speed]
         self.base_gaps = [(gap + self.rng.uniform(70, 210)) % 360 for gap in self.base_gaps]
         self.streak = 0
+        self.will_escape = (self.seed + self.level * 3) % 4 != 0
+        self.final_unlock = time_sec + self.duration * (0.850 + ((self.seed + self.level) % 5) * 0.006)
+        self.failed_at = None
 
     def add_particles(self, angle: float, color: tuple[int, int, int]) -> None:
         for _ in range(18):
@@ -466,23 +490,28 @@ class BallEscape:
             })
 
     def update(self, time_sec: float) -> None:
-        dt = 1.0 / self.fps
+        fixed_dt = 1.0 / 120.0
+        while self.simulation_time + fixed_dt <= time_sec + 1e-9:
+            self.simulation_time += fixed_dt
+            self._simulate_step(self.simulation_time, fixed_dt)
+
+    def _simulate_step(self, time_sec: float, dt: float) -> None:
         progress = self.active / max(1, self.ring_count)
         time_progress = clamp(time_sec / max(1.0, self.duration), 0.0, 1.0)
 
         # Real downward gravity creates visible parabolic falls. A small,
         # continuous energy gain plus the progress floor makes every run speed
         # up from roughly 1x to 3x-5x instead of staying mechanically constant.
-        self.gravity_g = 1.0 + progress * 0.75 + time_progress * 0.45
+        self.gravity_g = 1.0 + progress * 0.42 + time_progress * 0.22
         gravity = self.height * self.gravity_g
         self.velocity[1] += gravity * dt
-        continuous_boost = 1.0 + dt * (0.035 + progress * 0.045 + time_progress * 0.075)
+        continuous_boost = 1.0 + dt * (0.018 + progress * 0.026 + time_progress * 0.040)
         self.velocity[0] *= continuous_boost
         self.velocity[1] *= continuous_boost
 
         speed = math.hypot(*self.velocity)
-        min_speed = self.width * (0.46 + progress * 0.92 + time_progress * 0.32)
-        max_speed = self.width * (0.78 + progress * 1.35 + time_progress * 0.52)
+        min_speed = self.width * (0.43 + progress * 0.36 + time_progress * 0.14)
+        max_speed = self.width * (0.64 + progress * 0.56 + time_progress * 0.18)
         if speed < min_speed:
             scale = min_speed / max(speed, 0.001)
             self.velocity[0] *= scale
@@ -495,13 +524,25 @@ class BallEscape:
 
         if self.active < self.ring_count:
             stalled = time_sec - self.last_clear
-            if stalled > 0.42:
+            final_ring = self.active == self.ring_count - 1
+            late_chase = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0)
+            schedule_pressure = 0.0 if final_ring else clamp(
+                (time_sec - self.ring_deadline(self.active)) / max(0.20, self.duration * 0.035), 0.0, 1.0
+            )
+            help_after = 0.25 if final_ring and time_sec >= self.final_unlock else 0.54 - late_chase * 0.44
+            if stalled > help_after or schedule_pressure > 0.0:
                 gap_angle = math.radians(self.ring_gap(self.active, time_sec))
-                target_x = self.cx + math.cos(gap_angle) * self.radii[self.active]
-                target_y = self.cy + math.sin(gap_angle) * self.radii[self.active]
+                # Aim beyond the line. Targeting the ring itself pulls the ball
+                # back inward just before its full diameter has cleared it.
+                target_radius = self.radii[self.active] + self.ball_radius * 2.35
+                target_x = self.cx + math.cos(gap_angle) * target_radius
+                target_y = self.cy + math.sin(gap_angle) * target_radius
                 target_angle = math.atan2(target_y - self.position[1], target_x - self.position[0])
                 current_speed = math.hypot(*self.velocity)
-                blend = clamp((stalled - 0.42) * 0.085, 0.0, 0.11)
+                max_blend = 0.18 if final_ring and time_sec >= self.final_unlock and self.will_escape else 0.075 + late_chase * 0.145
+                blend = clamp((stalled - help_after) * 0.055, 0.0, max_blend)
+                if schedule_pressure > 0.0:
+                    blend = max(blend, 0.035 + schedule_pressure * 0.115)
                 self.velocity[0] = self.velocity[0] * (1 - blend) + math.cos(target_angle) * current_speed * blend
                 self.velocity[1] = self.velocity[1] * (1 - blend) + math.sin(target_angle) * current_speed * blend
 
@@ -516,11 +557,28 @@ class BallEscape:
             outward_speed = self.velocity[0] * nx + self.velocity[1] * ny
             ball_angle = math.degrees(math.atan2(dy, dx)) % 360
             stalled = time_sec - self.last_clear
-            widened_gap = min(150.0, self.gap_widths[self.active] + max(0.0, stalled - 0.42) * 95.0)
-            in_gap = abs(angle_delta(ball_angle, self.ring_gap(self.active, time_sec))) <= widened_gap / 2
+            final_ring = self.active == self.ring_count - 1
+            gate_closed = final_ring and (time_sec < self.final_unlock or not self.will_escape)
+            if gate_closed:
+                widened_gap = 0.0
+            elif final_ring:
+                unlock_progress = clamp((time_sec - self.final_unlock) / max(0.25, self.duration * 0.08), 0.0, 1.0)
+                widened_gap = self.gap_widths[self.active] + unlock_progress * 70.0
+            else:
+                late_bonus = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0) * 70.0
+                widened_gap = min(self.gap_widths[self.active] + 36.0 + late_bonus, self.gap_widths[self.active] + max(0.0, stalled - 0.58) * 22.0 + late_bonus)
+                schedule_pressure = clamp(
+                    (time_sec - self.ring_deadline(self.active)) / max(0.20, self.duration * 0.035), 0.0, 1.0
+                )
+                widened_gap = max(widened_gap, self.gap_widths[self.active] + schedule_pressure * 105.0)
+            ball_clearance = self.ball_radius + max(2.0, self.width * 0.006)
+            occupied_half_angle = math.degrees(math.asin(min(0.92, ball_clearance / max(radius, ball_clearance + 0.01))))
+            center_tolerance = max(0.0, widened_gap / 2 - occupied_half_angle)
+            in_gap = not gate_closed and abs(angle_delta(ball_angle, self.ring_gap(self.active, time_sec))) <= center_tolerance
 
             if distance + self.ball_radius >= radius and outward_speed > 0:
-                if in_gap:
+                can_clear = stalled >= self.min_clear_interval
+                if in_gap and can_clear:
                     if distance >= radius + self.ball_radius * 0.75:
                         color = color_for(self.theme, self.active, self.ring_count)
                         self.add_particles(math.atan2(dy, dx), color)
@@ -529,8 +587,11 @@ class BallEscape:
                         self.impact_squash = max(self.impact_squash, 0.45)
                         self.events.append((time_sec, 620 + self.active * 2.2, 0.52, "clear"))
                         self.record_music_hit(time_sec)
-                        clear_batch = max(1, math.ceil(self.ring_count / max(12.0, self.duration * 1.30)))
-                        self.active = min(self.ring_count, self.active + clear_batch)
+                        clear_batch = 1
+                        next_active = min(self.ring_count, self.active + 1)
+                        if next_active >= self.ring_count and (time_sec < self.final_unlock or not self.will_escape):
+                            next_active = self.ring_count - 1
+                        self.active = next_active
                         if time_sec - self.last_streak_at < 0.34:
                             self.streak += clear_batch
                         else:
@@ -570,6 +631,13 @@ class BallEscape:
                         self.flash = max(self.flash, 0.07)
                         self.impact_squash = 1.0
                         self.last_collision = time_sec
+
+        if self.completed_at is None and not self.will_escape and self.failed_at is None and time_sec >= self.duration - 0.62:
+            self.failed_at = time_sec
+            self.events.extend([
+                (time_sec, 196.0, 0.30, "impact"),
+                (time_sec + 0.16, 164.81, 0.26, "impact"),
+            ])
 
         self.trail.append((self.position[0], self.position[1]))
         speed_ratio = self.max_speed_ratio
@@ -613,6 +681,12 @@ class BallEscape:
             radius = self.radii[index]
             gap = self.ring_gap(index, time_sec)
             gap_width = self.gap_widths[index]
+            if index == self.active == self.ring_count - 1:
+                if time_sec < self.final_unlock or not self.will_escape:
+                    gap_width = 0.25
+                else:
+                    unlock_progress = clamp((time_sec - self.final_unlock) / max(0.25, self.duration * 0.08), 0.0, 1.0)
+                    gap_width += unlock_progress * 70.0
             start = gap + gap_width / 2
             end = gap + 360 - gap_width / 2
             color = color_for(self.theme, index, self.ring_count, self.level * 0.015)
@@ -706,11 +780,18 @@ class BallEscape:
         draw.text((left_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), f"{speed_ratio:.1f}X", font=value_font, fill=accent, anchor="rm")
         draw.text((right_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "RINGS", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
         draw.text((right_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), str(remaining), font=value_font, fill=(255, 255, 255, 255), anchor="rm")
-        draw_centered(draw, (self.cx, self.height * 0.205), f"GRAVITY {self.gravity_g:.1f}G  •  ACCELERATING", label_font, accent)
+        final_ring = self.active == self.ring_count - 1 and self.completed_at is None
+        if final_ring and (time_sec < self.final_unlock or not self.will_escape):
+            status_text = "FINAL GATE LOCKED"
+        elif final_ring:
+            status_text = "FINAL GATE OPEN — LAST CHANCE"
+        else:
+            status_text = f"GRAVITY {self.gravity_g:.1f}G  •  ACCELERATING"
+        draw_centered(draw, (self.cx, self.height * 0.205), status_text, label_font, accent)
 
         victory_pulse = 1.0 + (0.11 * math.sin(time_sec * 12.0) if self.completed_at is not None else 0.0)
         counter_font = font(max(32, round(self.width * 0.072 * victory_pulse)), bold=True)
-        center_text = "ESCAPED!" if self.completed_at is not None else str(remaining)
+        center_text = "ESCAPED!" if self.completed_at is not None else "SO CLOSE!" if self.failed_at is not None else str(remaining)
         center_color = (255, 255, 255, 255) if remaining else accent
         draw_centered(draw, (self.cx, self.cy), center_text, counter_font, center_color, stroke=2)
         if remaining:
@@ -794,7 +875,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if effective_music_mode == "hit-reveal":
             audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
         else:
-            audio_filter = f"[1:a]volume=0.80[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
+            audio_filter = f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.80[fx];[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
         mux = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(audio),
             "-stream_loop", "-1", "-i", str(music_source),
@@ -837,7 +918,7 @@ def main() -> None:
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--music")
-    parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
+    parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="continuous")
     parser.add_argument("--music-volume", type=float, default=0.62)
     parser.add_argument("--title", default="WILL THE BALL ESCAPE?")
     parser.add_argument("--width", type=int, default=720)
