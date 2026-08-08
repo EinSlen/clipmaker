@@ -7,12 +7,6 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 
 - **Ball Escape** — balle soumise à la gravité, anneaux rotatifs et accélération progressive.
 - **Organic Escape** — balle à traînée qui brise des contours organiques avec impacts ASMR accordés.
-- **Boss Battle** — duel procédural avec barres de vie, impacts critiques et vainqueur variable.
-- **Melody Drop** — balle gravitationnelle dont chaque rebond débloque une note.
-- **Color Switch** — balle changeante qui doit traverser la bonne tranche de chaque anneau.
-- **Orbit Merge** — particules orbitales qui fusionnent dans une planète de plus en plus massive.
-- **Laser Dodge** — coureur accéléré au milieu d'un champ de lasers rotatifs.
-- **Brick Cascade** — réaction en chaîne de briques colorées avec front de progression visible.
 - **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
 
 Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
@@ -69,14 +63,13 @@ Puis ouvrir noVNC, terminer la connexion et sélectionner `Gaming` dans le panne
 ```bash
 curl -X POST http://127.0.0.1:3000/api/game/render \
   -H 'Content-Type: application/json' \
-  -d '{"game":"boss-battle","duration":45,"difficulty":300,"theme":"neon","soundPack":"auto","musicFile":"__discover__","musicMode":"hit-reveal"}'
+  -d '{"game":"shape-tunnel","duration":45,"difficulty":200,"theme":"neon","soundPack":"auto","musicFile":"__discover__","musicMode":"continuous"}'
 ```
 
-Valeurs de `game` : `ball-escape`, `shape-tunnel`, `boss-battle`, `melody-drop`, `color-switch`,
-`orbit-merge`, `laser-dodge`, `brick-cascade`, `soft-body-slide`.
+Valeurs de `game` : `ball-escape`, `shape-tunnel`, `soft-body-slide`.
 
 Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il est volontairement plus lent
-que les huit moteurs 2D, mais produit une vraie scène 3D avec matériaux, ombres et déformations. Blender
+que les deux moteurs 2D, mais produit une vraie scène 3D avec matériaux, ombres et déformations. Blender
 est inclus dans l'image Docker officielle du projet.
 
 Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
@@ -87,8 +80,8 @@ Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT
 
 ```bash
 cd web
-npm test                  # types + tests déterministes des 8 moteurs
-npm run test:render-smoke # encode et inspecte les 8 MP4 avec ffprobe
+npm test                  # types + tests déterministes des 2 moteurs rapides
+npm run test:render-smoke # encode et inspecte les 2 MP4 avec ffprobe
 ```
 
 Les tests vérifient aussi que le catalogue TypeScript et les moteurs Python possèdent exactement les
