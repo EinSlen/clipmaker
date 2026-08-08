@@ -13,6 +13,7 @@ services:
     environment:
       REPO_ROOT: /repo
       PYTHON_BIN: python3
+      BLENDER_BIN: blender
       YOUTUBE_BROWSER_PATH: /usr/bin/chromium
       YOUTUBE_BROWSER_DATA_DIR: /repo/.youtube-browser
       YOUTUBE_BROWSER_DRY_RUN: "${YOUTUBE_BROWSER_DRY_RUN:-true}"

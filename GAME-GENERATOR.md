@@ -13,6 +13,7 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 - **Orbit Merge** — particules orbitales qui fusionnent dans une planète de plus en plus massive.
 - **Laser Dodge** — coureur accéléré au milieu d'un champ de lasers rotatifs.
 - **Brick Cascade** — réaction en chaîne de briques colorées avec front de progression visible.
+- **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
 
 Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
 vie ou notes. Les thèmes, graines, sons, musiques et durées restent communs afin de créer beaucoup
@@ -68,7 +69,15 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
 ```
 
 Valeurs de `game` : `ball-escape`, `shape-tunnel`, `boss-battle`, `melody-drop`, `color-switch`,
-`orbit-merge`, `laser-dodge`, `brick-cascade`.
+`orbit-merge`, `laser-dodge`, `brick-cascade`, `soft-body-slide`.
+
+Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il est volontairement plus lent
+que les huit moteurs 2D, mais produit une vraie scène 3D avec matériaux, ombres et déformations. Blender
+est inclus dans l'image Docker officielle du projet.
+
+Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
+`PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES`. Les valeurs par défaut privilégient un rendu final
+1080×1920 fluide tout en calculant les images Blender à une résolution intermédiaire plus économique.
 
 ## Tests
 

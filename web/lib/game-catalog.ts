@@ -7,6 +7,7 @@ export const GAME_IDS = [
   'orbit-merge',
   'laser-dodge',
   'brick-cascade',
+  'soft-body-slide',
 ] as const;
 
 export type GameId = (typeof GAME_IDS)[number];
@@ -138,6 +139,20 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     metricDefault: 200,
     tags: ['#brickcascade', '#chainreaction'],
     accent: 'from-lime-400 via-emerald-400 to-cyan-400',
+  },
+  {
+    id: 'soft-body-slide',
+    name: 'Soft Body Slide 3D',
+    shortName: 'Soft Body',
+    description: 'Premium Blender scene with studio lighting, metallic materials and procedural deformation.',
+    defaultHook: '0% vs 100% softness — what happens?',
+    metricLabel: 'Softness',
+    metricMin: 0,
+    metricMax: 100,
+    metricStep: 10,
+    metricDefault: 100,
+    tags: ['#softbody', '#blender3d', '#3dsimulation'],
+    accent: 'from-amber-300 via-yellow-500 to-orange-600',
   },
 ] as const;
 

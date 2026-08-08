@@ -15,15 +15,20 @@ ENV NODE_ENV=production
 ENV PORT=3000
 COPY tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
 
-# ffmpeg + python + yt-dlp + chromium for the uploaders.
+# ffmpeg + Python + Blender for rendering, Chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 python3-pip python3-venv python3-pil \
+      blender \
       chromium chromium-driver \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --no-cache-dir --break-system-packages yt-dlp -r /tmp/tiktok-upload-requirements.txt \
     && rm -f /tmp/tiktok-upload-requirements.txt
+
+# Blender headless needs EGL even when it falls back to software rendering.
+RUN apt-get update && apt-get install -y --no-install-recommends libegl1 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
@@ -35,6 +40,7 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 # Expects a bind mount of the parent repo at /repo (so vendor/ + uploads/ + renders/ persist)
 ENV PYTHON_BIN=python3
+ENV BLENDER_BIN=blender
 EXPOSE 3000
 CMD ["npm", "start"]
 

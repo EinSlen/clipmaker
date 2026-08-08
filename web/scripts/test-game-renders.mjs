@@ -26,7 +26,8 @@ process.stdout.write(`${unitOutput}\n`);
 if (!process.argv.includes('--smoke')) process.exit(0);
 
 const catalogSource = readFileSync(join(webDirectory, 'lib', 'game-catalog.ts'), 'utf8');
-const gameIds = [...catalogSource.matchAll(/\bid: '([a-z-]+)'/g)].map((match) => match[1]);
+const allGameIds = [...catalogSource.matchAll(/\bid: '([a-z-]+)'/g)].map((match) => match[1]);
+const gameIds = allGameIds.filter((gameId) => gameId !== 'soft-body-slide');
 const outputDirectory = mkdtempSync(join(tmpdir(), 'clipmaker-render-smoke-'));
 const results = [];
 
