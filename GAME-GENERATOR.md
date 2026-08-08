@@ -68,12 +68,17 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
 
 Valeurs de `game` : `ball-escape`, `shape-tunnel`, `soft-body-slide`.
 
-Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais canoniques
+Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais progressifs
 avec une rampe mobile, une capsule à contraintes physiques et un vrai réceptacle ouvert. La graine
 sélectionne une combinaison reproductible parmi plus de 2 000 variantes : forme, parcours, palette,
 réceptacle, progression de souplesse et paramètres physiques. Son mix par défaut privilégie les Foley
 ASMR synchronisés ; une musique choisie ou sous licence reste facultative. Blender est inclus dans
 l'image Docker officielle du projet.
+
+Le profil Soft Body par défaut privilégie désormais le réalisme sans contrainte de temps : 30 secondes,
+source native 1080×1920 à 30 i/s, 128 échantillons Eevee, ombres 4K, géométrie subdivisée et
+encodage H.264 CRF 14. Les
+variables `PREMIUM_RENDER_*` servent uniquement à créer des smokes plus rapides pendant le développement.
 
 Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
 `PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES`. Les valeurs par défaut privilégient un rendu final

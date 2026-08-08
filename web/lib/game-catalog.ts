@@ -85,7 +85,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     tags: ["#softbody", "#blender3d", "#satisfying"],
     accent: "from-amber-300 via-yellow-500 to-orange-600",
     preview: "/game-previews/soft-body-slide.webp",
-    engineLabel: "BLENDER 3D",
+    engineLabel: "BLENDER CINÉMA",
   },
 ] as const;
 
