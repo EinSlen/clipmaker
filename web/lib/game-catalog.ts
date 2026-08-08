@@ -19,6 +19,8 @@ export type GameDefinition = {
   metricDefault: number;
   tags: string[];
   accent: string;
+  preview: string;
+  engineLabel: string;
 };
 
 export const GAME_CATALOG: readonly GameDefinition[] = [
@@ -35,6 +37,8 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     metricDefault: 240,
     tags: ['#ballescape', '#bouncingball'],
     accent: 'from-fuchsia-500 to-cyan-400',
+    preview: '/game-previews/ball-escape.webp',
+    engineLabel: '2D PHYSICS',
   },
   {
     id: 'shape-tunnel',
@@ -49,6 +53,8 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     metricDefault: 200,
     tags: ['#bouncingball', '#asmr', '#satisfyingvideo'],
     accent: 'from-cyan-400 to-lime-400',
+    preview: '/game-previews/organic-escape.webp',
+    engineLabel: '2D ORGANIC',
   },
   {
     id: 'soft-body-slide',
@@ -63,6 +69,8 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     metricDefault: 100,
     tags: ['#softbody', '#blender3d', '#3dsimulation'],
     accent: 'from-amber-300 via-yellow-500 to-orange-600',
+    preview: '/game-previews/soft-body-slide.webp',
+    engineLabel: '3D BLENDER',
   },
 ] as const;
 

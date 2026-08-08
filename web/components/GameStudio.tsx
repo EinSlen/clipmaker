@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { Download, Gamepad2, Loader2, Music2, RefreshCw, Sparkles, UploadCloud } from 'lucide-react';
+import Image from 'next/image';
+import { CheckCircle2, Download, Gamepad2, Loader2, Music2, RefreshCw, Sparkles, UploadCloud } from 'lucide-react';
 import { Button } from './Button';
 import { TikTokTargetPicker } from './TikTokTargetPicker';
 import { YoutubePublisher } from './YoutubePublisher';
@@ -259,18 +260,39 @@ export function GameStudio() {
               <span className="text-xs font-medium text-ink-300">Game format</span>
               <span className="text-[10px] text-emerald-300">{GAME_CATALOG.length} original engines</span>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0">
               {GAME_CATALOG.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => selectGame(item.id)}
-                  className={`overflow-hidden rounded-xl border text-left transition ${game === item.id ? 'border-white/45 bg-white/10 shadow-lg shadow-black/20' : 'border-white/10 bg-ink-900/45 hover:bg-white/5'}`}
+                  aria-pressed={game === item.id}
+                  className={`group min-w-[82%] snap-center overflow-hidden rounded-2xl border text-left transition duration-200 sm:min-w-0 ${game === item.id ? 'border-white/55 bg-white/10 shadow-xl shadow-black/30 ring-1 ring-white/15' : 'border-white/10 bg-ink-900/45 hover:-translate-y-0.5 hover:border-white/25 hover:bg-white/5'}`}
                 >
-                  <span className={`block h-1.5 bg-gradient-to-r ${item.accent}`} />
+                  <span className="relative block aspect-[9/12] overflow-hidden bg-ink-950">
+                    <Image
+                      src={item.preview}
+                      alt={`${item.name} gameplay preview`}
+                      fill
+                      sizes="(max-width: 640px) 100vw, 220px"
+                      className="object-cover object-center transition duration-500 group-hover:scale-[1.035]"
+                    />
+                    <span className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-black/15" />
+                    <span className="absolute left-2.5 top-2.5 rounded-full border border-white/15 bg-black/55 px-2 py-1 text-[9px] font-bold tracking-[0.16em] text-white/90 backdrop-blur-md">
+                      {item.engineLabel}
+                    </span>
+                    {game === item.id && (
+                      <span className="absolute right-2.5 top-2.5 grid size-7 place-items-center rounded-full bg-white text-ink-950 shadow-lg">
+                        <CheckCircle2 className="size-4" />
+                      </span>
+                    )}
+                    <span className="absolute inset-x-0 bottom-0 p-3">
+                      <span className="block text-base font-semibold leading-tight text-white drop-shadow-lg">{item.name}</span>
+                    </span>
+                  </span>
                   <span className="block p-3">
-                    <span className="block text-sm font-semibold text-white">{item.name}</span>
-                    <span className="mt-1 block text-[11px] leading-4 text-ink-400">{item.description}</span>
+                    <span className="block text-[11px] leading-4 text-ink-300">{item.description}</span>
+                    <span className={`mt-3 block h-1 rounded-full bg-gradient-to-r ${item.accent}`} />
                   </span>
                 </button>
               ))}
