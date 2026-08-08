@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { ExternalLink, Loader2, ShieldCheck, Youtube } from 'lucide-react';
-import { Button } from './Button';
+import * as React from "react";
+import { ExternalLink, Loader2, ShieldCheck, Youtube } from "lucide-react";
+import { Button } from "./Button";
 
 type Status = {
   ok: boolean;
   dryRun: boolean;
   readyForLiveUpload: boolean;
   configured: {
-    browser: 'configured' | 'missing';
-    cookies: 'configured' | 'missing';
-    authenticated: 'configured' | 'missing';
-    package: 'configured' | 'missing';
+    browser: "configured" | "missing";
+    cookies: "configured" | "missing";
+    authenticated: "configured" | "missing";
+    package: "configured" | "missing";
   };
   error?: string;
 };
@@ -24,11 +24,11 @@ type YouTubeAccount = {
 };
 
 export function YoutubePublisher({
-  gameId = 'editor',
+  gameId = "editor",
   filename,
   defaultTitle,
   description,
-  tags
+  tags,
 }: {
   gameId?: string;
   filename: string;
@@ -38,31 +38,38 @@ export function YoutubePublisher({
 }) {
   const [status, setStatus] = React.useState<Status | null>(null);
   const [accounts, setAccounts] = React.useState<YouTubeAccount[]>([]);
-  const [account, setAccount] = React.useState('default');
+  const [account, setAccount] = React.useState("default");
   const [title, setTitle] = React.useState(defaultTitle.slice(0, 100));
-  const [privacy, setPrivacy] = React.useState<'private' | 'unlisted'>('private');
-  const [adminToken, setAdminToken] = React.useState('');
+  const [privacy, setPrivacy] = React.useState<"private" | "unlisted">(
+    "private"
+  );
+  const [adminToken, setAdminToken] = React.useState("");
   const [uploading, setUploading] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [releaseUrl, setReleaseUrl] = React.useState<string | null>(null);
   const [routeHydrated, setRouteHydrated] = React.useState(false);
 
   React.useEffect(() => {
-    const saved = window.sessionStorage.getItem('clipmaker-upload-token');
+    const saved = window.sessionStorage.getItem("clipmaker-upload-token");
     if (saved) setAdminToken(saved);
-    fetch('/api/youtube/accounts')
+    fetch("/api/youtube/accounts")
       .then((response) => response.json())
       .then((data) => {
         const next = (data.accounts || []) as YouTubeAccount[];
         setAccounts(next);
         try {
-          const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-youtube-routes') || '{}') as Record<string, string>;
-          if (next.some((item) => item.id === routes[gameId])) setAccount(routes[gameId]);
+          const routes = JSON.parse(
+            window.localStorage.getItem("clipmaker-game-youtube-routes") || "{}"
+          ) as Record<string, string>;
+          if (next.some((item) => item.id === routes[gameId]))
+            setAccount(routes[gameId]);
         } catch {}
         setRouteHydrated(true);
       })
       .catch(() => {
-        setAccounts([{ id: 'default', label: 'Default channel', configured: false }]);
+        setAccounts([
+          { id: "default", label: "Chaîne par défaut", configured: false },
+        ]);
         setRouteHydrated(true);
       });
   }, [gameId]);
@@ -70,9 +77,14 @@ export function YoutubePublisher({
   React.useEffect(() => {
     if (!routeHydrated) return;
     try {
-      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-youtube-routes') || '{}') as Record<string, string>;
+      const routes = JSON.parse(
+        window.localStorage.getItem("clipmaker-game-youtube-routes") || "{}"
+      ) as Record<string, string>;
       routes[gameId] = account;
-      window.localStorage.setItem('clipmaker-game-youtube-routes', JSON.stringify(routes));
+      window.localStorage.setItem(
+        "clipmaker-game-youtube-routes",
+        JSON.stringify(routes)
+      );
     } catch {}
   }, [account, gameId, routeHydrated]);
 
@@ -81,24 +93,26 @@ export function YoutubePublisher({
     fetch(`/api/youtube/status?account=${encodeURIComponent(account)}`)
       .then((response) => response.json())
       .then(setStatus)
-      .catch((error) => setStatus({
-        ok: false,
-        dryRun: true,
-        readyForLiveUpload: false,
-        configured: {
-          browser: 'missing',
-          cookies: 'missing',
-          authenticated: 'missing',
-          package: 'missing'
-        },
-        error: String(error)
-      }));
+      .catch((error) =>
+        setStatus({
+          ok: false,
+          dryRun: true,
+          readyForLiveUpload: false,
+          configured: {
+            browser: "missing",
+            cookies: "missing",
+            authenticated: "missing",
+            package: "missing",
+          },
+          error: String(error),
+        })
+      );
   }, [account]);
 
   function updateAdminToken(value: string) {
     setAdminToken(value);
-    if (value) window.sessionStorage.setItem('clipmaker-upload-token', value);
-    else window.sessionStorage.removeItem('clipmaker-upload-token');
+    if (value) window.sessionStorage.setItem("clipmaker-upload-token", value);
+    else window.sessionStorage.removeItem("clipmaker-upload-token");
   }
 
   async function upload() {
@@ -107,11 +121,11 @@ export function YoutubePublisher({
     setMessage(null);
     setReleaseUrl(null);
     try {
-      const response = await fetch('/api/youtube/upload', {
-        method: 'POST',
+      const response = await fetch("/api/youtube/upload", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          ...(adminToken ? { 'x-clipmaker-upload-token': adminToken } : {})
+          "Content-Type": "application/json",
+          ...(adminToken ? { "x-clipmaker-upload-token": adminToken } : {}),
         },
         body: JSON.stringify({
           filename,
@@ -119,108 +133,201 @@ export function YoutubePublisher({
           description,
           tags,
           privacy,
-          account
-        })
+          account,
+        }),
       });
       const data = await response.json();
       if (!data.ok) {
-        setMessage(`Upload failed: ${data.error || 'YouTube rejected the upload'}`);
+        console.error("Publication YouTube impossible", data.error);
+        setMessage(
+          "Échec de la publication YouTube. Vérifie la session et les journaux du serveur."
+        );
         return;
       }
       if (data.dryRun) {
-        setMessage(`Dry run passed · ${Math.round(data.media.duration)} s · ${data.media.width}×${data.media.height} · nothing was uploaded`);
+        setMessage(
+          `Test validé · ${Math.round(data.media.duration)} s · ${
+            data.media.width
+          }×${data.media.height} · aucune vidéo publiée`
+        );
       } else {
-        setMessage(`Short uploaded to ${account} as ${privacy}`);
+        setMessage(
+          `Short envoyé sur ${account} en mode ${
+            privacy === "private" ? "privé" : "non répertorié"
+          }.`
+        );
         if (data.upload?.releaseUrl) setReleaseUrl(data.upload.releaseUrl);
       }
     } catch (error) {
-      setMessage(`Upload failed: ${String(error)}`);
+      console.error("Publication YouTube impossible", error);
+      setMessage(
+        "Échec de la publication YouTube. Vérifie la connexion au serveur."
+      );
     } finally {
       setUploading(false);
     }
   }
 
   const liveMode = status?.ok && !status.dryRun;
-  const disabled = uploading || !title.trim() || !status?.ok || Boolean(liveMode && !status.readyForLiveUpload);
+  const disabled =
+    uploading ||
+    !title.trim() ||
+    !status?.ok ||
+    Boolean(liveMode && !status.readyForLiveUpload);
 
   return (
-    <section className="rounded-xl bg-ink-700/40 border border-white/10 p-3 space-y-3">
+    <section
+      className="subpanel space-y-4 p-4 sm:p-5"
+      aria-labelledby="youtube-publish-title"
+    >
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium flex items-center gap-2">
-          <Youtube className="size-4 text-red-500" /> YouTube Shorts
+        <h3
+          id="youtube-publish-title"
+          className="flex items-center gap-2 font-semibold"
+        >
+          <Youtube className="size-5 text-red-400" aria-hidden="true" />{" "}
+          Publication YouTube Shorts
         </h3>
-        <span className={`text-[11px] rounded-full px-2 py-1 ${liveMode ? 'bg-red-500/15 text-red-200' : 'bg-emerald-500/15 text-emerald-200'}`}>
-          {status ? (liveMode ? 'live upload' : 'dry run') : 'checking...'}
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+            liveMode
+              ? "bg-red-500/15 text-red-200"
+              : "bg-emerald-500/15 text-emerald-200"
+          }`}
+          role="status"
+        >
+          {status
+            ? liveMode
+              ? "Publication réelle"
+              : "Mode test"
+            : "Vérification…"}
         </span>
       </div>
 
       <label className="text-xs text-ink-400 space-y-1 block">
-        <span>YouTube channel profile</span>
-        <select value={account} onChange={(event) => setAccount(event.target.value)} className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm">
-          {(accounts.length ? accounts : [{ id: 'default', label: 'Default channel', configured: false }]).map((item) => (
-            <option key={item.id} value={item.id}>{item.label}{item.configured ? '' : ' — login required'}</option>
+        <span>Profil de chaîne YouTube</span>
+        <select
+          value={account}
+          onChange={(event) => setAccount(event.target.value)}
+          className="field-control h-11"
+        >
+          {(accounts.length
+            ? accounts
+            : [{ id: "default", label: "Chaîne par défaut", configured: false }]
+          ).map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.id === "default" && item.label === "Default channel"
+                ? "Chaîne par défaut"
+                : item.label}
+              {item.configured ? "" : " — connexion requise"}
+            </option>
           ))}
         </select>
-        <span className="block text-[10px] text-ink-500">This route is remembered for {gameId}. Create another profile with <code>node scripts/youtube-agent.mjs auth --account channel-name</code>.</span>
+        <span className="block text-xs leading-relaxed text-ink-500">
+          Cette destination est mémorisée pour ce format. Pour créer un autre
+          profil :{" "}
+          <code>node scripts/youtube-agent.mjs auth --account nom-chaine</code>.
+        </span>
       </label>
 
       <label className="text-xs text-ink-400 space-y-1 block">
-        <span>Title</span>
+        <span>
+          Titre du Short{" "}
+          <span className="text-ink-500">(contenu vidéo en anglais)</span>
+        </span>
         <input
           value={title}
           onChange={(event) => setTitle(event.target.value.slice(0, 100))}
-          className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
-          placeholder="Short title"
+          className="field-control h-11"
+          placeholder="Titre du Short en anglais"
         />
-        <span className="block text-[10px] text-ink-500">{title.length}/100 characters</span>
+        <span className="block text-xs text-ink-500">
+          {title.length}/100 caractères
+        </span>
       </label>
 
       <label className="text-xs text-ink-400 space-y-1 block">
-        <span>Initial visibility</span>
+        <span>Visibilité initiale</span>
         <select
           value={privacy}
-          onChange={(event) => setPrivacy(event.target.value as 'private' | 'unlisted')}
-          className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
+          onChange={(event) =>
+            setPrivacy(event.target.value as "private" | "unlisted")
+          }
+          className="field-control h-11"
         >
-          <option value="private">Private — recommended for review</option>
-          <option value="unlisted">Unlisted</option>
+          <option value="private">
+            Privée — recommandée pour vérification
+          </option>
+          <option value="unlisted">Non répertoriée</option>
         </select>
       </label>
 
       {liveMode && (
         <label className="text-xs text-ink-400 space-y-1 block">
-          <span>ClipMaker admin token</span>
+          <span>Jeton d’administration ClipMaker</span>
           <input
             type="password"
             value={adminToken}
             onChange={(event) => updateAdminToken(event.target.value)}
-            className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm"
+            className="field-control h-11"
             autoComplete="off"
           />
         </label>
       )}
 
-      {status && !status.ok && <p className="text-xs text-red-300">{status.error || 'YouTube uploader unavailable'}</p>}
+      {status && !status.ok && (
+        <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+          Service de publication YouTube indisponible. Vérifie la configuration
+          du serveur.
+        </p>
+      )}
       {liveMode && !status.readyForLiveUpload && (
-        <p className="text-xs text-amber-300">The YouTube session is missing or expired. Run <code>npm run youtube:auth</code> in <code>web/</code>, then sign in through the Chrome window.</p>
+        <p className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-200">
+          La session YouTube est absente ou expirée. Lance{" "}
+          <code>npm run youtube:auth</code> dans <code>web/</code>, puis
+          connecte-toi dans la fenêtre Chrome.
+        </p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={upload} disabled={disabled}>
-          {uploading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-          {liveMode ? 'Upload to YouTube' : 'Test YouTube upload'}
+        <Button
+          type="button"
+          onClick={upload}
+          disabled={disabled}
+          className="max-sm:w-full"
+        >
+          {uploading ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <ShieldCheck className="size-4" aria-hidden="true" />
+          )}
+          {liveMode ? "Publier sur YouTube" : "Tester la publication YouTube"}
         </Button>
         {releaseUrl && (
-          <a href={releaseUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-ink-200 hover:text-white">
-            View video <ExternalLink className="size-3" />
+          <a
+            href={releaseUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-ink-200 hover:text-white"
+          >
+            Voir la vidéo <ExternalLink className="size-3" aria-hidden="true" />
           </a>
         )}
       </div>
 
-      <p className="text-[11px] text-ink-400">
-        A dry run validates the file without publishing it. In live mode, ClipMaker only reuses the local Chrome session; it never stores a Google password. Public uploads remain disabled.
+      <p className="text-xs leading-relaxed text-ink-400">
+        Le mode test valide le fichier sans le publier. En mode réel, ClipMaker
+        réutilise uniquement la session Chrome locale et ne conserve jamais le
+        mot de passe Google. La publication publique reste désactivée.
       </p>
-      {message && <p className="text-sm text-ink-200 whitespace-pre-wrap">{message}</p>}
+      {message && (
+        <p
+          className="whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-ink-200"
+          role="status"
+        >
+          {message}
+        </p>
+      )}
     </section>
   );
 }
