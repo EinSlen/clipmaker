@@ -9,7 +9,7 @@ import { GAME_CATALOG, getGameDefinition, type GameId } from '@/lib/game-catalog
 import type { MusicTrack } from '@/lib/types';
 
 type Theme = 'neon' | 'sunset' | 'ice';
-type SoundPack = 'auto' | 'meme' | 'funny' | 'arcade' | 'impact';
+type SoundPack = 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
 type MusicMode = 'hit-reveal' | 'continuous';
 
 type GameResult = {
@@ -325,17 +325,18 @@ export function GameStudio() {
               <Music2 className="size-4 text-cyan-300" />
               <div>
                 <h3 className="text-sm font-medium">Simulation audio</h3>
-                <p className="text-[11px] text-ink-400">Discover a fresh licensed track, then reveal its melody one collision at a time.</p>
+                <p className="text-[11px] text-ink-400">Match fresh licensed music and collision effects to each simulation.</p>
               </div>
             </div>
             <label className="text-xs text-ink-400 space-y-1 block">
               <span>Collision sound pack</span>
               <select value={soundPack} onChange={(event) => setSoundPack(event.target.value as SoundPack)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                <option value="auto">Auto Viral Mix — meme-heavy rotation</option>
+                <option value="auto">Auto — matched to each game</option>
                 <option value="meme">Meme Mix — meows, boings and pops</option>
                 <option value="funny">Funny — boings and pops</option>
                 <option value="arcade">Arcade — musical hits</option>
                 <option value="impact">Impact — heavy bounces</option>
+                <option value="asmr">Peaceful ASMR — soft tuned taps</option>
               </select>
             </label>
             <label className="text-xs text-ink-400 space-y-1 block">
