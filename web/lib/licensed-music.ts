@@ -74,7 +74,9 @@ async function downloadTrack(url: string, destination: string): Promise<void> {
   await fs.writeFile(destination, buffer);
 }
 
-export async function discoverLicensedMusic(seed: number): Promise<LicensedMusic | null> {
+export type MusicMood = 'energetic' | 'peaceful';
+
+export async function discoverLicensedMusic(seed: number, mood: MusicMood = 'energetic'): Promise<LicensedMusic | null> {
   const clientId = process.env.JAMENDO_CLIENT_ID?.trim();
   if (!clientId) return null;
 
@@ -84,8 +86,8 @@ export async function discoverLicensedMusic(seed: number): Promise<LicensedMusic
     limit: '40',
     offset: String(seed % 240),
     order: 'popularity_week',
-    fuzzytags: 'upbeat electronic arcade energetic',
-    speed: 'high veryhigh',
+    fuzzytags: mood === 'peaceful' ? 'peaceful ambient chill relaxing dreamy' : 'upbeat electronic arcade energetic',
+    speed: mood === 'peaceful' ? 'low medium' : 'high veryhigh',
     vocalinstrumental: 'instrumental',
     include: 'licenses musicinfo',
     audioformat: 'mp32',

@@ -92,7 +92,7 @@ def main() -> None:
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--theme", choices=("neon", "sunset", "ice"), default="sunset")
-    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact"), default="auto")
+    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--music")
     parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
     parser.add_argument("--music-volume", type=float, default=0.58)

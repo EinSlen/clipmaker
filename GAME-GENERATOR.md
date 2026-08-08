@@ -6,7 +6,7 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 ## Jeux disponibles
 
 - **Ball Escape** — balle soumise à la gravité, anneaux rotatifs et accélération progressive.
-- **Shape Tunnel** — comète qui traverse des couches géométriques ondulantes et musicales.
+- **Organic Escape** — balle à traînée qui brise des contours organiques avec impacts ASMR accordés.
 - **Boss Battle** — duel procédural avec barres de vie, impacts critiques et vainqueur variable.
 - **Melody Drop** — balle gravitationnelle dont chaque rebond débloque une note.
 - **Color Switch** — balle changeante qui doit traverser la bonne tranche de chaque anneau.
@@ -51,6 +51,10 @@ docker compose exec clipmaker npm run youtube:doctor
 
 Les rendus persistent dans `web/renders/`. Un seul rendu est encodé à la fois pour ne pas saturer un
 petit VPS.
+
+Les moteurs 2D calculent par défaut en 360×640 à 15 FPS puis encodent en 1080×1920. Les variables
+`GAME_RENDER_WIDTH`, `GAME_RENDER_HEIGHT` et `GAME_RENDER_FPS` permettent d'augmenter la qualité ou
+de réduire la charge d'un VPS.
 
 Pour connecter plusieurs chaînes YouTube :
 

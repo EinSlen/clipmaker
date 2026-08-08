@@ -19,7 +19,7 @@ type RenderRequest = {
   rings?: number;
   seed?: number;
   theme?: 'neon' | 'sunset' | 'ice';
-  soundPack?: 'auto' | 'meme' | 'funny' | 'arcade' | 'impact';
+  soundPack?: 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
   musicFile?: string;
   musicMode?: 'hit-reveal' | 'continuous';
   musicVolume?: number;
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     const difficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
-    const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact'].includes(body.soundPack) ? body.soundPack : 'auto';
+    const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr'].includes(body.soundPack) ? body.soundPack : 'auto';
     const musicMode = body.musicMode === 'continuous' ? 'continuous' : 'hit-reveal';
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     const requestedMusic = body.musicFile ?? '__discover__';
     if (requestedMusic === '__discover__') {
       try {
-        const discovered = await discoverLicensedMusic(seed);
+        const discovered = await discoverLicensedMusic(seed, game === 'shape-tunnel' ? 'peaceful' : 'energetic');
         if (discovered) {
           musicPath = discovered.path;
           musicTitle = `${discovered.title} — ${discovered.artist}`;

@@ -101,6 +101,14 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
                 bent_frequency = max(45.0, frequency * 0.42 * (1.0 - elapsed * 2.4))
                 tone = math.sin(2 * math.pi * bent_frequency * elapsed)
                 tone += 0.18 * math.sin(2 * math.pi * bent_frequency * 0.51 * elapsed)
+            elif kind == "asmr":
+                progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
+                envelope = min(1.0, elapsed * 120.0) * math.exp(-progress * 4.8)
+                bent_frequency = frequency * (1.025 - progress * 0.025)
+                phase = 2 * math.pi * bent_frequency * elapsed
+                tone = math.sin(phase)
+                tone += 0.22 * math.sin(phase * 2.0)
+                tone += 0.08 * math.sin(phase * 3.01)
             else:
                 envelope = math.exp(-elapsed * 27.0) * min(1.0, elapsed * 90.0)
                 tone = math.sin(2 * math.pi * frequency * elapsed)
@@ -146,6 +154,10 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
                 event_length = 0.18
         elif sound_pack == "funny":
             event_length = 0.24
+        elif sound_pack == "asmr":
+            event_sound = "asmr"
+            event_strength = min(0.34, strength)
+            event_length = 0.16
         add_tone(start, event_frequency, event_strength, event_length, event_sound)
 
     peak = max(0.001, max(abs(sample) for sample in samples))
@@ -236,6 +248,52 @@ def synth_original_music(output: Path, seed: int, duration: float = 48.0) -> Non
 
     peak = max(0.001, max(abs(sample) for sample in samples))
     gain = min(0.92 / peak, 1.0)
+    pcm = array("h", (round(clamp(sample * gain, -1.0, 1.0) * 32767) for sample in samples))
+    with wave.open(str(output), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm.tobytes())
+
+
+def synth_peaceful_music(output: Path, seed: int, duration: float = 48.0) -> None:
+    """Create a calm, beatless ambient loop for satisfying simulations."""
+    rate = 44_100
+    samples = array("f", [0.0]) * (math.ceil(duration * rate) + 1)
+    rng = random.Random(seed ^ 0x0A5A4F)
+
+    def add_note(start: float, frequency: float, length: float, strength: float, bell: bool = False) -> None:
+        start_index = int(start * rate)
+        count = min(int(length * rate), len(samples) - start_index)
+        for index in range(max(0, count)):
+            elapsed = index / rate
+            attack = min(1.0, elapsed / (0.018 if bell else 0.45))
+            release = min(1.0, max(0.0, length - elapsed) / (0.55 if bell else 1.4))
+            envelope = attack * release * (math.exp(-elapsed * 1.5) if bell else 1.0)
+            phase = 2 * math.pi * frequency * elapsed
+            if bell:
+                tone = math.sin(phase) + 0.22 * math.sin(phase * 2.01) + 0.08 * math.sin(phase * 3.98)
+            else:
+                tone = math.sin(phase) + 0.18 * math.sin(phase * 1.003) + 0.10 * math.sin(phase * 2.0)
+            samples[start_index + index] += tone * envelope * strength
+
+    roots = (130.81, 110.0, 146.83, 98.0)  # C, A, D, G
+    chord_length = 4.8
+    for chord_index in range(math.ceil(duration / chord_length)):
+        start = chord_index * chord_length
+        root = roots[chord_index % len(roots)]
+        for ratio in (1.0, 1.189207, 1.498307):
+            add_note(start, root * ratio, chord_length * 1.18, 0.042, False)
+    notes = (523.25, 659.25, 783.99, 587.33, 698.46, 523.25, 440.0, 587.33)
+    cursor = 0.45
+    note_index = seed % len(notes)
+    while cursor < duration:
+        add_note(cursor, notes[note_index % len(notes)], 1.05, 0.09, True)
+        cursor += 0.72 + rng.uniform(-0.06, 0.10)
+        note_index += 1 if rng.random() > 0.22 else 2
+
+    peak = max(0.001, max(abs(sample) for sample in samples))
+    gain = min(0.82 / peak, 1.0)
     pcm = array("h", (round(clamp(sample * gain, -1.0, 1.0) * 32767) for sample in samples))
     with wave.open(str(output), "wb") as wav:
         wav.setnchannels(1)
@@ -714,8 +772,11 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError("ffmpeg n'a pas pu encoder les images du jeu")
 
         if args.sound_pack == "auto":
-            selector = args.seed % 10
-            selected_sound_pack = "meme" if selector < 6 else "funny" if selector < 8 else "arcade" if selector < 9 else "impact"
+            if args.game == "shape-tunnel":
+                selected_sound_pack = "asmr"
+            else:
+                selector = args.seed % 10
+                selected_sound_pack = "meme" if selector < 6 else "funny" if selector < 8 else "arcade" if selector < 9 else "impact"
         else:
             selected_sound_pack = args.sound_pack
         actual_duration = rendered_frames / fps
@@ -723,10 +784,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if external_music_file:
             music_source = external_music_file
         else:
-            synth_original_music(generated_music, args.seed)
+            if args.game == "shape-tunnel":
+                synth_peaceful_music(generated_music, args.seed)
+            else:
+                synth_original_music(generated_music, args.seed)
             music_source = generated_music
 
-        if args.music_mode == "hit-reveal":
+        effective_music_mode = "continuous" if args.game == "shape-tunnel" else args.music_mode
+        if effective_music_mode == "hit-reveal":
             audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
         else:
             audio_filter = f"[1:a]volume=0.80[fx];[2:a]volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
@@ -749,9 +814,9 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "theme": args.theme,
         "sound_pack": selected_sound_pack,
         "sound_mode": args.sound_pack,
-        "music": external_music_file.name if external_music_file else "Original generated track",
+        "music": external_music_file.name if external_music_file else ("Peaceful generated ambient track" if args.game == "shape-tunnel" else "Original generated track"),
         "music_generated": external_music_file is None,
-        "music_mode": args.music_mode,
+        "music_mode": effective_music_mode,
         "music_hits": len(game.music_hits),
         "events": len(game.events),
         "levels_completed": game.level - 1,
@@ -770,7 +835,7 @@ def main() -> None:
     parser.add_argument("--difficulty", type=int)
     parser.add_argument("--rings", type=int, default=240)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
-    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact"), default="auto")
+    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--music")
     parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
     parser.add_argument("--music-volume", type=float, default=0.62)
