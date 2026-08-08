@@ -3,9 +3,9 @@
 Génération de jeux hypnotiques et compilation de vidéos verticales, avec publication automatisée
 sur TikTok et YouTube Shorts.
 
-Le studio multi-jeux produit huit formats originaux : **Ball Escape**, **Shape Tunnel**,
+Le studio multi-jeux produit neuf formats originaux : **Ball Escape**, **Shape Tunnel**,
 **Boss Battle**, **Melody Drop**, **Color Switch**, **Orbit Merge**, **Laser Dodge** et
-**Brick Cascade** en 1080×1920 avec audio synchronisé. Il peut générer des lots et router un rendu vers
+**Brick Cascade**, plus le moteur premium Blender **Soft Body Slide 3D**, en 1080×1920 avec audio synchronisé. Il peut générer des lots et router un rendu vers
 plusieurs comptes TikTok et plusieurs profils YouTube isolés. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md)
 et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
 

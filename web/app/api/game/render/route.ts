@@ -98,7 +98,7 @@ export async function POST(request: Request) {
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const filename = `${game}-${seed}-${randomId()}.mp4`;
     const output = path.join(RENDERS_DIR, filename);
-    const script = path.join(process.cwd(), 'scripts', 'render-ball-escape.py');
+    const script = path.join(process.cwd(), 'scripts', game === 'soft-body-slide' ? 'render-premium-3d.py' : 'render-ball-escape.py');
 
     await fs.mkdir(RENDERS_DIR, { recursive: true });
     let musicPath: string | undefined;
