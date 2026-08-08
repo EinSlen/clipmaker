@@ -90,7 +90,8 @@ export async function POST(request: Request) {
     const definition = getGameDefinition(game);
     const requestedDuration = numberInRange(body.duration, 15, 15, 60);
     const duration = game === 'soft-body-slide' ? 15 : requestedDuration;
-    const difficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
+    const requestedDifficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
+    const difficulty = game === 'soft-body-slide' ? 100 : requestedDifficulty;
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
     const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr'].includes(body.soundPack) ? body.soundPack : 'auto';
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
     let musicCredit: string | null = null;
     let musicSource: 'jamendo' | 'library' | 'original' = 'original';
     let musicNote: string | null = null;
-    const requestedMusic = body.musicFile ?? '__discover__';
+    const requestedMusic = body.musicFile ?? (game === 'soft-body-slide' ? '' : '__discover__');
     if (requestedMusic === '__discover__') {
       try {
         const discovered = await discoverLicensedMusic(seed, game === 'shape-tunnel' || game === 'soft-body-slide' ? 'peaceful' : 'energetic');

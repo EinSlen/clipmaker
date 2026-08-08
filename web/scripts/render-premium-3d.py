@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import math
 import os
@@ -17,27 +16,36 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-RENDERER_SPEC = importlib.util.spec_from_file_location("clipmaker_audio", SCRIPT_DIR / "render-ball-escape.py")
-assert RENDERER_SPEC and RENDERER_SPEC.loader
-AUDIO = importlib.util.module_from_spec(RENDERER_SPEC)
-RENDERER_SPEC.loader.exec_module(AUDIO)
 
 SOFTNESS_RATIOS = (0.0, 0.25, 0.50, 0.75, 1.0)
+FOLEY_EVENT_RATIOS = (0.23, 0.39, 0.96)
+FOLEY_EVENT_TYPES = ("ramp-contact-1", "ramp-contact-2", "receiver-outcome")
 
 
 def softness_stages(max_softness: int) -> tuple[int, ...]:
-    bounded = max(0, min(100, max_softness))
-    return tuple(round(bounded * ratio) for ratio in SOFTNESS_RATIOS)
+    # The recognizable comparison always uses the same five canonical levels.
+    # The difficulty argument is retained for API compatibility and metadata.
+    del max_softness
+    return (0, 25, 50, 75, 100)
 
 
-def stage_impact_times(duration: float) -> list[float]:
-    """Return receiver contacts at the rendered 0.82 keyframes (frame 1 is t=0)."""
+def stage_event_times(duration: float) -> list[tuple[float, float, float]]:
+    """Return the two ramp contacts and receiver outcome for each trial."""
     segment = duration / len(SOFTNESS_RATIOS)
-    return [min(duration - 0.01, (index + 0.80) * segment) for index in range(len(SOFTNESS_RATIOS))]
+    return [
+        tuple(min(duration - 0.01, (index + ratio) * segment) for ratio in FOLEY_EVENT_RATIOS)
+        for index in range(len(SOFTNESS_RATIOS))
+    ]
 
 
-def synth_premium_foley(duration: float, impact_times: list[float], stages: tuple[int, ...], output: Path, seed: int) -> None:
-    """Create a stereo slide, squash and receiver-impact layer for the five trials."""
+def synth_premium_foley(
+    duration: float,
+    event_times: list[tuple[float, float, float]],
+    stages: tuple[int, ...],
+    output: Path,
+    seed: int,
+) -> None:
+    """Create three distinct, synchronized stereo foley cues for each trial."""
     rate = 48_000
     sample_count = math.ceil(duration * rate) + 1
     left = array("f", [0.0]) * sample_count
@@ -85,31 +93,52 @@ def synth_premium_foley(duration: float, impact_times: list[float], stages: tupl
             left[start_index + index] += value * gain_left
             right[start_index + index] += value * gain_right
 
-    segment = duration / len(stages)
-    for index, (softness_percent, impact_time) in enumerate(zip(stages, impact_times)):
-        softness = softness_percent / 100.0
-        pan = -0.20 + index * 0.10
-        slide_start = index * segment + segment * 0.18
-        slide_length = max(0.12, impact_time - slide_start - 0.08)
-        add_texture(slide_start, slide_length, 0.012 + softness * 0.010, pan, 0.18 + softness * 0.45)
+    # A near-silent stereo room tone prevents hard digital silence between actions.
+    ambience_left = 0.0
+    ambience_right = 0.0
+    for sample_index in range(sample_count):
+        ambience_left += ((rng.random() * 2.0 - 1.0) - ambience_left) * 0.006
+        ambience_right += ((rng.random() * 2.0 - 1.0) - ambience_right) * 0.005
+        left[sample_index] += ambience_left * 0.0014
+        right[sample_index] += ambience_right * 0.0014
 
-        # Rigid trials ring; softer trials trade that ring for a lower, wetter squash.
+    for index, (softness_percent, trial_events) in enumerate(zip(stages, event_times)):
+        softness = softness_percent / 100.0
+        contact_one, contact_two, outcome = trial_events
+        trial_pan = -0.12 + index * 0.06
+
+        # First ramp contact: a quick whoosh into a bright clink.
+        add_texture(contact_one - 0.16, 0.18, 0.028 + softness * 0.010, -0.34 + trial_pan, 0.20 + softness * 0.25)
         add_tone(
-            impact_time,
-            520.0 - softness * 330.0,
-            0.16 + softness * 0.13,
-            0.22 + softness * 0.08,
-            pan,
-            0.18 + softness * 0.46,
+            contact_one,
+            760.0 - softness * 250.0,
+            0.085 + softness * 0.035,
+            0.13 + softness * 0.025,
+            -0.34 + trial_pan,
+            0.14 + softness * 0.16,
         )
-        add_tone(impact_time, 92.0 - softness * 24.0, 0.24, 0.26 + softness * 0.10, pan, 0.54)
-        add_texture(impact_time, 0.12 + softness * 0.18, 0.035 + softness * 0.075, pan, softness, fade=False)
+
+        # Second ramp contact: a lower friction burst with a separate knock.
+        add_texture(contact_two - 0.12, 0.25, 0.045 + softness * 0.022, trial_pan, 0.30 + softness * 0.42)
         add_tone(
-            impact_time + segment * 0.07,
+            contact_two,
+            420.0 - softness * 195.0,
+            0.13 + softness * 0.07,
+            0.18 + softness * 0.05,
+            trial_pan,
+            0.25 + softness * 0.30,
+        )
+
+        # Receptacle/outcome: a compact plop whose body follows the softness.
+        add_tone(outcome, 500.0 - softness * 315.0, 0.17 + softness * 0.14, 0.24 + softness * 0.09, 0.30 + trial_pan, 0.46)
+        add_tone(outcome, 94.0 - softness * 26.0, 0.25, 0.28 + softness * 0.11, 0.30 + trial_pan, 0.56)
+        add_texture(outcome, 0.13 + softness * 0.19, 0.042 + softness * 0.084, 0.30 + trial_pan, softness, fade=False)
+        add_tone(
+            outcome + 0.10,
             330.0 - softness * 170.0,
             0.10 + softness * 0.07,
             0.09 + (1.0 - softness) * 0.07,
-            -pan,
+            0.12 - trial_pan,
             0.28,
         )
 
@@ -127,16 +156,25 @@ def synth_premium_foley(duration: float, impact_times: list[float], stages: tupl
 
 
 def build_continuous_audio_filter(music_volume: float) -> str:
-    """Keep the stereo music bed audible and duck it briefly under the foley."""
+    """Keep only a very low stereo bed beneath the dynamic foley bursts."""
     bounded_volume = max(0.0, min(1.5, music_volume))
+    ambient_volume = bounded_volume * 0.055
     return (
         "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        "volume=0.92,asplit=2[fxmix][fxkey];"
+        "volume=1.35,asplit=2[fxmix][fxkey];"
         "[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        f"haas=side_gain=0.32,volume={bounded_volume:.3f}[music];"
+        f"highpass=f=90,lowpass=f=4800,haas=side_gain=0.18,volume={ambient_volume:.4f}[music];"
         "[music][fxkey]sidechaincompress=threshold=0.020:ratio=2.8:attack=8:release=190:makeup=1[ducked];"
         "[ducked][fxmix]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
-        "[mix]loudnorm=I=-16:TP=-1.0:LRA=8[a]"
+        "[mix]alimiter=limit=0.891:attack=5:release=70:level=false[a]"
+    )
+
+
+def build_foley_only_audio_filter() -> str:
+    """Preserve the reference's large contrast between impacts and quiet air."""
+    return (
+        "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        "highpass=f=28,volume=1.55,alimiter=limit=0.891:attack=5:release=70:level=false[a]"
     )
 
 
@@ -158,18 +196,19 @@ def premium_font_file() -> str:
 
 
 def build_video_filter(duration: float, stages: tuple[int, ...], title_file: Path, title_length: int) -> str:
-    """Upscale cleanly and add crisp post-render labels outside Blender."""
+    """Upscale cleanly and add only restrained, high-positioned labels."""
     font_file = premium_font_file()
     title_path = ffmpeg_filter_path(title_file)
-    title_size = max(34, min(60, round(950 / (max(16, title_length) * 0.62))))
+    title_size = max(22, min(30, round(650 / (max(16, title_length) * 0.62))))
     filters = [
         "fps=30:round=up",
         "scale=1080:1920:flags=lanczos",
         "unsharp=5:5:0.28:3:3:0.0",
         (
             f"drawtext=fontfile='{font_file}':textfile='{title_path}':expansion=none:"
-            f"fontcolor=0x182135:fontsize={title_size}:x=(w-text_w)/2:y=150:"
-            "box=1:boxcolor=white@0.52:boxborderw=18"
+            f"fontcolor=white@0.68:fontsize={title_size}:x=(w-text_w)/2:y=224:"
+            "shadowcolor=black@0.40:shadowx=2:shadowy=2:"
+            "enable='between(t\\,0\\,0.800)'"
         ),
     ]
     segment = duration / len(stages)
@@ -178,8 +217,8 @@ def build_video_filter(duration: float, stages: tuple[int, ...], title_file: Pat
         end = duration if index == len(stages) - 1 else (index + 1) * segment - 0.001
         filters.append(
             f"drawtext=fontfile='{font_file}':text='{softness}% SOFT':expansion=none:"
-            "fontcolor=0xB87618:fontsize=48:x=(w-text_w)/2:y=250:"
-            "box=1:boxcolor=white@0.46:boxborderw=14:"
+            "fontcolor=white:fontsize=78:x=(w-text_w)/2:y=112:"
+            "shadowcolor=black@0.46:shadowx=4:shadowy=4:"
             f"enable='between(t\\,{start:.3f}\\,{end:.3f})'"
         )
     return ",".join(filters)
@@ -196,7 +235,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     samples = int(os.environ.get("PREMIUM_RENDER_SAMPLES", "5"))
     frame_count = round(args.duration * fps)
     stages = softness_stages(args.difficulty)
-    impact_times = stage_impact_times(args.duration)
+    event_times = stage_event_times(args.duration)
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-premium-", dir=str(output.parent)) as temporary:
         root = Path(temporary)
@@ -204,9 +243,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         frames.mkdir()
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
-        music = root / "peaceful-generated-track.wav"
         title_file = root / "title.txt"
-        display_title = (args.title.strip() or "SOFT BODY LANDING TEST").upper()[:52]
+        display_title = (args.title.strip() or "Soft Body Landing Test")[:52]
         title_file.write_text(display_title, encoding="utf-8")
         blender_command = [
             blender, "--background", "--factory-startup", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
@@ -222,15 +260,21 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             "-vf", video_filter,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", str(silent),
         ], check=True)
-        synth_premium_foley(args.duration, impact_times, stages, effects, args.seed)
+        synth_premium_foley(args.duration, event_times, stages, effects, args.seed)
         external_music = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
         if external_music is None:
-            AUDIO.synth_peaceful_music(music, args.seed, duration=max(16.0, args.duration + 1.0))
-        music_source = external_music or music
-        audio_filter = build_continuous_audio_filter(args.music_volume)
-        subprocess.run([
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
-            "-stream_loop", "-1", "-i", str(music_source), "-filter_complex", audio_filter,
+            audio_filter = build_foley_only_audio_filter()
+            audio_command = [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
+                "-filter_complex", audio_filter,
+            ]
+        else:
+            audio_filter = build_continuous_audio_filter(args.music_volume)
+            audio_command = [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
+                "-stream_loop", "-1", "-i", str(external_music), "-filter_complex", audio_filter,
+            ]
+        subprocess.run(audio_command + [
             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000",
             "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
         ], check=True)
@@ -244,12 +288,17 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "difficulty": args.difficulty,
         "sound_pack": "premium-foley",
         "requested_sound_pack": args.sound_pack,
-        "music": external_music.name if external_music else "Original peaceful stereo bed",
-        "music_generated": external_music is None,
-        "music_mode": "continuous",
+        "music": external_music.name if external_music else "Foley-only ASMR mix",
+        "music_generated": False,
+        "music_mode": "subtle-bed" if external_music else "foley-only",
         "requested_music_mode": args.music_mode,
-        "music_hits": len(impact_times),
-        "events": len(impact_times),
+        "music_hits": len(event_times) * len(FOLEY_EVENT_RATIOS),
+        "events": len(event_times) * len(FOLEY_EVENT_RATIOS),
+        "trials": len(stages),
+        "trial_duration": args.duration / len(stages),
+        "events_per_trial": len(FOLEY_EVENT_RATIOS),
+        "event_ratios": list(FOLEY_EVENT_RATIOS),
+        "foley_event_types": list(FOLEY_EVENT_TYPES),
         "softness_stages": list(stages),
         "units_completed": args.difficulty,
         "units_total": 100,
