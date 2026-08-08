@@ -53,11 +53,54 @@ type GameResult = {
   musicSource: "jamendo" | "library" | "original";
   musicCredit: string | null;
   musicNote: string | null;
+  variantKey: string | null;
+  variantLabel: string | null;
+  variantShape: string | null;
+  variantRamp: string | null;
+  variantPalette: string | null;
+  variantReceiver: string | null;
+  stagePreset: string | null;
+  softnessStages: number[] | null;
   title: string;
   youtubeTitle: string;
   caption: string;
   tags: string[];
 };
+
+const softBodyShapeLabels: Record<string, string> = {
+  "classic-pill": "Capsule classique",
+  "slender-cylinder": "Cylindre fin",
+  "plush-capsule": "Capsule moelleuse",
+  "rounded-barrel": "Tonneau arrondi",
+  "rolled-gel": "Gel roulé",
+};
+
+const softBodyRampLabels: Record<string, string> = {
+  "classic-lip": "Rampe classique",
+  "double-wave": "Double vague",
+  "scoop-launch": "Rampe tremplin",
+  "roller-wave": "Vague roulante",
+  "long-glide": "Longue glissade",
+};
+
+const softBodyPaletteLabels: Record<string, string> = {
+  champagne: "studio champagne",
+  "rose-gold": "studio or rose",
+  platinum: "studio platine",
+  copper: "studio cuivre",
+  "pale-gold": "studio or pâle",
+};
+
+function localizedSoftBodyVariant(result: GameResult): string | null {
+  if (!result.variantShape || !result.variantRamp || !result.variantPalette) {
+    return result.variantLabel;
+  }
+  return [
+    softBodyShapeLabels[result.variantShape] || result.variantShape,
+    softBodyRampLabels[result.variantRamp] || result.variantRamp,
+    softBodyPaletteLabels[result.variantPalette] || result.variantPalette,
+  ].join(" · ");
+}
 
 const themes: { id: Theme; label: string; colors: string }[] = [
   {
@@ -405,6 +448,11 @@ export function GameStudio() {
                   <span className="absolute bottom-3 left-3 rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/80 backdrop-blur">
                     Aperçu réel
                   </span>
+                  {item.id === "soft-body-slide" && (
+                    <span className="absolute bottom-3 right-3 rounded-full border border-amber-200/20 bg-black/60 px-2.5 py-1 text-[9px] font-semibold text-amber-100 backdrop-blur">
+                      2 500+ variantes
+                    </span>
+                  )}
                   {selected && (
                     <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-ink-950 shadow-lg">
                       <CheckCircle2 className="size-3.5" /> Sélectionné
@@ -493,7 +541,7 @@ export function GameStudio() {
                   <div className="space-y-1.5 text-xs text-ink-400">
                     <span>Niveaux de souplesse</span>
                     <div className="field-control flex h-11 items-center justify-center font-semibold text-white">
-                      0 · 25 · 50 · 75 · 100 %
+                      5 niveaux générés · 0 → 100 %
                     </div>
                   </div>
                 ) : (
@@ -526,13 +574,12 @@ export function GameStudio() {
               {game === "soft-body-slide" ? (
                 <>
                   <p className="text-xs leading-5 text-ink-500">
-                    Direction artistique fixe, calée sur la simulation de
-                    référence : studio gris perle, marbre ivoire et métal
-                    champagne.
+                    Chaque graine compose un studio premium différent tout en
+                    gardant le rendu marbre et métal de la référence.
                   </p>
                   <div className="flex h-11 items-center gap-3 rounded-xl border border-amber-200/20 bg-amber-200/5 px-3 text-xs font-medium text-white">
                     <span className="h-3 w-16 rounded-full bg-gradient-to-r from-slate-300 via-amber-200 to-yellow-600" />
-                    <span>Studio premium</span>
+                    <span>Variation studio automatique</span>
                     <CheckCircle2 className="ml-auto size-4 text-amber-200" />
                   </div>
                 </>
@@ -737,10 +784,12 @@ export function GameStudio() {
                 </div>
                 <div>
                   <dt className="text-ink-500">
-                    {gameDefinition.uiMetricLabel}
+                    {game === "soft-body-slide"
+                      ? "Variation"
+                      : gameDefinition.uiMetricLabel}
                   </dt>
                   <dd className="mt-1 font-semibold text-white">
-                    {difficulty}
+                    {game === "soft-body-slide" ? "Automatique" : difficulty}
                   </dd>
                 </div>
                 <div className="col-span-2">
@@ -779,6 +828,12 @@ export function GameStudio() {
                       <RefreshCw className="size-4" />
                     </Button>
                   </div>
+                  {game === "soft-body-slide" && (
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      La graine change la forme, la rampe, le métal, le décor,
+                      le réceptacle, la physique et les niveaux.
+                    </span>
+                  )}
                 </label>
                 <label className="block space-y-1.5 text-xs text-ink-400">
                   <span>Nombre de vidéos</span>
@@ -794,8 +849,9 @@ export function GameStudio() {
                     <option value={3}>3 vidéos uniques</option>
                   </select>
                   <span className="block text-[10px] leading-4 text-ink-500">
-                    Chaque vidéo reçoit une graine et une sélection musicale
-                    différentes.
+                    {game === "soft-body-slide"
+                      ? "Chaque vidéo reçoit une combinaison visuelle et physique différente."
+                      : "Chaque vidéo reçoit une graine et une sélection musicale différentes."}
                   </span>
                 </label>
               </div>
@@ -915,12 +971,19 @@ export function GameStudio() {
                   {getGameDefinition(result.game).uiName} · {result.duration} s
                   ·{" "}
                   {result.game === "soft-body-slide"
-                    ? "5 niveaux · 0–100 %"
+                    ? `5 niveaux · ${(result.softnessStages || [0, 25, 50, 75, 100]).join(
+                        " / "
+                      )} %`
                     : `${result.difficulty} ${getGameDefinition(
                         result.game
                       ).uiMetricLabel.toLowerCase()}`} ·{" "}
                   {(result.size / 1024 / 1024).toFixed(1)} Mo
                 </p>
+                {localizedSoftBodyVariant(result) && (
+                  <p className="mt-1 text-[11px] text-amber-200/85">
+                    Variante : {localizedSoftBodyVariant(result)}
+                  </p>
+                )}
                 <p className="mt-1 text-[11px] text-cyan-200/80">
                   {result.musicMode === "hit-reveal"
                     ? `${result.musicHits} séquences déclenchées par collision`

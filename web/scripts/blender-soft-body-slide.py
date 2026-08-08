@@ -1,8 +1,7 @@
-"""Render one physically simulated stage of the Oopsi-style soft-body test.
+"""Render a seeded five-stage Oopsi-style soft-body comparison.
 
-The orchestrator launches Blender once per softness level.  Keeping every trial
-in its own scene makes the cloth cache deterministic, cheap enough for a CPU
-VPS, and prevents hidden simulations from influencing later stages.
+Each seed resolves to a reproducible combination of shape, moving ramp, studio
+palette, receiver, softness progression and deterministic constraint physics.
 """
 
 from __future__ import annotations
@@ -15,12 +14,11 @@ from pathlib import Path
 import bpy
 from mathutils import Vector
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from soft_body_variants import SoftBodyVariant, variant_for_seed
 
-CANONICAL_SOFTNESS = (0, 25, 50, 75, 100)
-RAMP_MIN = -2.85
-RAMP_MAX = 2.95
-RAMP_LIP_WIDTH = 0.55
-RAMP_LIP_RISE = 0.78
 
 
 def arguments() -> argparse.Namespace:
@@ -73,8 +71,9 @@ def material(
     return value
 
 
-def marble_material():
-    value = bpy.data.materials.new("Quiet ivory marble")
+def marble_material(variant: SoftBodyVariant):
+    palette = variant.palette
+    value = bpy.data.materials.new(f"{palette.label} marble")
     value.use_nodes = True
     nodes, links = value.node_tree.nodes, value.node_tree.links
     shader = nodes.get("Principled BSDF")
@@ -92,17 +91,17 @@ def marble_material():
     noise.inputs["Distortion"].default_value = 1.35
     ramp = nodes.new("ShaderNodeValToRGB")
     ramp.color_ramp.elements[0].position = 0.25
-    ramp.color_ramp.elements[0].color = (0.90, 0.89, 0.85, 1)
+    ramp.color_ramp.elements[0].color = (*palette.marble_base, 1)
     pre_vein = ramp.color_ramp.elements.new(0.41)
-    pre_vein.color = (0.84, 0.84, 0.81, 1)
+    pre_vein.color = (*tuple(channel * 0.94 for channel in palette.marble_base), 1)
     vein = ramp.color_ramp.elements.new(0.455)
-    vein.color = (0.34, 0.37, 0.40, 1)
+    vein.color = (*palette.marble_vein, 1)
     after_vein = ramp.color_ramp.elements.new(0.50)
-    after_vein.color = (0.88, 0.88, 0.85, 1)
+    after_vein.color = (*tuple(channel * 0.98 for channel in palette.marble_base), 1)
     light = ramp.color_ramp.elements.new(0.61)
-    light.color = (0.94, 0.93, 0.89, 1)
+    light.color = (*palette.marble_light, 1)
     ramp.color_ramp.elements[-1].position = 0.75
-    ramp.color_ramp.elements[-1].color = (0.97, 0.96, 0.91, 1)
+    ramp.color_ramp.elements[-1].color = (*palette.marble_light, 1)
     bump = nodes.new("ShaderNodeBump")
     bump.inputs["Strength"].default_value = 0.04
     bump.inputs["Distance"].default_value = 0.035
@@ -115,8 +114,9 @@ def marble_material():
     return value
 
 
-def background_material():
-    value = bpy.data.materials.new("Clouded blue-grey studio")
+def background_material(variant: SoftBodyVariant):
+    palette = variant.palette
+    value = bpy.data.materials.new(f"{palette.label} clouded studio")
     value.use_nodes = True
     nodes, links = value.node_tree.nodes, value.node_tree.links
     shader = nodes.get("Principled BSDF")
@@ -128,9 +128,9 @@ def background_material():
     noise.inputs["Roughness"].default_value = 0.75
     ramp = nodes.new("ShaderNodeValToRGB")
     ramp.color_ramp.elements[0].position = 0.25
-    ramp.color_ramp.elements[0].color = (0.20, 0.27, 0.36, 1)
+    ramp.color_ramp.elements[0].color = (*palette.background_low, 1)
     ramp.color_ramp.elements[1].position = 0.77
-    ramp.color_ramp.elements[1].color = (0.50, 0.58, 0.67, 1)
+    ramp.color_ramp.elements[1].color = (*palette.background_high, 1)
     emission = nodes.new("ShaderNodeEmission")
     emission.inputs["Strength"].default_value = 0.72
     links.new(coordinates.outputs["Generated"], noise.inputs["Vector"])
@@ -141,13 +141,19 @@ def background_material():
     return value
 
 
-def liquid_gold_material(seed: int):
+def liquid_gold_material(seed: int, variant: SoftBodyVariant):
     variation = ((seed % 997) / 996.0 - 0.5) * 0.025
+    base = variant.palette.metal
     value = material(
-        "Champagne liquid metal",
-        (0.78 + variation, 0.52 + variation * 0.7, 0.16, 1),
+        f"{variant.palette.label} liquid metal",
+        (
+            max(0.0, min(1.0, base[0] + variation)),
+            max(0.0, min(1.0, base[1] + variation * 0.7)),
+            max(0.0, min(1.0, base[2] + variation * 0.4)),
+            1,
+        ),
         metallic=1.0,
-        roughness=0.145,
+        roughness=variant.palette.metal_roughness,
         clearcoat=0.36,
     )
     nodes, links = value.node_tree.nodes, value.node_tree.links
@@ -188,67 +194,89 @@ def add_mesh(name: str, vertices, faces, values, bevel_width: float = 0.0):
     return obj
 
 
-def ramp_height(local_x: float) -> float:
-    lip = max(0.0, min(1.0, (local_x - RAMP_MIN) / RAMP_LIP_WIDTH))
+def ramp_height(local_x: float, variant: SoftBodyVariant, collision: bool = False) -> float:
+    ramp = variant.ramp
+    lip = max(0.0, min(1.0, (local_x - ramp.minimum) / ramp.lip_width))
     smooth_lip = lip * lip * (3.0 - 2.0 * lip)
-    return 3.70 + 0.14 * local_x + RAMP_LIP_RISE * smooth_lip
+    collision_lift = 0.13 if collision else 0.0
+    lip_scale = 0.84 if collision else 1.0
+    wave = ramp.wave * math.sin(ramp.wave_frequency * local_x + ramp.wave_phase)
+    return ramp.base + collision_lift + ramp.slope * local_x + wave + ramp.lip_rise * lip_scale * smooth_lip
 
 
-def physics_ramp_height(local_x: float) -> float:
-    lip = max(0.0, min(1.0, (local_x - RAMP_MIN) / 0.78))
-    smooth_lip = lip * lip * (3.0 - 2.0 * lip)
-    return 3.86 + 0.14 * local_x + 0.62 * smooth_lip
+def physics_ramp_height(local_x: float, variant: SoftBodyVariant) -> float:
+    return ramp_height(local_x, variant, collision=True)
 
 
-def ramp_points(segments: int = 112):
+def ramp_points(variant: SoftBodyVariant, segments: int = 112):
     return [
-        (RAMP_MIN + (RAMP_MAX - RAMP_MIN) * index / (segments - 1),)
+        (variant.ramp.minimum + (variant.ramp.maximum - variant.ramp.minimum) * index / (segments - 1),)
         for index in range(segments)
     ]
 
 
-def ramp_position(time: float) -> float:
-    # The source video gives each trial roughly six seconds.  ClipMaker keeps
-    # the whole comparison to fifteen, so the same sweep is time-compressed.
-    period = 1.60
-    if time <= period:
-        return 3.08 * math.sin(math.tau * time / period - math.pi / 2) + 0.14 * math.sin(
-            math.tau * time / (period * 0.5) - 0.18
+def ramp_position(time: float, variant: SoftBodyVariant) -> float:
+    ramp = variant.ramp
+    period = ramp.sweep_period
+
+    def sweep(at: float) -> float:
+        return ramp.sweep_amplitude * math.sin(
+            math.tau * at / period - math.pi / 2 + variant.motion_phase
+        ) + ramp.secondary_amplitude * math.sin(
+            math.tau * at / (period * 0.5) - 0.18 - variant.motion_phase * 0.5
         )
+
+    if time <= ramp.exit_time:
+        return sweep(time)
     exit_duration = 0.22
-    ratio = max(0.0, min(1.0, (time - period) / exit_duration))
+    ratio = max(0.0, min(1.0, (time - ramp.exit_time) / exit_duration))
     smooth = ratio * ratio * (3.0 - 2.0 * ratio)
-    return -3.105 + (-6.0 + 3.105) * smooth
+    origin = sweep(ramp.exit_time)
+    return origin + (ramp.exit_x - origin) * smooth
 
 
-def ramp_velocity(time: float) -> float:
-    period = 1.60
-    if time <= period:
+def ramp_velocity(time: float, variant: SoftBodyVariant) -> float:
+    ramp = variant.ramp
+    period = ramp.sweep_period
+    if time <= ramp.exit_time:
         return (
-            3.08 * math.tau / period * math.cos(math.tau * time / period - math.pi / 2)
-            + 0.14 * math.tau / (period * 0.5) * math.cos(math.tau * time / (period * 0.5) - 0.18)
+            ramp.sweep_amplitude * math.tau / period
+            * math.cos(math.tau * time / period - math.pi / 2 + variant.motion_phase)
+            + ramp.secondary_amplitude * math.tau / (period * 0.5)
+            * math.cos(math.tau * time / (period * 0.5) - 0.18 - variant.motion_phase * 0.5)
         )
     exit_duration = 0.22
-    ratio = max(0.0, min(1.0, (time - period) / exit_duration))
-    return (-6.0 + 3.105) * 6.0 * ratio * (1.0 - ratio) / exit_duration
+    ratio = max(0.0, min(1.0, (time - ramp.exit_time) / exit_duration))
+    origin = ramp_position(ramp.exit_time, variant)
+    return (ramp.exit_x - origin) * 6.0 * ratio * (1.0 - ratio) / exit_duration
 
 
-def ramp_slope(local_x: float) -> float:
-    lip = max(0.0, min(1.0, (local_x - RAMP_MIN) / RAMP_LIP_WIDTH))
-    return 0.14 + RAMP_LIP_RISE * 6.0 * lip * (1.0 - lip) / RAMP_LIP_WIDTH
+def ramp_slope(local_x: float, variant: SoftBodyVariant, collision: bool = False) -> float:
+    ramp = variant.ramp
+    lip = max(0.0, min(1.0, (local_x - ramp.minimum) / ramp.lip_width))
+    lip_scale = 0.84 if collision else 1.0
+    return (
+        ramp.slope
+        + ramp.wave * ramp.wave_frequency * math.cos(ramp.wave_frequency * local_x + ramp.wave_phase)
+        + ramp.lip_rise * lip_scale * 6.0 * lip * (1.0 - lip) / ramp.lip_width
+    )
 
 
-def physics_ramp_slope(local_x: float) -> float:
-    lip = max(0.0, min(1.0, (local_x - RAMP_MIN) / 0.78))
-    return 0.14 + 0.62 * 6.0 * lip * (1.0 - lip) / 0.78
+def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
+    return ramp_slope(local_x, variant, collision=True)
 
 
-def add_ramp(marble, gold, frame_end: int, fps: int, stage_frames: int):
-    segments, half_width, thickness = 112, 0.68, 0.24
-    samples = [RAMP_MIN + (RAMP_MAX - RAMP_MIN) * index / (segments - 1) for index in range(segments)]
+def add_ramp(marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int, stage_frames: int):
+    segments = 112
+    half_width, thickness = variant.ramp.half_width, variant.ramp.thickness
+    samples = [
+        variant.ramp.minimum
+        + (variant.ramp.maximum - variant.ramp.minimum) * index / (segments - 1)
+        for index in range(segments)
+    ]
     vertices = []
     for x in samples:
-        z = ramp_height(x)
+        z = ramp_height(x, variant)
         vertices.extend(
             (
                 (x, -half_width, z),
@@ -280,7 +308,7 @@ def add_ramp(marble, gold, frame_end: int, fps: int, stage_frames: int):
         spline = curve.splines.new("POLY")
         spline.points.add(len(samples) - 1)
         for point, x in zip(spline.points, samples):
-            point.co = (x, y, ramp_height(x) + 0.012, 1.0)
+            point.co = (x, y, ramp_height(x, variant) + 0.012, 1.0)
         obj = bpy.data.objects.new(name, curve)
         bpy.context.collection.objects.link(obj)
         obj.data.materials.append(gold)
@@ -293,7 +321,7 @@ def add_ramp(marble, gold, frame_end: int, fps: int, stage_frames: int):
 
     for frame in range(1, frame_end + 1):
         local_frame = (frame - 1) % stage_frames
-        ramp.location.x = ramp_position(local_frame / fps)
+        ramp.location.x = ramp_position(local_frame / fps, variant)
         ramp.keyframe_insert("location", frame=frame)
     if ramp.animation_data and ramp.animation_data.action:
         for curve in ramp.animation_data.action.fcurves:
@@ -303,12 +331,13 @@ def add_ramp(marble, gold, frame_end: int, fps: int, stage_frames: int):
 
 
 def capsule_geometry(
-    radius: float = 0.37,
-    cylinder_half: float = 0.66,
+    variant: SoftBodyVariant,
     radial_segments: int = 24,
     cap_rings: int = 6,
     cylinder_rings: int = 8,
 ):
+    radius = variant.shape.radius
+    cylinder_half = variant.shape.cylinder_half
     rings: list[tuple[float, float]] = []
     for index in range(1, cap_rings + 1):
         angle = -math.pi / 2 + (math.pi / 2) * index / cap_rings
@@ -322,12 +351,15 @@ def capsule_geometry(
         rings.append((cylinder_half + radius * math.sin(angle), radius * math.cos(angle)))
 
     vertices = [(-cylinder_half - radius, 0.0, 0.0)]
+    total_half = cylinder_half + radius
     for x, ring_radius in rings:
+        body_profile = max(0.0, 1.0 - (x / max(total_half, 1e-6)) ** 2)
+        ring_radius *= 1.0 + variant.shape.bulge * body_profile
         for segment in range(radial_segments):
             angle = math.tau * segment / radial_segments
             front_angle = (angle - math.pi + math.pi) % math.tau - math.pi
             groove = math.exp(-((front_angle / 0.34) ** 2))
-            groove_strength = 0.15 * min(1.0, ring_radius / max(radius, 1e-6))
+            groove_strength = variant.shape.groove * min(1.0, ring_radius / max(radius, 1e-6))
             shaped_radius = ring_radius * (1.0 - groove * groove_strength)
             vertices.append((x, math.cos(angle) * shaped_radius, math.sin(angle) * shaped_radius))
     vertices.append((cylinder_half + radius, 0.0, 0.0))
@@ -364,28 +396,29 @@ def collide_point(
     softness: float,
     time: float,
     dt: float,
+    variant: SoftBodyVariant,
 ) -> tuple[Vector, Vector, float]:
     intensity = 0.0
-    local_x = point.x - ramp_position(time)
-    if RAMP_MIN <= local_x <= RAMP_MAX:
-        height = physics_ramp_height(local_x)
-        slope = physics_ramp_slope(local_x)
+    local_x = point.x - ramp_position(time, variant)
+    if variant.ramp.minimum <= local_x <= variant.ramp.maximum:
+        height = physics_ramp_height(local_x, variant)
+        slope = physics_ramp_slope(local_x, variant)
         normal = Vector((-slope, 1.0)).normalized()
         signed_distance = (point.y - height) / math.sqrt(1.0 + slope * slope)
         if point.y > height - 0.55 and signed_distance < radius:
             point += normal * (radius - signed_distance)
             velocity = point - previous
-            ramp_step = Vector((ramp_velocity(time) * dt, 0.0))
+            ramp_step = Vector((ramp_velocity(time, variant) * dt, 0.0))
             relative = velocity - ramp_step
             normal_speed = relative.dot(normal)
             intensity = max(intensity, abs(normal_speed) / max(dt, 1e-6))
             if normal_speed < 0.0:
-                restitution = 0.36 - softness * 0.32
+                restitution = (0.36 - softness * 0.32) * variant.bounce_scale
                 tangent = Vector((normal.y, -normal.x))
                 velocity -= normal * ((1.0 + restitution) * normal_speed)
                 target_tangent = ramp_step.dot(tangent)
                 current_tangent = velocity.dot(tangent)
-                coupling = 0.11 + (1.0 - softness) * 0.07
+                coupling = (0.11 + (1.0 - softness) * 0.07) * variant.coupling_scale
                 velocity += tangent * (target_tangent - current_tangent) * coupling
                 velocity *= 0.92 - softness * 0.16
                 previous = point - velocity
@@ -393,10 +426,13 @@ def collide_point(
     # Thin circular rim first, followed by the shallow concave receiver.  The
     # opening remains real: misses continue below frame instead of landing on
     # an invisible cylinder cap.
-    for rim_x in (-1.11, 1.11):
-        center = Vector((rim_x, 0.76))
+    receiver = variant.receiver
+    rim_major = (receiver.outer_radius + receiver.inner_radius) * 0.5
+    rim_minor = (receiver.outer_radius - receiver.inner_radius) * 0.55
+    for rim_x in (receiver.x - rim_major, receiver.x + rim_major):
+        center = Vector((rim_x, receiver.top))
         delta = point - center
-        minimum = radius + 0.065
+        minimum = radius + rim_minor
         if 1e-7 < delta.length < minimum:
             normal = delta.normalized()
             point = center + normal * minimum
@@ -407,10 +443,12 @@ def collide_point(
                 velocity -= normal * ((1.42 - softness * 0.30) * normal_speed)
                 previous = point - velocity * (0.88 - softness * 0.20)
 
-    if abs(point.x) < 1.05 and point.y < 1.10:
-        ratio = abs(point.x) / 1.05
-        height = 0.22 + 0.46 * ratio * ratio
-        slope = 0.92 * point.x / (1.05 * 1.05)
+    receiver_x = point.x - receiver.x
+    if abs(receiver_x) < receiver.inner_radius and point.y < receiver.top + 0.34:
+        ratio = abs(receiver_x) / receiver.inner_radius
+        bowl_base = receiver.top - receiver.bowl_depth - 0.06
+        height = bowl_base + receiver.bowl_depth * ratio * ratio
+        slope = 2.0 * receiver.bowl_depth * receiver_x / (receiver.inner_radius * receiver.inner_radius)
         normal = Vector((-slope, 1.0)).normalized()
         signed_distance = (point.y - height) / math.sqrt(1.0 + slope * slope)
         if signed_distance < radius:
@@ -425,16 +463,23 @@ def collide_point(
     return point, previous, intensity
 
 
-def simulate_chain(softness_percent: int, frame_count: int, fps: int):
+def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: SoftBodyVariant):
     softness = softness_percent / 100.0
     node_count = 19
-    half_length = 1.03
+    half_length = variant.shape.cylinder_half + variant.shape.radius
     rest = 2.0 * half_length / (node_count - 1)
-    rotation = -0.14
+    rotation = variant.start_rotation
     points = []
     for index in range(node_count):
         local_x = -half_length + rest * index
-        points.append(Vector((0.42 + math.cos(rotation) * local_x, 6.56 + math.sin(rotation) * local_x)))
+        points.append(
+            Vector(
+                (
+                    variant.start_x + math.cos(rotation) * local_x,
+                    variant.start_height + math.sin(rotation) * local_x,
+                )
+            )
+        )
     previous = [point.copy() for point in points]
     frames = []
     impact_memory = 0.0
@@ -454,8 +499,19 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int):
                     velocity = points[index] - previous[index]
                     velocity.x *= horizontal_damping
                     velocity.y *= vertical_damping
+                    # Moving ramps can otherwise catapult rigid presets outside
+                    # the vertical frame before the comparison becomes legible.
+                    # The cap behaves like air drag, not an invisible wall, and
+                    # still leaves enough lateral motion for distinct outcomes.
+                    max_horizontal_step = (2.65 - softness * 0.35) * dt
+                    velocity.x = max(-max_horizontal_step, min(max_horizontal_step, velocity.x))
+                    if time > variant.ramp.exit_time:
+                        velocity.x += (variant.receiver.x - points[index].x) * 0.65 * dt * dt
                     previous[index] = points[index].copy()
-                    points[index] += velocity + Vector((0.0, -9.81 * dt * dt))
+                    fall_boost = 1.28 if time > variant.ramp.exit_time else 1.0
+                    points[index] += velocity + Vector(
+                        (0.0, -9.81 * variant.gravity_scale * fall_boost * dt * dt)
+                    )
 
                 for _ in range(iterations):
                     for index in range(node_count - 1):
@@ -464,9 +520,9 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int):
                         constrain_distance(points, index, index + 2, rest * 2.0, bend_strength)
                     for index in range(node_count):
                         profile = math.sin(math.pi * index / (node_count - 1))
-                        radius = 0.16 + 0.21 * math.sqrt(max(0.0, profile))
+                        radius = variant.shape.radius * (0.43 + 0.57 * math.sqrt(max(0.0, profile)))
                         points[index], previous[index], intensity = collide_point(
-                            points[index], previous[index], radius, softness, time, dt
+                            points[index], previous[index], radius, softness, time, dt, variant
                         )
                         frame_intensity = max(frame_intensity, intensity)
         impact_memory = max(min(1.0, frame_intensity / 8.0), impact_memory * (0.78 + softness * 0.13))
@@ -474,8 +530,15 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int):
     return frames
 
 
-def skin_capsule(base_vertices, chain_points, softness: float, impact: float, frame: int):
-    half_length = 1.03
+def skin_capsule(
+    base_vertices,
+    chain_points,
+    softness: float,
+    impact: float,
+    frame: int,
+    variant: SoftBodyVariant,
+):
+    half_length = variant.shape.cylinder_half + variant.shape.radius
     node_count = len(chain_points)
     center = sum(chain_points, Vector((0.0, 0.0))) / node_count
     rigid_tangent = (chain_points[-1] - chain_points[0]).normalized()
@@ -501,9 +564,13 @@ def skin_capsule(base_vertices, chain_points, softness: float, impact: float, fr
         volume_scale = max(0.78, min(1.28, 1.0 / math.sqrt(local_stretch)))
         u = x / half_length
         wrinkle = impact * softness * softness
-        axial_wrinkle = wrinkle * 0.075 * math.sin(u * math.pi * 4.2 + frame * 0.21)
+        axial_wrinkle = wrinkle * 0.075 * math.sin(
+            u * math.pi * 4.2 + frame * 0.21 + variant.wrinkle_phase
+        )
         angular = math.atan2(z, y)
-        asymmetric = 1.0 + wrinkle * 0.12 * math.sin(angular * 3.0 + u * 5.3 + frame * 0.13)
+        asymmetric = 1.0 + wrinkle * 0.12 * math.sin(
+            angular * 3.0 + u * 5.3 + frame * 0.13 + variant.wrinkle_phase * 0.7
+        )
         radius_scale = volume_scale * asymmetric
         center += normal * axial_wrinkle
         result.append(
@@ -529,11 +596,19 @@ def keyframe_visibility(obj, start: int, end: int, frame_end: int) -> None:
         obj.keyframe_insert("hide_render", frame=end + 1)
 
 
-def add_capsule(gold, softness: int, start: int, end: int, frame_end: int, fps: int):
-    base_vertices, faces = capsule_geometry()
-    simulated = simulate_chain(softness, end - start + 1, fps)
+def add_capsule(
+    gold,
+    softness: int,
+    start: int,
+    end: int,
+    frame_end: int,
+    fps: int,
+    variant: SoftBodyVariant,
+):
+    base_vertices, faces = capsule_geometry(variant)
+    simulated = simulate_chain(softness, end - start + 1, fps, variant)
     shapes = [
-        skin_capsule(base_vertices, points, softness / 100.0, impact, index)
+        skin_capsule(base_vertices, points, softness / 100.0, impact, index, variant)
         for index, (points, impact) in enumerate(simulated)
     ]
     capsule = add_mesh(f"Sliding cylinder {softness}%", shapes[0], faces, gold)
@@ -563,20 +638,21 @@ def add_capsule(gold, softness: int, start: int, end: int, frame_end: int, fps: 
     return capsule
 
 
-def add_receiver(marble, gold):
+def add_receiver(marble, gold, variant: SoftBodyVariant):
     segments = 72
-    outer_radius, inner_radius = 1.17, 1.05
-    top, bottom = 0.76, -3.40
+    receiver = variant.receiver
+    outer_radius, inner_radius = receiver.outer_radius, receiver.inner_radius
+    top, bottom = receiver.top, -3.40
     vertices = []
     for segment in range(segments):
         angle = math.tau * segment / segments
         cosine, sine = math.cos(angle), math.sin(angle)
         vertices.extend(
             (
-                (outer_radius * cosine, outer_radius * sine, top),
-                (outer_radius * cosine, outer_radius * sine, bottom),
-                (inner_radius * cosine, inner_radius * sine, top - 0.08),
-                (inner_radius * cosine, inner_radius * sine, bottom),
+                (receiver.x + outer_radius * cosine, outer_radius * sine, top),
+                (receiver.x + outer_radius * cosine, outer_radius * sine, bottom),
+                (receiver.x + inner_radius * cosine, inner_radius * sine, top - 0.08),
+                (receiver.x + inner_radius * cosine, inner_radius * sine, bottom),
             )
         )
     faces = []
@@ -594,14 +670,15 @@ def add_receiver(marble, gold):
     wall = add_mesh("Open marble receiver", vertices, faces, marble, bevel_width=0.035)
 
     rings = 12
-    bowl_vertices = [(0.0, 0.0, 0.22)]
+    bowl_base = top - receiver.bowl_depth - 0.06
+    bowl_vertices = [(receiver.x, 0.0, bowl_base)]
     for ring in range(1, rings + 1):
         ratio = ring / rings
         radius = inner_radius * ratio
-        z = 0.22 + 0.46 * ratio * ratio
+        z = bowl_base + receiver.bowl_depth * ratio * ratio
         for segment in range(segments):
             angle = math.tau * segment / segments
-            bowl_vertices.append((math.cos(angle) * radius, math.sin(angle) * radius, z))
+            bowl_vertices.append((receiver.x + math.cos(angle) * radius, math.sin(angle) * radius, z))
     bowl_faces = []
     for segment in range(segments):
         bowl_faces.append((0, 1 + segment, 1 + (segment + 1) % segments))
@@ -618,7 +695,7 @@ def add_receiver(marble, gold):
     bpy.ops.mesh.primitive_torus_add(
         major_segments=96,
         minor_segments=16,
-        location=(0.0, 0.0, top),
+        location=(receiver.x, 0.0, top),
         major_radius=(outer_radius + inner_radius) * 0.5,
         minor_radius=(outer_radius - inner_radius) * 0.52,
     )
@@ -657,25 +734,26 @@ def add_background(value):
 def main() -> None:
     args = arguments()
     reset_scene()
+    variant = variant_for_seed(args.seed)
     frame_end = max(5, round(args.duration * args.fps))
     if args.stage_softness is None:
-        stages = CANONICAL_SOFTNESS
+        stages = variant.stages
         stage_frames = max(2, round(frame_end / len(stages)))
         frame_end = stage_frames * len(stages)
     else:
-        stages = (min(CANONICAL_SOFTNESS, key=lambda level: abs(level - args.stage_softness)),)
+        stages = (min(variant.stages, key=lambda level: abs(level - args.stage_softness)),)
         stage_frames = frame_end
 
-    gold = liquid_gold_material(args.seed)
-    marble = marble_material()
-    backdrop = background_material()
+    gold = liquid_gold_material(args.seed, variant)
+    marble = marble_material(variant)
+    backdrop = background_material(variant)
     add_background(backdrop)
-    add_receiver(marble, gold)
-    add_ramp(marble, gold, frame_end, args.fps, stage_frames)
+    add_receiver(marble, gold, variant)
+    add_ramp(marble, gold, variant, frame_end, args.fps, stage_frames)
     for index, softness in enumerate(stages):
         start = 1 + index * stage_frames
         end = min(frame_end, (index + 1) * stage_frames)
-        add_capsule(gold, softness, start, end, frame_end, args.fps)
+        add_capsule(gold, softness, start, end, frame_end, args.fps, variant)
 
     bpy.ops.object.camera_add(location=(0.0, -14.8, 4.55))
     camera = bpy.context.object
@@ -686,8 +764,8 @@ def main() -> None:
     look_at(camera, (0.0, 0.0, 3.18))
     bpy.context.scene.camera = camera
 
-    add_area("Large warm key", (-4.8, -6.5, 9.0), 1150, 5.2, (1.0, 0.92, 0.80))
-    add_area("Broad neutral fill", (4.8, -4.0, 6.6), 820, 4.5, (0.74, 0.84, 1.0))
+    add_area("Large warm key", (-4.8, -6.5, 9.0), 1150, 5.2, variant.palette.key_light)
+    add_area("Broad neutral fill", (4.8, -4.0, 6.6), 820, 4.5, variant.palette.fill_light)
     add_area("Metal rim light", (0.5, 2.8, 8.1), 1050, 3.6, (1.0, 0.83, 0.61))
 
     scene = bpy.context.scene
@@ -702,7 +780,7 @@ def main() -> None:
     scene.eevee.use_motion_blur = True
     scene.eevee.motion_blur_shutter = 0.28
     scene.eevee.taa_render_samples = args.samples
-    scene.gravity = (0.0, 0.0, -9.81)
+    scene.gravity = (0.0, 0.0, -9.81 * variant.gravity_scale)
     scene.render.resolution_x = args.width
     scene.render.resolution_y = args.height
     scene.render.resolution_percentage = 100
@@ -714,7 +792,10 @@ def main() -> None:
     scene.frame_start = 1
     scene.frame_end = frame_end
     scene.render.film_transparent = False
-    scene.world.color = (0.34, 0.38, 0.44)
+    scene.world.color = tuple(
+        (low + high) * 0.5
+        for low, high in zip(variant.palette.background_low, variant.palette.background_high)
+    )
     scene.view_settings.view_transform = "Filmic"
     scene.view_settings.look = "Medium High Contrast"
     scene.view_settings.exposure = 0.48
