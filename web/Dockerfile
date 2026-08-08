@@ -13,6 +13,7 @@ FROM node:20-bookworm-slim AS runtime-base
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+COPY tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
 
 # ffmpeg + python + yt-dlp + chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,7 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium chromium-driver \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp -r /tmp/tiktok-upload-requirements.txt \
+    && rm -f /tmp/tiktok-upload-requirements.txt
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public

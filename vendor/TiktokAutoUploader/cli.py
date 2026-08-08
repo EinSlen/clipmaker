@@ -1,6 +1,6 @@
 import argparse
 import re
-from tiktok_uploader import tiktok, Video
+from tiktok_uploader import tiktok
 from tiktok_uploader.basics import eprint
 from tiktok_uploader.Config import Config
 import sys, os
@@ -75,6 +75,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         if args.youtube:
+            from tiktok_uploader.Video import Video
             video_obj = Video(args.youtube, args.title)
             video_obj.is_valid_file_format()
             video = video_obj.source_ref
@@ -92,7 +93,9 @@ if __name__ == "__main__":
         if args.music_id and not music_id:
             eprint(f"[-] Music ID/URL invalide : {args.music_id}")
             sys.exit(1)
-        tiktok.upload_video(args.users, args.video,  args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy, music_id=music_id)
+        uploaded = tiktok.upload_video(args.users, args.video, args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy, music_id=music_id)
+        if not uploaded:
+            sys.exit(1)
 
     elif args.subcommand == "show":
         # if flag is c then show cookie names

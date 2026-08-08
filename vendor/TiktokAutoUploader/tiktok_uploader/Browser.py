@@ -1,7 +1,7 @@
 from .cookies import load_cookies_from_file, save_cookies_to_file
 from fake_useragent import UserAgent, FakeUserAgentError
 import undetected_chromedriver as uc
-import threading, os
+import threading, os, re, subprocess
 
 
 WITH_PROXIES = False
@@ -29,7 +29,29 @@ class Browser:
         # Proxies not supported on login.
         # if WITH_PROXIES:
         #     options.add_argument('--proxy-server={}'.format(PROXIES[0]))
-        self._driver = uc.Chrome(options=options)
+        browser_path = uc.find_chrome_executable()
+        version_main = None
+        if os.name == "nt":
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon") as key:
+                    version_main = int(str(winreg.QueryValueEx(key, "version")[0]).split(".", 1)[0])
+            except (OSError, ValueError):
+                pass
+        elif browser_path:
+            try:
+                version_output = subprocess.check_output([browser_path, "--version"], text=True, stderr=subprocess.STDOUT)
+                match = re.search(r"(\d+)\.", version_output)
+                if match:
+                    version_main = int(match.group(1))
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+        chrome_kwargs = {"options": options}
+        if browser_path:
+            chrome_kwargs["browser_executable_path"] = browser_path
+        if version_main:
+            chrome_kwargs["version_main"] = version_main
+        self._driver = uc.Chrome(**chrome_kwargs)
         self.with_random_user_agent()
 
     def with_random_user_agent(self, fallback=None):

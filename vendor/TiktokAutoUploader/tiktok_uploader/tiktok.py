@@ -3,9 +3,9 @@ import requests, zlib, json, time, subprocess, string, secrets, os, sys
 from fake_useragent import FakeUserAgentError, UserAgent
 from requests_auth_aws_sigv4 import AWSSigV4
 from tiktok_uploader.cookies import load_cookies_from_file
-from tiktok_uploader.Browser import Browser
 from tiktok_uploader.bot_utils import *
-from tiktok_uploader import Config, Video, eprint
+from tiktok_uploader.Config import Config
+from tiktok_uploader.basics import eprint
 from dotenv import load_dotenv
 
 
@@ -17,14 +17,18 @@ _UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ch
 
 
 def login(login_name: str):
+	from tiktok_uploader.Browser import Browser
 	# Check if login name is already save in file.
 	cookies = load_cookies_from_file(f"tiktok_session-{login_name}")
 	session_cookie = next((c for c in cookies if c["name"] == 'sessionid'), None)
-	session_from_file = session_cookie is not None
+	expires_at = (session_cookie or {}).get("expiry") or (session_cookie or {}).get("expires")
+	session_from_file = session_cookie is not None and (not expires_at or float(expires_at) > time.time() + 60)
 
 	if session_from_file:
 		print("Unnecessary login: session already saved!")
 		return session_cookie["value"]
+	if session_cookie is not None:
+		print("Saved TikTok session expired; opening Chrome to refresh it.")
 
 	browser = Browser.get()
 	response = browser.driver.get(os.getenv("TIKTOK_LOGIN_URL"))
@@ -352,6 +356,7 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 	if not uploaded:
 		print("[-] Could not upload video")
 		return False
+	return True
 
 
 
