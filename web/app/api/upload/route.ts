@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   const id = randomId();
   const safeExt = (file.name.match(/\.([a-z0-9]{2,5})$/i)?.[1] || 'mp4').toLowerCase();
   const filename = `${id}.${safeExt}`;
-  const dest = path.join(UPLOADS_DIR, filename);
+  const dest = path.join(/* turbopackIgnore: true */ UPLOADS_DIR, filename);
   const buf = Buffer.from(await file.arrayBuffer());
   await fs.writeFile(dest, buf);
   return NextResponse.json({ ok: true, id, filename, serverPath: dest, size: buf.length });

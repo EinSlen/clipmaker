@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import { getGameDefinition, isGameId, type GameId } from '@/lib/game-catalog';
 import { discoverLicensedMusic } from '@/lib/licensed-music';
 import { PUBLIC_MUSIC_DIR, RENDERS_DIR } from '@/lib/server-paths';
 import { randomId } from '@/lib/utils';
@@ -12,6 +13,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 600;
 
 type RenderRequest = {
+  game?: GameId;
+  difficulty?: number;
   duration?: number;
   rings?: number;
   seed?: number;
@@ -80,15 +83,17 @@ export async function POST(request: Request) {
   rendering = true;
   try {
     const body = (await request.json()) as RenderRequest;
+    const game = isGameId(body.game) ? body.game : 'ball-escape';
+    const definition = getGameDefinition(game);
     const duration = numberInRange(body.duration, 45, 15, 60);
-    const rings = numberInRange(body.rings, 240, 40, 300);
+    const difficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
     const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact'].includes(body.soundPack) ? body.soundPack : 'auto';
     const musicMode = body.musicMode === 'continuous' ? 'continuous' : 'hit-reveal';
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
-    const title = String(body.title || 'Will the ball escape?').trim().slice(0, 52);
-    const filename = `ball-escape-${seed}-${randomId()}.mp4`;
+    const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
+    const filename = `${game}-${seed}-${randomId()}.mp4`;
     const output = path.join(RENDERS_DIR, filename);
     const script = path.join(process.cwd(), 'scripts', 'render-ball-escape.py');
 
@@ -151,8 +156,9 @@ export async function POST(request: Request) {
     const rendererArgs = [
       script,
       '--output', output,
+      '--game', game,
       '--duration', String(duration),
-      '--rings', String(rings),
+      '--difficulty', String(difficulty),
       '--seed', String(seed),
       '--theme', theme,
       '--sound-pack', soundPack,
@@ -162,21 +168,27 @@ export async function POST(request: Request) {
     ];
     if (musicPath) rendererArgs.push('--music', musicPath);
     const renderer = await runRenderer(rendererArgs);
-    let rendererMetadata: { sound_pack?: string; duration?: number; music?: string; music_generated?: boolean; music_mode?: string; music_hits?: number } = {};
+    let rendererMetadata: { sound_pack?: string; duration?: number; music?: string; music_generated?: boolean; music_mode?: string; music_hits?: number; units_completed?: number; units_total?: number } = {};
     try {
       const lastLine = renderer.stdout.trim().split(/\r?\n/).at(-1);
       if (lastLine) rendererMetadata = JSON.parse(lastLine);
     } catch {}
     if (!musicTitle && rendererMetadata.music_generated) musicTitle = rendererMetadata.music || 'Original generated track';
     const stat = await fs.stat(output);
-    const captionBase = `${title} Run #${seed}. Did you think it would make it out?`;
+    const captionBase = `${title} Run #${seed}. Did you predict the ending?`;
     return NextResponse.json({
       ok: true,
       filename,
       size: stat.size,
       duration: rendererMetadata.duration || duration,
       seed,
-      rings,
+      game,
+      gameName: definition.name,
+      difficulty,
+      metricLabel: definition.metricLabel,
+      unitsCompleted: rendererMetadata.units_completed || 0,
+      unitsTotal: rendererMetadata.units_total || difficulty,
+      rings: game === 'ball-escape' ? difficulty : undefined,
       theme,
       soundPack: rendererMetadata.sound_pack || soundPack,
       musicMode: rendererMetadata.music_mode || musicMode,
@@ -189,7 +201,7 @@ export async function POST(request: Request) {
       title,
       youtubeTitle: `${title} #shorts`,
       caption: musicCredit ? `${captionBase}\n${musicCredit}` : captionBase,
-      tags: ['#satisfying', '#ballescape', '#simulation', '#hypnotic', '#shorts'],
+      tags: ['#satisfying', '#simulation', '#hypnotic', ...definition.tags, '#shorts'],
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });

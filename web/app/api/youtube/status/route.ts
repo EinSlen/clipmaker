@@ -4,11 +4,13 @@ import { getYouTubeDoctorStatus } from '@/lib/youtube-agent';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const status = await getYouTubeDoctorStatus();
+    const account = new URL(request.url).searchParams.get('account') || 'default';
+    const status = await getYouTubeDoctorStatus(account);
     return NextResponse.json({
       ok: true,
+      account,
       dryRun: status.dry_run,
       readyForLiveUpload: status.ready_for_live_upload,
       configured: status.configured,

@@ -17,6 +17,7 @@ type Body = {
   tags?: string[];
   privacy?: 'private' | 'unlisted' | 'public';
   confirmPublic?: boolean;
+  account?: string;
 };
 
 function hasValidAdminToken(req: Request): boolean {
@@ -64,7 +65,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Un Short doit être carré ou vertical' }, { status: 400 });
     }
 
-    const status = await getYouTubeDoctorStatus();
+    const account = String(body.account || 'default').trim().toLowerCase();
+    const status = await getYouTubeDoctorStatus(account);
     if (!status.dry_run) {
       if (!status.ready_for_live_upload) {
         return NextResponse.json({ ok: false, error: 'Session YouTube absente ou expirée; lance npm run youtube:auth' }, { status: 503 });
@@ -90,12 +92,14 @@ export async function POST(req: Request) {
       tags,
       durationSeconds: media.duration,
       aspectRatio: media.width === media.height ? '1:1' : '9:16',
-      privacy
+      privacy,
+      account,
     });
 
     return NextResponse.json({
       ok: true,
       dryRun: result.dry_run,
+      account,
       media,
       upload: result.result
     });

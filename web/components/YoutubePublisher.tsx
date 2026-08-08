@@ -17,6 +17,12 @@ type Status = {
   error?: string;
 };
 
+type YouTubeAccount = {
+  id: string;
+  label: string;
+  configured: boolean;
+};
+
 export function YoutubePublisher({
   filename,
   defaultTitle,
@@ -29,6 +35,8 @@ export function YoutubePublisher({
   tags: string[];
 }) {
   const [status, setStatus] = React.useState<Status | null>(null);
+  const [accounts, setAccounts] = React.useState<YouTubeAccount[]>([]);
+  const [account, setAccount] = React.useState('default');
   const [title, setTitle] = React.useState(defaultTitle.slice(0, 100));
   const [privacy, setPrivacy] = React.useState<'private' | 'unlisted'>('private');
   const [adminToken, setAdminToken] = React.useState('');
@@ -39,7 +47,15 @@ export function YoutubePublisher({
   React.useEffect(() => {
     const saved = window.sessionStorage.getItem('clipmaker-upload-token');
     if (saved) setAdminToken(saved);
-    fetch('/api/youtube/status')
+    fetch('/api/youtube/accounts')
+      .then((response) => response.json())
+      .then((data) => setAccounts(data.accounts || []))
+      .catch(() => setAccounts([{ id: 'default', label: 'Default channel', configured: false }]));
+  }, []);
+
+  React.useEffect(() => {
+    setStatus(null);
+    fetch(`/api/youtube/status?account=${encodeURIComponent(account)}`)
       .then((response) => response.json())
       .then(setStatus)
       .catch((error) => setStatus({
@@ -54,7 +70,7 @@ export function YoutubePublisher({
         },
         error: String(error)
       }));
-  }, []);
+  }, [account]);
 
   function updateAdminToken(value: string) {
     setAdminToken(value);
@@ -79,7 +95,8 @@ export function YoutubePublisher({
           title: title.trim(),
           description,
           tags,
-          privacy
+          privacy,
+          account
         })
       });
       const data = await response.json();
@@ -90,7 +107,7 @@ export function YoutubePublisher({
       if (data.dryRun) {
         setMessage(`Dry run passed · ${Math.round(data.media.duration)} s · ${data.media.width}×${data.media.height} · nothing was uploaded`);
       } else {
-        setMessage(`Short uploaded to YouTube as ${privacy}`);
+        setMessage(`Short uploaded to ${account} as ${privacy}`);
         if (data.upload?.releaseUrl) setReleaseUrl(data.upload.releaseUrl);
       }
     } catch (error) {
@@ -113,6 +130,16 @@ export function YoutubePublisher({
           {status ? (liveMode ? 'live upload' : 'dry run') : 'checking...'}
         </span>
       </div>
+
+      <label className="text-xs text-ink-400 space-y-1 block">
+        <span>YouTube channel profile</span>
+        <select value={account} onChange={(event) => setAccount(event.target.value)} className="w-full bg-ink-800 border border-white/10 rounded-lg px-3 py-2 text-sm">
+          {(accounts.length ? accounts : [{ id: 'default', label: 'Default channel', configured: false }]).map((item) => (
+            <option key={item.id} value={item.id}>{item.label}{item.configured ? '' : ' — login required'}</option>
+          ))}
+        </select>
+        <span className="block text-[10px] text-ink-500">Create another profile with <code>node scripts/youtube-agent.mjs auth --account channel-name</code>.</span>
+      </label>
 
       <label className="text-xs text-ink-400 space-y-1 block">
         <span>Title</span>

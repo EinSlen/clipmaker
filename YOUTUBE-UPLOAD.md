@@ -40,6 +40,19 @@ Les données sensibles restent dans `.youtube-browser/`, dossier ignoré par Git
 cookies donne accès à la session YouTube : ne jamais le partager, le publier ou le commiter. Pour
 révoquer la session locale, se déconnecter du compte puis supprimer ce dossier.
 
+### Plusieurs chaînes
+
+Le profil historique s'appelle `default`. Pour isoler une autre chaîne, lui donner un identifiant
+court puis refaire la connexion :
+
+```powershell
+node scripts/youtube-agent.mjs auth --account gaming
+node scripts/youtube-agent.mjs doctor --account gaming
+```
+
+Les profils supplémentaires sont stockés dans `.youtube-browser/accounts/<identifiant>/` et
+apparaissent automatiquement dans le sélecteur de l'interface.
+
 ## 3. Tester puis activer l’envoi réel
 
 Le mode simulation est actif par défaut. Ajouter d’abord dans `web/.env.local` :
@@ -54,9 +67,11 @@ CLIPMAKER_UPLOAD_TOKEN=une-longue-valeur-aleatoire
 Générer une valeur sûre sous PowerShell :
 
 ```powershell
-$bytes = [byte[]]::new(32)
-[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-[Convert]::ToHexString($bytes).ToLowerInvariant()
+$bytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+([BitConverter]::ToString($bytes)).Replace('-', '').ToLowerInvariant()
 ```
 
 Redémarrer ClipMaker, générer un rendu et lancer une simulation depuis le panneau YouTube Shorts.
@@ -82,6 +97,12 @@ chiffrement n’est pas portable. Sur le VPS, construire l’image puis lancer l
 ```bash
 docker compose build clipmaker youtube-auth
 docker compose --profile youtube-auth run --rm --service-ports youtube-auth
+```
+
+Pour une chaîne supplémentaire, préfixer la commande avec son identifiant :
+
+```bash
+YOUTUBE_ACCOUNT=gaming docker compose --profile youtube-auth run --rm --service-ports youtube-auth
 ```
 
 Depuis le PC local, créer un tunnel SSH vers le VPS :
