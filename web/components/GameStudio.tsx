@@ -2,9 +2,10 @@
 
 import * as React from 'react';
 import { Download, Gamepad2, Loader2, Music2, RefreshCw, Sparkles, UploadCloud } from 'lucide-react';
-import { AccountPicker } from './AccountPicker';
 import { Button } from './Button';
+import { TikTokTargetPicker } from './TikTokTargetPicker';
 import { YoutubePublisher } from './YoutubePublisher';
+import { GAME_CATALOG, getGameDefinition, type GameId } from '@/lib/game-catalog';
 import type { MusicTrack } from '@/lib/types';
 
 type Theme = 'neon' | 'sunset' | 'ice';
@@ -16,7 +17,13 @@ type GameResult = {
   size: number;
   duration: number;
   seed: number;
-  rings: number;
+  game: GameId;
+  gameName: string;
+  difficulty: number;
+  metricLabel: string;
+  unitsCompleted: number;
+  unitsTotal: number;
+  rings?: number;
   theme: Theme;
   soundPack: SoundPack;
   musicMode: MusicMode | 'original';
@@ -39,8 +46,9 @@ const themes: { id: Theme; label: string; colors: string }[] = [
 ];
 
 export function GameStudio() {
+  const [game, setGame] = React.useState<GameId>('ball-escape');
   const [duration, setDuration] = React.useState(45);
-  const [rings, setRings] = React.useState(240);
+  const [difficulty, setDifficulty] = React.useState(240);
   const [theme, setTheme] = React.useState<Theme>('neon');
   const [soundPack, setSoundPack] = React.useState<SoundPack>('auto');
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
@@ -56,10 +64,13 @@ export function GameStudio() {
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<GameResult | null>(null);
   const [caption, setCaption] = React.useState('');
-  const [account, setAccount] = React.useState<string | undefined>();
+  const [accounts, setAccounts] = React.useState<string[]>([]);
+  const [publishedAccounts, setPublishedAccounts] = React.useState<string[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const [uploadMessage, setUploadMessage] = React.useState<string | null>(null);
   const [tiktokSound, setTiktokSound] = React.useState('');
+  const gameDefinition = getGameDefinition(game);
+  const [routesHydrated, setRoutesHydrated] = React.useState(false);
 
   React.useEffect(() => {
     fetch('/api/music/list')
@@ -67,6 +78,25 @@ export function GameStudio() {
       .then((data) => setMusicTracks(data.tracks || []))
       .catch(() => setMusicTracks([]));
   }, []);
+
+  React.useEffect(() => {
+    try {
+      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
+      setAccounts(Array.isArray(routes['ball-escape']) ? routes['ball-escape'] : []);
+    } catch {
+      setAccounts([]);
+    }
+    setRoutesHydrated(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!routesHydrated) return;
+    try {
+      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
+      routes[game] = accounts;
+      window.localStorage.setItem('clipmaker-game-tiktok-routes', JSON.stringify(routes));
+    } catch {}
+  }, [accounts, game, routesHydrated]);
 
   React.useEffect(() => {
     if (!rendering) return;
@@ -79,6 +109,22 @@ export function GameStudio() {
     setSeed(String(Math.floor(100_000 + Math.random() * 999_800_000)));
   }
 
+  function selectGame(nextGame: GameId) {
+    const definition = getGameDefinition(nextGame);
+    try {
+      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
+      setAccounts(Array.isArray(routes[nextGame]) ? routes[nextGame] : []);
+    } catch {
+      setAccounts([]);
+    }
+    setGame(nextGame);
+    setDifficulty(definition.metricDefault);
+    setTitle(definition.defaultHook);
+    setResult(null);
+    setPublishedAccounts([]);
+    setUploadMessage(null);
+  }
+
   async function generate() {
     setRendering(true);
     setResult(null);
@@ -89,8 +135,9 @@ export function GameStudio() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          game,
           duration,
-          rings,
+          difficulty,
           theme,
           soundPack,
           musicFile: musicFile || undefined,
@@ -135,22 +182,38 @@ export function GameStudio() {
   }
 
   async function uploadTikTok() {
-    if (!result || !account) return;
+    if (!result || !accounts.length) return;
+    const pendingAccounts = accounts.filter((username) => !publishedAccounts.includes(username));
+    if (!pendingAccounts.length) {
+      setUploadMessage('All selected TikTok accounts already received this render.');
+      return;
+    }
     setUploading(true);
     setUploadMessage(null);
     try {
-      const response = await fetch('/api/tiktok/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: result.filename,
-          username: account,
-          caption: caption.slice(0, 2000),
-          musicId: tiktokSound.trim() || undefined,
-        }),
-      });
-      const data = await response.json();
-      setUploadMessage(data.ok ? `✅ Video sent to @${account}` : `❌ ${data.error || data.stderr || 'TikTok upload failed'}`);
+      const messages: string[] = [];
+      const uploaded = new Set(publishedAccounts);
+      for (const username of pendingAccounts) {
+        const response = await fetch('/api/tiktok/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: result.filename,
+            username,
+            caption: caption.slice(0, 2000),
+            musicId: tiktokSound.trim() || undefined,
+          }),
+        });
+        const data = await response.json();
+        if (data.ok) {
+          uploaded.add(username);
+          messages.push(`✅ @${username} — published`);
+        } else {
+          messages.push(`❌ @${username} — ${data.error || data.stderr || 'upload failed'}`);
+        }
+      }
+      setPublishedAccounts([...uploaded]);
+      setUploadMessage(messages.join('\n'));
     } catch (caught) {
       setUploadMessage(`❌ ${String(caught)}`);
     } finally {
@@ -166,8 +229,31 @@ export function GameStudio() {
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-accent/15 p-2.5"><Gamepad2 className="size-5 text-accent" /></div>
             <div>
-              <h2 className="font-semibold">Automatic Ball Escape</h2>
-              <p className="text-xs text-ink-400 mt-1">Every seed creates a gravity-driven run that accelerates after every bounce, with synchronized audio and a publish-ready 1080×1920 video.</p>
+              <h2 className="font-semibold">Automatic Game Studio</h2>
+              <p className="text-xs text-ink-400 mt-1">Choose an original simulation, tune its challenge and generate a deterministic 1080×1920 video with synchronized audio.</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-ink-300">Game format</span>
+              <span className="text-[10px] text-emerald-300">4 original engines</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {GAME_CATALOG.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => selectGame(item.id)}
+                  className={`overflow-hidden rounded-xl border text-left transition ${game === item.id ? 'border-white/45 bg-white/10 shadow-lg shadow-black/20' : 'border-white/10 bg-ink-900/45 hover:bg-white/5'}`}
+                >
+                  <span className={`block h-1.5 bg-gradient-to-r ${item.accent}`} />
+                  <span className="block p-3">
+                    <span className="block text-sm font-semibold text-white">{item.name}</span>
+                    <span className="mt-1 block text-[11px] leading-4 text-ink-400">{item.description}</span>
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -192,8 +278,8 @@ export function GameStudio() {
               </select>
             </label>
             <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Rings: {rings}</span>
-              <input type="range" min={40} max={300} step={10} value={rings} onChange={(event) => setRings(Number(event.target.value))} className="w-full h-10 accent-fuchsia-500" />
+              <span>{gameDefinition.metricLabel}: {difficulty}</span>
+              <input type="range" min={gameDefinition.metricMin} max={gameDefinition.metricMax} step={gameDefinition.metricStep} value={difficulty} onChange={(event) => setDifficulty(Number(event.target.value))} className="w-full h-10 accent-fuchsia-500" />
             </label>
           </div>
 
@@ -299,7 +385,7 @@ export function GameStudio() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-medium">Run #{result.seed}</h3>
-                <p className="text-[11px] text-ink-400">{result.duration}s · {result.rings} rings · {(result.size / 1024 / 1024).toFixed(1)} MB{result.musicTitle ? ` · ${result.musicTitle}` : ''}</p>
+                <p className="text-[11px] text-ink-400">{result.gameName} · {result.duration}s · {result.difficulty} {result.metricLabel.toLowerCase()} · {(result.size / 1024 / 1024).toFixed(1)} MB{result.musicTitle ? ` · ${result.musicTitle}` : ''}</p>
                 <p className="text-[10px] text-cyan-200/80 mt-0.5">{result.musicMode === 'hit-reveal' ? `${result.musicHits} collision-triggered music slices` : result.musicMode === 'continuous' ? 'Continuous soundtrack' : 'Original generated soundtrack'}</p>
               </div>
               <a href={`/api/renders/${encodeURIComponent(result.filename)}`} download className="inline-flex h-9 items-center gap-2 rounded-xl bg-white/5 px-3 text-sm hover:bg-white/10">
@@ -312,7 +398,7 @@ export function GameStudio() {
               <span>TikTok / Shorts caption</span>
               <textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={3} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" />
             </label>
-            <AccountPicker value={account} onChange={setAccount} />
+            <TikTokTargetPicker value={accounts} onChange={setAccounts} />
             <label className="text-xs text-ink-400 space-y-1 block">
               <span>Official TikTok sound — optional URL or ID</span>
               <input
@@ -323,9 +409,9 @@ export function GameStudio() {
               />
               <span className="block text-[10px] text-ink-500">Attaches the post to a funny or trending sound without embedding it in the YouTube file.</span>
             </label>
-            <Button variant="outline" onClick={uploadTikTok} disabled={uploading || !account}>
+            <Button variant="outline" onClick={uploadTikTok} disabled={uploading || !accounts.length || accounts.every((username) => publishedAccounts.includes(username))}>
               {uploading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-              Publish to TikTok
+              Publish to {accounts.length || 0} TikTok {accounts.length === 1 ? 'account' : 'accounts'}
             </Button>
             {uploadMessage && <p className="text-sm text-ink-200 whitespace-pre-wrap">{uploadMessage}</p>}
           </section>

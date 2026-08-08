@@ -3,8 +3,10 @@
 Génération de jeux hypnotiques et compilation de vidéos verticales, avec publication automatisée
 sur TikTok et YouTube Shorts.
 
-Le nouveau studio **Ball Escape** produit des variantes originales en 1080×1920 avec audio
-synchronisé. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md) et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
+Le studio multi-jeux produit des variantes originales de **Ball Escape**, **Shape Tunnel**,
+**Boss Battle** et **Melody Drop** en 1080×1920 avec audio synchronisé. Il peut router un rendu vers
+plusieurs comptes TikTok et plusieurs profils YouTube isolés. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md)
+et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
 
 ## ✨ Fonctionnalités
 

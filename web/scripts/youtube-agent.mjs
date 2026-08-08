@@ -7,9 +7,18 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(webDir, '..');
-const dataDir = process.env.YOUTUBE_BROWSER_DATA_DIR
+const rootDataDir = process.env.YOUTUBE_BROWSER_DATA_DIR
   ? path.resolve(process.env.YOUTUBE_BROWSER_DATA_DIR)
   : path.join(repoRoot, '.youtube-browser');
+const rawArguments = process.argv.slice(2);
+const accountArgumentIndex = rawArguments.indexOf('--account');
+const requestedAccount = String(process.env.YOUTUBE_ACCOUNT || (accountArgumentIndex >= 0 ? rawArguments[accountArgumentIndex + 1] : '') || 'default').trim().toLowerCase();
+if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(requestedAccount)) {
+  throw new Error('Invalid YouTube account profile.');
+}
+const dataDir = requestedAccount === 'default'
+  ? rootDataDir
+  : path.join(rootDataDir, 'accounts', requestedAccount);
 const legacyAuthProfileDir = path.join(dataDir, 'auth-profile');
 const platformAuthProfileDir = path.join(dataDir, `auth-profile-${process.platform}`);
 const authProfileDir = process.platform === 'win32' && fs.existsSync(legacyAuthProfileDir)
@@ -100,6 +109,7 @@ function doctor() {
   const ready = Boolean(browserPath && packagePresent && authenticated);
   return {
     ok: Boolean(browserPath && packagePresent),
+    account: requestedAccount,
     dry_run: isDryRun(),
     provider: 'browser-session',
     configured: {

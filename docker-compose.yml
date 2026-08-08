@@ -38,6 +38,7 @@ services:
       REPO_ROOT: /repo
       YOUTUBE_BROWSER_PATH: /usr/bin/chromium
       YOUTUBE_BROWSER_DATA_DIR: /repo/.youtube-browser
+      YOUTUBE_ACCOUNT: "${YOUTUBE_ACCOUNT:-default}"
       DISPLAY: :99
     volumes:
       - ./:/repo

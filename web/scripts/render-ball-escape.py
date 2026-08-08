@@ -17,6 +17,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from game_variants import create_game
+
 
 THEMES = {
     "neon": ((5, 7, 18), 0.58, 0.92),
@@ -675,7 +677,11 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     fps = int(os.environ.get("GAME_RENDER_FPS", args.fps))
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    game = BallEscape(width, height, fps, args.duration, args.rings, args.seed, args.theme, args.title)
+    difficulty = args.difficulty if args.difficulty is not None else args.rings
+    if args.game == "ball-escape":
+        game = BallEscape(width, height, fps, args.duration, difficulty, args.seed, args.theme, args.title)
+    else:
+        game = create_game(args.game, width, height, fps, args.duration, difficulty, args.seed, args.theme, args.title)
     ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg")
     external_music_file = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
 
@@ -683,11 +689,12 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         silent = Path(temp_dir) / "silent.mp4"
         audio = Path(temp_dir) / "effects.wav"
         generated_music = Path(temp_dir) / "original-generated-track.wav"
+        video_crf = "22" if args.game == "shape-tunnel" else "19"
         encode = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
             "-vf", "scale=1080:1920:flags=lanczos",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", str(silent),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", video_crf, "-pix_fmt", "yuv420p", "-an", str(silent),
         ]
         process = subprocess.Popen(encode, stdin=subprocess.PIPE)
         assert process.stdin is not None
@@ -736,7 +743,9 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "output": output.name,
         "duration": round(actual_duration, 3),
         "seed": args.seed,
-        "rings": args.rings,
+        "game": args.game,
+        "difficulty": difficulty,
+        "rings": difficulty if args.game == "ball-escape" else None,
         "theme": args.theme,
         "sound_pack": selected_sound_pack,
         "sound_mode": args.sound_pack,
@@ -746,7 +755,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "music_hits": len(game.music_hits),
         "events": len(game.events),
         "levels_completed": game.level - 1,
-        "rings_cleared_current_level": game.active,
+        "units_completed": game.active,
+        "units_total": getattr(game, "total", getattr(game, "ring_count", difficulty)),
         "max_speed_x": round(game.max_speed_ratio, 2),
     }
 
@@ -756,6 +766,8 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration", type=float, default=45.0)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--game", choices=("ball-escape", "shape-tunnel", "boss-battle", "melody-drop"), default="ball-escape")
+    parser.add_argument("--difficulty", type=int)
     parser.add_argument("--rings", type=int, default=240)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact"), default="auto")
