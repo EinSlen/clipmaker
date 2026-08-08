@@ -9,6 +9,10 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 - **Shape Tunnel** — comète qui traverse des couches géométriques ondulantes et musicales.
 - **Boss Battle** — duel procédural avec barres de vie, impacts critiques et vainqueur variable.
 - **Melody Drop** — balle gravitationnelle dont chaque rebond débloque une note.
+- **Color Switch** — balle changeante qui doit traverser la bonne tranche de chaque anneau.
+- **Orbit Merge** — particules orbitales qui fusionnent dans une planète de plus en plus massive.
+- **Laser Dodge** — coureur accéléré au milieu d'un champ de lasers rotatifs.
+- **Brick Cascade** — réaction en chaîne de briques colorées avec front de progression visible.
 
 Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
 vie ou notes. Les thèmes, graines, sons, musiques et durées restent communs afin de créer beaucoup
@@ -19,11 +23,12 @@ de variantes sans dupliquer le code de publication.
 1. Ouvrir l'onglet **Auto Game** et choisir un format.
 2. Régler la durée, la difficulté, la palette et l'accroche en anglais.
 3. Garder **Auto Viral Mix** et **Hit Reveal** pour synchroniser les impacts avec la musique.
-4. Générer, regarder la vidéo entière, puis choisir un ou plusieurs comptes TikTok et un profil YouTube.
+4. Générer une vidéo ou un lot de trois variantes, regarder chaque résultat, puis choisir un ou plusieurs comptes TikTok et un profil YouTube.
 5. Publier d'abord YouTube en privé et vérifier le résultat avant d'augmenter la cadence.
 
 Les cibles TikTok sont traitées une par une avec un résultat séparé par compte. Les profils YouTube
-sont isolés dans `.youtube-browser/accounts/<profil>/` ; le profil historique reste `default`.
+sont isolés dans `.youtube-browser/accounts/<profil>/` ; le profil historique reste `default`. Les
+routages TikTok et YouTube sont mémorisés séparément pour chaque jeu dans le navigateur.
 
 ## Audio
 
@@ -62,7 +67,19 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
   -d '{"game":"boss-battle","duration":45,"difficulty":300,"theme":"neon","soundPack":"auto","musicFile":"__discover__","musicMode":"hit-reveal"}'
 ```
 
-Valeurs de `game` : `ball-escape`, `shape-tunnel`, `boss-battle`, `melody-drop`.
+Valeurs de `game` : `ball-escape`, `shape-tunnel`, `boss-battle`, `melody-drop`, `color-switch`,
+`orbit-merge`, `laser-dodge`, `brick-cascade`.
+
+## Tests
+
+```bash
+cd web
+npm test                  # types + tests déterministes des 8 moteurs
+npm run test:render-smoke # encode et inspecte les 8 MP4 avec ffprobe
+```
+
+Les tests vérifient aussi que le catalogue TypeScript et les moteurs Python possèdent exactement les
+mêmes identifiants de jeu.
 
 La viralité ne peut pas être garantie. Comparer la rétention par jeu, graine, accroche, durée et compte
 avant d'automatiser une cadence importante.

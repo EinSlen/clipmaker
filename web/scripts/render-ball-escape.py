@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from game_variants import create_game
+from game_variants import GAME_CLASSES, create_game
 
 
 THEMES = {
@@ -689,7 +689,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         silent = Path(temp_dir) / "silent.mp4"
         audio = Path(temp_dir) / "effects.wav"
         generated_music = Path(temp_dir) / "original-generated-track.wav"
-        video_crf = "22" if args.game == "shape-tunnel" else "19"
+        video_crf = "22" if args.game in {"shape-tunnel", "laser-dodge"} else "19"
         encode = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
@@ -766,7 +766,7 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration", type=float, default=45.0)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--game", choices=("ball-escape", "shape-tunnel", "boss-battle", "melody-drop"), default="ball-escape")
+    parser.add_argument("--game", choices=("ball-escape", *GAME_CLASSES), default="ball-escape")
     parser.add_argument("--difficulty", type=int)
     parser.add_argument("--rings", type=int, default=240)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")

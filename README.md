@@ -3,8 +3,9 @@
 Génération de jeux hypnotiques et compilation de vidéos verticales, avec publication automatisée
 sur TikTok et YouTube Shorts.
 
-Le studio multi-jeux produit des variantes originales de **Ball Escape**, **Shape Tunnel**,
-**Boss Battle** et **Melody Drop** en 1080×1920 avec audio synchronisé. Il peut router un rendu vers
+Le studio multi-jeux produit huit formats originaux : **Ball Escape**, **Shape Tunnel**,
+**Boss Battle**, **Melody Drop**, **Color Switch**, **Orbit Merge**, **Laser Dodge** et
+**Brick Cascade** en 1080×1920 avec audio synchronisé. Il peut générer des lots et router un rendu vers
 plusieurs comptes TikTok et plusieurs profils YouTube isolés. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md)
 et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
 

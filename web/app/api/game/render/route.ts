@@ -83,6 +83,9 @@ export async function POST(request: Request) {
   rendering = true;
   try {
     const body = (await request.json()) as RenderRequest;
+    if (body.game !== undefined && !isGameId(body.game)) {
+      return NextResponse.json({ ok: false, error: 'Unknown game format.' }, { status: 400 });
+    }
     const game = isGameId(body.game) ? body.game : 'ball-escape';
     const definition = getGameDefinition(game);
     const duration = numberInRange(body.duration, 45, 15, 60);
