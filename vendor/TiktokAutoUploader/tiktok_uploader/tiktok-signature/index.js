@@ -1,4 +1,5 @@
 const { createCipheriv } = require("crypto");
+const { existsSync } = require("fs");
 const { devices, chromium } = require("playwright-chromium");
 const Utils = require("./utils");
 const iPhone11 = devices["iPhone 11 Pro"];
@@ -11,6 +12,8 @@ class Signer {
     "--disable-infobars",
     "--window-size=1920,1080",
     "--start-maximized",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
   ];
   // Default TikTok loading page
   default_url = "https://www.tiktok.com/@rihanna?lang=en";
@@ -39,6 +42,12 @@ class Signer {
       ignoreDefaultArgs: ["--mute-audio", "--hide-scrollbars"],
       ignoreHTTPSErrors: true,
     };
+
+    const chromiumExecutable =
+      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium";
+    if (existsSync(chromiumExecutable)) {
+      this.options.executablePath = chromiumExecutable;
+    }
   }
 
   async init() {

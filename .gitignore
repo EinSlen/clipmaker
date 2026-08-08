@@ -20,6 +20,7 @@ temp_*.m4a
 # Web app runtime data
 web/node_modules/
 web/.next/
+*.tsbuildinfo
 web/.env
 web/.env.local
 web/uploads/

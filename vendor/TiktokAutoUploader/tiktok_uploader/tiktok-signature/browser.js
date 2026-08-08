@@ -23,5 +23,6 @@ var userAgent = process.argv[3];
     await signer.close();
   } catch (err) {
     console.error(err);
+    process.exitCode = 1;
   }
 })();

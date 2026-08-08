@@ -1,6 +1,11 @@
-from .Browser import *
-from .cookies import *
-from .Config import *
-from .Video import *
-from .tiktok import *
-from .basics import *
+"""TikTok uploader package.
+
+Keep imports lightweight so local-file uploads do not require the optional
+MoviePy/Pytube editing stack or start browser-related modules eagerly.
+"""
+
+from . import tiktok
+from .Config import Config
+from .basics import eprint
+
+__all__ = ["Config", "eprint", "tiktok"]
