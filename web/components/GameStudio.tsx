@@ -1,18 +1,35 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import Image from 'next/image';
-import { CheckCircle2, Download, Gamepad2, Loader2, Music2, RefreshCw, Sparkles, UploadCloud } from 'lucide-react';
-import { Button } from './Button';
-import { TikTokTargetPicker } from './TikTokTargetPicker';
-import { YoutubePublisher } from './YoutubePublisher';
-import { GAME_CATALOG, getGameDefinition, type GameId } from '@/lib/game-catalog';
-import type { MusicTrack } from '@/lib/types';
+import * as React from "react";
+import Image from "next/image";
+import {
+  CheckCircle2,
+  Download,
+  Gamepad2,
+  Loader2,
+  Music2,
+  Palette,
+  RefreshCw,
+  Settings2,
+  Sparkles,
+  UploadCloud,
+  Video,
+  Youtube,
+} from "lucide-react";
+import { Button } from "./Button";
+import { TikTokTargetPicker } from "./TikTokTargetPicker";
+import { YoutubePublisher } from "./YoutubePublisher";
+import {
+  GAME_CATALOG,
+  getGameDefinition,
+  type GameId,
+} from "@/lib/game-catalog";
+import type { MusicTrack } from "@/lib/types";
 
-type Theme = 'neon' | 'sunset' | 'ice';
-type SoundPack = 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
-type MusicMode = 'hit-reveal' | 'continuous';
-type RenderedSoundPack = SoundPack | 'premium-foley';
+type Theme = "neon" | "sunset" | "ice";
+type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
+type MusicMode = "hit-reveal" | "continuous";
+type RenderedSoundPack = SoundPack | "premium-foley";
 
 type GameResult = {
   filename: string;
@@ -28,11 +45,11 @@ type GameResult = {
   rings?: number;
   theme: Theme;
   soundPack: RenderedSoundPack;
-  musicMode: MusicMode | 'original';
+  musicMode: MusicMode | "original";
   musicHits: number;
   musicUsed: string | null;
   musicTitle: string | null;
-  musicSource: 'jamendo' | 'library' | 'original';
+  musicSource: "jamendo" | "library" | "original";
   musicCredit: string | null;
   musicNote: string | null;
   title: string;
@@ -42,25 +59,39 @@ type GameResult = {
 };
 
 const themes: { id: Theme; label: string; colors: string }[] = [
-  { id: 'neon', label: 'Rainbow', colors: 'from-fuchsia-500 via-cyan-400 to-lime-400' },
-  { id: 'sunset', label: 'Sunset', colors: 'from-orange-500 via-pink-500 to-purple-600' },
-  { id: 'ice', label: 'Ice', colors: 'from-cyan-300 via-blue-400 to-indigo-600' },
+  {
+    id: "neon",
+    label: "Arc-en-ciel",
+    colors: "from-fuchsia-500 via-cyan-400 to-lime-400",
+  },
+  {
+    id: "sunset",
+    label: "Coucher de soleil",
+    colors: "from-orange-500 via-pink-500 to-purple-600",
+  },
+  {
+    id: "ice",
+    label: "Glace",
+    colors: "from-cyan-300 via-blue-400 to-indigo-600",
+  },
 ];
 
 export function GameStudio() {
-  const [game, setGame] = React.useState<GameId>('ball-escape');
+  const [game, setGame] = React.useState<GameId>("ball-escape");
   const [duration, setDuration] = React.useState(15);
-  const [difficulty, setDifficulty] = React.useState(GAME_CATALOG[0].metricDefault);
-  const [theme, setTheme] = React.useState<Theme>('neon');
-  const [soundPack, setSoundPack] = React.useState<SoundPack>('auto');
+  const [difficulty, setDifficulty] = React.useState(
+    GAME_CATALOG[0].metricDefault
+  );
+  const [theme, setTheme] = React.useState<Theme>("neon");
+  const [soundPack, setSoundPack] = React.useState<SoundPack>("auto");
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
-  const [musicFile, setMusicFile] = React.useState('__discover__');
-  const [musicMode, setMusicMode] = React.useState<MusicMode>('continuous');
+  const [musicFile, setMusicFile] = React.useState("__discover__");
+  const [musicMode, setMusicMode] = React.useState<MusicMode>("continuous");
   const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [title, setTitle] = React.useState('Will the ball escape?');
-  const [seed, setSeed] = React.useState('');
+  const [title, setTitle] = React.useState("Will the ball escape?");
+  const [seed, setSeed] = React.useState("");
   const [rendering, setRendering] = React.useState(false);
   const [elapsed, setElapsed] = React.useState(0);
   const [batchSize, setBatchSize] = React.useState(1);
@@ -68,17 +99,22 @@ export function GameStudio() {
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<GameResult | null>(null);
   const [batchResults, setBatchResults] = React.useState<GameResult[]>([]);
-  const [caption, setCaption] = React.useState('');
+  const [caption, setCaption] = React.useState("");
   const [accounts, setAccounts] = React.useState<string[]>([]);
-  const [publishedAccounts, setPublishedAccounts] = React.useState<string[]>([]);
+  const [publishedAccounts, setPublishedAccounts] = React.useState<string[]>(
+    []
+  );
   const [uploading, setUploading] = React.useState(false);
   const [uploadMessage, setUploadMessage] = React.useState<string | null>(null);
-  const [tiktokSound, setTiktokSound] = React.useState('');
+  const [tiktokSound, setTiktokSound] = React.useState("");
+  const [publishTab, setPublishTab] = React.useState<"tiktok" | "youtube">(
+    "tiktok"
+  );
   const gameDefinition = getGameDefinition(game);
   const [routesHydrated, setRoutesHydrated] = React.useState(false);
 
   React.useEffect(() => {
-    fetch('/api/music/list')
+    fetch("/api/music/list")
       .then((response) => response.json())
       .then((data) => setMusicTracks(data.tracks || []))
       .catch(() => setMusicTracks([]));
@@ -86,8 +122,12 @@ export function GameStudio() {
 
   React.useEffect(() => {
     try {
-      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
-      setAccounts(Array.isArray(routes['ball-escape']) ? routes['ball-escape'] : []);
+      const routes = JSON.parse(
+        window.localStorage.getItem("clipmaker-game-tiktok-routes") || "{}"
+      ) as Record<string, string[]>;
+      setAccounts(
+        Array.isArray(routes["ball-escape"]) ? routes["ball-escape"] : []
+      );
     } catch {
       setAccounts([]);
     }
@@ -97,16 +137,24 @@ export function GameStudio() {
   React.useEffect(() => {
     if (!routesHydrated) return;
     try {
-      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
+      const routes = JSON.parse(
+        window.localStorage.getItem("clipmaker-game-tiktok-routes") || "{}"
+      ) as Record<string, string[]>;
       routes[game] = accounts;
-      window.localStorage.setItem('clipmaker-game-tiktok-routes', JSON.stringify(routes));
+      window.localStorage.setItem(
+        "clipmaker-game-tiktok-routes",
+        JSON.stringify(routes)
+      );
     } catch {}
   }, [accounts, game, routesHydrated]);
 
   React.useEffect(() => {
     if (!rendering) return;
     setElapsed(0);
-    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    const timer = window.setInterval(
+      () => setElapsed((value) => value + 1),
+      1000
+    );
     return () => window.clearInterval(timer);
   }, [rendering]);
 
@@ -117,15 +165,17 @@ export function GameStudio() {
   function selectGame(nextGame: GameId) {
     const definition = getGameDefinition(nextGame);
     try {
-      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-tiktok-routes') || '{}') as Record<string, string[]>;
+      const routes = JSON.parse(
+        window.localStorage.getItem("clipmaker-game-tiktok-routes") || "{}"
+      ) as Record<string, string[]>;
       setAccounts(Array.isArray(routes[nextGame]) ? routes[nextGame] : []);
     } catch {
       setAccounts([]);
     }
     setGame(nextGame);
     setDifficulty(definition.metricDefault);
-    setMusicMode('continuous');
-    if (nextGame === 'soft-body-slide') setDuration(15);
+    setMusicMode("continuous");
+    if (nextGame === "soft-body-slide") setDuration(15);
     setTitle(definition.defaultHook);
     setResult(null);
     setBatchResults([]);
@@ -144,9 +194,9 @@ export function GameStudio() {
       const generated: GameResult[] = [];
       const requestedSeed = seed.trim() ? Number(seed) : undefined;
       for (let index = 0; index < batchSize; index += 1) {
-        const response = await fetch('/api/game/render', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const response = await fetch("/api/game/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             game,
             duration,
@@ -157,15 +207,20 @@ export function GameStudio() {
             musicMode,
             musicVolume,
             title,
-            seed: requestedSeed ? ((requestedSeed + index - 1) % 2_147_483_647) + 1 : undefined,
+            seed: requestedSeed
+              ? ((requestedSeed + index - 1) % 2_147_483_647) + 1
+              : undefined,
           }),
         });
         const data = await response.json();
-        if (!data.ok) throw new Error(`Video ${index + 1}: ${data.error || 'The render failed.'}`);
+        if (!data.ok)
+          throw new Error(
+            `Vidéo ${index + 1} : ${data.error || "échec du rendu."}`
+          );
         generated.push(data);
         setBatchResults([...generated]);
         setResult(data);
-        setCaption(`${data.caption} ${data.tags.join(' ')}`);
+        setCaption(`${data.caption} ${data.tags.join(" ")}`);
         setSeed(String(data.seed));
         setBatchProgress(index + 1);
       }
@@ -178,26 +233,32 @@ export function GameStudio() {
 
   function selectResult(next: GameResult) {
     setResult(next);
-    setCaption(`${next.caption} ${next.tags.join(' ')}`);
+    setCaption(`${next.caption} ${next.tags.join(" ")}`);
     setPublishedAccounts([]);
     setUploadMessage(null);
   }
 
   async function uploadMusic(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    event.currentTarget.value = '';
+    event.currentTarget.value = "";
     if (!file) return;
     setUploadingMusic(true);
     setError(null);
     try {
       const form = new FormData();
-      form.append('file', file);
-      form.append('vibe', 'game');
-      const response = await fetch('/api/music/upload', { method: 'POST', body: form });
+      form.append("file", file);
+      form.append("vibe", "game");
+      const response = await fetch("/api/music/upload", {
+        method: "POST",
+        body: form,
+      });
       const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'The audio upload failed.');
+      if (!data.ok) throw new Error(data.error || "Échec de l’import audio.");
       setMusicFile(data.file);
-      setMusicTracks((tracks) => [{ id: data.file, title: file.name, file: data.file, vibe: ['game'] }, ...tracks.filter((track) => track.file !== data.file)]);
+      setMusicTracks((tracks) => [
+        { id: data.file, title: file.name, file: data.file, vibe: ["game"] },
+        ...tracks.filter((track) => track.file !== data.file),
+      ]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -207,9 +268,13 @@ export function GameStudio() {
 
   async function uploadTikTok() {
     if (!result || !accounts.length) return;
-    const pendingAccounts = accounts.filter((username) => !publishedAccounts.includes(username));
+    const pendingAccounts = accounts.filter(
+      (username) => !publishedAccounts.includes(username)
+    );
     if (!pendingAccounts.length) {
-      setUploadMessage('All selected TikTok accounts already received this render.');
+      setUploadMessage(
+        "Ce rendu a déjà été publié sur tous les comptes TikTok sélectionnés."
+      );
       return;
     }
     setUploading(true);
@@ -218,9 +283,9 @@ export function GameStudio() {
       const messages: string[] = [];
       const uploaded = new Set(publishedAccounts);
       for (const username of pendingAccounts) {
-        const response = await fetch('/api/tiktok/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const response = await fetch("/api/tiktok/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             filename: result.filename,
             username,
@@ -231,13 +296,17 @@ export function GameStudio() {
         const data = await response.json();
         if (data.ok) {
           uploaded.add(username);
-          messages.push(`✅ @${username} — published`);
+          messages.push(`✅ @${username} — publié`);
         } else {
-          messages.push(`❌ @${username} — ${data.error || data.stderr || 'upload failed'}`);
+          console.error(
+            `Publication TikTok impossible pour @${username}`,
+            data.error || data.stderr
+          );
+          messages.push(`❌ @${username} — échec de la publication`);
         }
       }
       setPublishedAccounts([...uploaded]);
-      setUploadMessage(messages.join('\n'));
+      setUploadMessage(messages.join("\n"));
     } catch (caught) {
       setUploadMessage(`❌ ${String(caught)}`);
     } finally {
@@ -245,258 +314,697 @@ export function GameStudio() {
     }
   }
 
+  const musicSummary =
+    musicFile === "__discover__"
+      ? "découverte automatique"
+      : musicFile === "__auto__"
+      ? "rotation de la bibliothèque"
+      : musicFile
+      ? "piste choisie"
+      : "piste générée";
+
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-white/10 bg-ink-800/70 overflow-hidden">
-        <div className="h-1.5 bg-gradient-to-r from-fuchsia-500 via-cyan-400 to-lime-400" />
-        <div className="p-4 space-y-4">
+    <div className="space-y-6">
+      <section className="panel p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-accent/15 p-2.5"><Gamepad2 className="size-5 text-accent" /></div>
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent-soft">
+              <Gamepad2 className="size-5" />
+            </span>
             <div>
-              <h2 className="font-semibold">Automatic Game Studio</h2>
-              <p className="text-xs text-ink-400 mt-1">Choose an original simulation, tune its challenge and generate a deterministic 1080×1920 video with synchronized audio.</p>
+              <h2 className="text-lg font-semibold">
+                Studio de jeux automatiques
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-ink-400">
+                Choisis une simulation originale, règle son rythme et génère une
+                vidéo 1080×1920 avec un son parfaitement synchronisé.
+              </p>
             </div>
           </div>
+          <span className="w-fit rounded-full border border-emerald-400/15 bg-emerald-400/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-200">
+            {GAME_CATALOG.length} moteurs originaux
+          </span>
+        </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-ink-300">Game format</span>
-              <span className="text-[10px] text-emerald-300">{GAME_CATALOG.length} original engines</span>
-            </div>
-            <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0">
-              {GAME_CATALOG.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => selectGame(item.id)}
-                  aria-pressed={game === item.id}
-                  className={`group min-w-[82%] snap-center overflow-hidden rounded-2xl border text-left transition duration-200 sm:min-w-0 ${game === item.id ? 'border-white/55 bg-white/10 shadow-xl shadow-black/30 ring-1 ring-white/15' : 'border-white/10 bg-ink-900/45 hover:-translate-y-0.5 hover:border-white/25 hover:bg-white/5'}`}
-                >
-                  <span className="relative block aspect-[9/12] overflow-hidden bg-ink-950">
-                    <Image
-                      src={item.preview}
-                      alt={`${item.name} gameplay preview`}
-                      fill
-                      sizes="(max-width: 640px) 100vw, 220px"
-                      className="object-cover object-center transition duration-500 group-hover:scale-[1.035]"
-                    />
-                    <span className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-black/15" />
-                    <span className="absolute left-2.5 top-2.5 rounded-full border border-white/15 bg-black/55 px-2 py-1 text-[9px] font-bold tracking-[0.16em] text-white/90 backdrop-blur-md">
-                      {item.engineLabel}
-                    </span>
-                    {game === item.id && (
-                      <span className="absolute right-2.5 top-2.5 grid size-7 place-items-center rounded-full bg-white text-ink-950 shadow-lg">
-                        <CheckCircle2 className="size-4" />
-                      </span>
-                    )}
-                    <span className="absolute inset-x-0 bottom-0 p-3">
-                      <span className="block text-base font-semibold leading-tight text-white drop-shadow-lg">{item.name}</span>
-                    </span>
+        <div className="mt-6 flex items-center gap-3">
+          <span className="grid size-7 place-items-center rounded-full bg-accent text-xs font-bold">
+            1
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold">Choisir la simulation</h3>
+            <p className="text-xs text-ink-500">
+              Chaque carte montre une image issue du vrai moteur de rendu.
+            </p>
+          </div>
+        </div>
+        <div className="scroll-pretty mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:overflow-visible md:pb-0">
+          {GAME_CATALOG.map((item) => {
+            const selected = game === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => selectGame(item.id)}
+                aria-pressed={selected}
+                aria-labelledby={`game-${item.id}-title`}
+                aria-describedby={`game-${item.id}-objective game-${item.id}-description`}
+                className={`group min-w-[78vw] snap-center overflow-hidden rounded-2xl border text-left transition duration-200 sm:min-w-[20rem] md:min-w-0 ${
+                  selected
+                    ? "border-accent/80 bg-accent/[0.08] shadow-xl shadow-accent/10 ring-1 ring-accent/30"
+                    : "border-white/10 bg-ink-900/55 hover:-translate-y-1 hover:border-white/25"
+                }`}
+              >
+                <span className="relative block aspect-[4/5] overflow-hidden bg-black">
+                  <Image
+                    src={item.preview}
+                    alt=""
+                    aria-hidden
+                    fill
+                    sizes="(max-width: 768px) 78vw, 340px"
+                    className="scale-125 object-cover opacity-35 blur-2xl"
+                  />
+                  <span className="absolute inset-0 bg-black/25" />
+                  <Image
+                    src={item.preview}
+                    alt={`Aperçu du jeu ${item.uiName}`}
+                    fill
+                    sizes="(max-width: 768px) 78vw, 340px"
+                    className="object-contain transition duration-500 group-hover:scale-[1.02]"
+                  />
+                  <span className="absolute left-3 top-3 rounded-full border border-white/15 bg-black/65 px-2.5 py-1 text-[9px] font-bold tracking-[0.14em] text-white backdrop-blur">
+                    {item.engineLabel}
                   </span>
-                  <span className="block p-3">
-                    <span className="block text-[11px] leading-4 text-ink-300">{item.description}</span>
-                    <span className={`mt-3 block h-1 rounded-full bg-gradient-to-r ${item.accent}`} />
+                  <span className="absolute bottom-3 left-3 rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/80 backdrop-blur">
+                    Aperçu réel
                   </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <label className="text-xs text-ink-400 space-y-1 block">
-            <span>Hook shown from the first frame</span>
-            <input
-              value={title}
-              maxLength={52}
-              onChange={(event) => setTitle(event.target.value)}
-              className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
-            />
-          </label>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Duration</span>
-              <select value={duration} disabled={game === 'soft-body-slide'} onChange={(event) => setDuration(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
-                <option value={15}>15 seconds</option>
-                <option value={30}>30 seconds</option>
-                <option value={45}>45 seconds</option>
-                <option value={60}>60 seconds</option>
-              </select>
-            </label>
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>{gameDefinition.metricLabel}: {difficulty}</span>
-              <input type="range" min={gameDefinition.metricMin} max={gameDefinition.metricMax} step={gameDefinition.metricStep} value={difficulty} onChange={(event) => setDifficulty(Number(event.target.value))} className="w-full h-10 accent-fuchsia-500" />
-            </label>
-          </div>
-
-          <div className="space-y-1.5">
-            <span className="text-xs text-ink-400">Color theme</span>
-            <div className="grid grid-cols-3 gap-2">
-              {themes.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setTheme(item.id)}
-                  className={`rounded-xl border p-2 text-xs transition ${theme === item.id ? 'border-white/50 bg-white/10 text-white' : 'border-white/10 text-ink-400 hover:bg-white/5'}`}
-                >
-                  <span className={`block h-2 rounded-full bg-gradient-to-r ${item.colors} mb-1.5`} />
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-ink-900/55 p-3 space-y-3">
-            <div className="flex items-center gap-2">
-              <Music2 className="size-4 text-cyan-300" />
-              <div>
-                <h3 className="text-sm font-medium">Simulation audio</h3>
-                <p className="text-[11px] text-ink-400">Match fresh licensed music and collision effects to each simulation.</p>
-              </div>
-            </div>
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Collision sound pack</span>
-              <select value={soundPack} disabled={game === 'soft-body-slide'} onChange={(event) => setSoundPack(event.target.value as SoundPack)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
-                <option value="auto">{game === 'soft-body-slide' ? 'Premium Foley — slide, squash and impact' : 'Auto — matched to each game'}</option>
-                <option value="meme">Meme Mix — meows, boings and pops</option>
-                <option value="funny">Funny — boings and pops</option>
-                <option value="arcade">Arcade — musical hits</option>
-                <option value="impact">Impact — heavy bounces</option>
-                <option value="asmr">Peaceful ASMR — soft tuned taps</option>
-              </select>
-            </label>
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Music source</span>
-              <div className="flex gap-2">
-                <select value={musicFile} onChange={(event) => setMusicFile(event.target.value)} className="min-w-0 flex-1 bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                  <option value="__discover__">Auto Discovery — fresh licensed track</option>
-                  <option value="">Original generated electronic track</option>
-                  {musicTracks.length > 0 && <option value="__auto__">Auto — rotate my audio library</option>}
-                  {musicTracks.map((track) => <option key={track.id} value={track.file}>{track.title}</option>)}
-                </select>
-                <Button type="button" variant="outline" size="sm" onClick={() => musicInputRef.current?.click()} disabled={uploadingMusic}>
-                  {uploadingMusic ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />} Upload
-                </Button>
-                <input ref={musicInputRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg" className="hidden" onChange={uploadMusic} />
-              </div>
-            </label>
-            {musicFile && (
-              <div className="grid grid-cols-2 gap-3">
-                <label className="text-xs text-ink-400 space-y-1 block">
-                  <span>Music behavior</span>
-                  <select value={musicMode} disabled={game === 'soft-body-slide'} onChange={(event) => setMusicMode(event.target.value as MusicMode)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
-                    <option value="hit-reveal">Hit Reveal — unlock each beat</option>
-                    <option value="continuous">Continuous soundtrack</option>
-                  </select>
-                </label>
-                <label className="text-xs text-ink-400 space-y-1 block">
-                  <span>Track volume: {Math.round(musicVolume * 100)}%</span>
-                  <input type="range" min={10} max={85} value={Math.round(musicVolume * 100)} onChange={(event) => setMusicVolume(Number(event.target.value) / 100)} className="w-full h-10 accent-cyan-400" />
-                </label>
-              </div>
-            )}
-            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Continuous music is the default; Hit Reveal remains available for beat-by-beat experiments.</p>
-          </div>
-
-          <label className="text-xs text-ink-400 space-y-1 block">
-            <span>Seed — leave empty for a new random run</span>
-            <div className="flex gap-2">
-              <input
-                inputMode="numeric"
-                value={seed}
-                onChange={(event) => setSeed(event.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="Random"
-                className="min-w-0 flex-1 bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white"
-              />
-              <Button type="button" variant="outline" size="sm" onClick={randomizeSeed} aria-label="New seed"><RefreshCw className="size-4" /></Button>
-            </div>
-          </label>
-
-          <label className="text-xs text-ink-400 space-y-1 block">
-            <span>Batch size</span>
-            <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-              <option value={1}>1 video</option>
-              <option value={2}>2 unique videos</option>
-              <option value={3}>3 unique videos</option>
-            </select>
-            <span className="block text-[10px] text-ink-500">Each video gets a different deterministic seed and soundtrack selection. Publishing always remains manual.</span>
-          </label>
-
-          <Button onClick={generate} disabled={rendering || !title.trim()} className="w-full" size="lg">
-            {rendering ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
-            {rendering ? `Encoding ${Math.min(batchProgress + 1, batchSize)}/${batchSize}… ${elapsed}s` : `Generate ${batchSize === 1 ? 'video' : `${batchSize} videos`}`}
-          </Button>
-          <p className="text-[11px] text-ink-500 text-center">Rendering stays on your server. No third-party video is used.</p>
-          {error && <p className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-200">{error}</p>}
+                  {selected && (
+                    <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-ink-950 shadow-lg">
+                      <CheckCircle2 className="size-3.5" /> Sélectionné
+                    </span>
+                  )}
+                </span>
+                <span className="block space-y-2 p-4">
+                  <span
+                    id={`game-${item.id}-title`}
+                    className="block text-base font-semibold text-white"
+                  >
+                    {item.uiName}
+                  </span>
+                  <span
+                    id={`game-${item.id}-objective`}
+                    className="block text-xs font-medium leading-5 text-accent-soft"
+                  >
+                    {item.objective}
+                  </span>
+                  <span
+                    id={`game-${item.id}-description`}
+                    className="block text-xs leading-5 text-ink-400"
+                  >
+                    {item.description}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      {result && (
-        <>
-          {batchResults.length > 1 && (
-            <section className="rounded-xl border border-white/10 bg-ink-800/70 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium">Generated batch</h3>
-                <span className="text-[11px] text-emerald-300">{batchResults.length}/{batchSize} ready</span>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        <section className="panel p-5 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span className="grid size-7 place-items-center rounded-full bg-white/10 text-xs font-bold">
+              2
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold">Régler la vidéo</h3>
+              <p className="text-xs text-ink-500">
+                Contenu, apparence et identité sonore.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <div className="subpanel space-y-4 p-4">
+              <div className="flex items-center gap-2">
+                <Video className="size-4 text-accent-soft" />
+                <h4 className="text-sm font-semibold">Contenu</h4>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {batchResults.map((item, index) => (
-                  <button key={item.filename} type="button" onClick={() => selectResult(item)} className={`rounded-lg border p-2 text-left text-xs transition ${result.filename === item.filename ? 'border-cyan-300/60 bg-cyan-400/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}>
-                    <span className="block font-medium text-white">Video {index + 1}</span>
-                    <span className="text-ink-400">Seed {item.seed} · {(item.size / 1024 / 1024).toFixed(1)} MB</span>
+              <label className="block space-y-1.5 text-xs text-ink-400">
+                <span>
+                  Accroche dans la vidéo{" "}
+                  <span className="text-ink-500">(anglais)</span>
+                </span>
+                <input
+                  value={title}
+                  maxLength={52}
+                  onChange={(event) => setTitle(event.target.value)}
+                  className="field-control h-11"
+                />
+                <span className="block text-[10px] text-ink-500">
+                  Ce texte est intégré à la première image du Short.
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>Durée</span>
+                  <select
+                    value={duration}
+                    disabled={game === "soft-body-slide"}
+                    onChange={(event) =>
+                      setDuration(Number(event.target.value))
+                    }
+                    className="field-control h-11 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <option value={15}>15 s</option>
+                    <option value={30}>30 s</option>
+                    <option value={45}>45 s</option>
+                    <option value={60}>60 s</option>
+                  </select>
+                </label>
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>
+                    {gameDefinition.uiMetricLabel} :{" "}
+                    <strong className="text-white">{difficulty}</strong>
+                  </span>
+                  <input
+                    type="range"
+                    min={gameDefinition.metricMin}
+                    max={gameDefinition.metricMax}
+                    step={gameDefinition.metricStep}
+                    value={difficulty}
+                    onChange={(event) =>
+                      setDifficulty(Number(event.target.value))
+                    }
+                    className="h-11 w-full accent-accent"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="subpanel space-y-4 p-4">
+              <div className="flex items-center gap-2">
+                <Palette className="size-4 text-accent-soft" />
+                <h4 className="text-sm font-semibold">Style visuel</h4>
+              </div>
+              <p className="text-xs leading-5 text-ink-500">
+                Le thème recolore le décor, les anneaux et les effets sans
+                modifier la simulation.
+              </p>
+              <div className="grid gap-2">
+                {themes.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTheme(item.id)}
+                    aria-pressed={theme === item.id}
+                    className={`flex h-11 items-center gap-3 rounded-xl border px-3 text-xs font-medium transition ${
+                      theme === item.id
+                        ? "border-white/35 bg-white/10 text-white"
+                        : "border-white/10 text-ink-400 hover:border-white/20 hover:bg-white/5"
+                    }`}
+                  >
+                    <span
+                      className={`h-3 w-16 rounded-full bg-gradient-to-r ${item.colors}`}
+                    />
+                    <span>{item.label}</span>
+                    {theme === item.id && (
+                      <CheckCircle2 className="ml-auto size-4" />
+                    )}
                   </button>
                 ))}
               </div>
-            </section>
-          )}
-          <section className="rounded-2xl border border-white/10 bg-black overflow-hidden">
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video src={`/api/renders/${encodeURIComponent(result.filename)}`} controls playsInline loop className="w-full max-h-[72vh] aspect-[9/16] object-contain" />
-          </section>
-
-          <section className="rounded-xl bg-ink-700/40 border border-white/10 p-3 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-medium">Run #{result.seed}</h3>
-                <p className="text-[11px] text-ink-400">{result.gameName} · {result.duration}s · {result.difficulty} {result.metricLabel.toLowerCase()} · {(result.size / 1024 / 1024).toFixed(1)} MB{result.musicTitle ? ` · ${result.musicTitle}` : ''}</p>
-                <p className="text-[10px] text-cyan-200/80 mt-0.5">{result.musicMode === 'hit-reveal' ? `${result.musicHits} collision-triggered music slices` : result.musicMode === 'continuous' ? 'Continuous soundtrack' : 'Original generated soundtrack'}</p>
-              </div>
-              <a href={`/api/renders/${encodeURIComponent(result.filename)}`} download className="inline-flex h-9 items-center gap-2 rounded-xl bg-white/5 px-3 text-sm hover:bg-white/10">
-                <Download className="size-4" /> Download
-              </a>
             </div>
-            {result.musicNote && <p className="text-[11px] text-amber-200/80">{result.musicNote}</p>}
-            {result.musicCredit && <p className="text-[10px] text-ink-400 break-words">{result.musicCredit}</p>}
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>TikTok / Shorts caption</span>
-              <textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={3} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" />
-            </label>
-            <TikTokTargetPicker value={accounts} onChange={setAccounts} />
-            <label className="text-xs text-ink-400 space-y-1 block">
-              <span>Official TikTok sound — optional URL or ID</span>
-              <input
-                value={tiktokSound}
-                onChange={(event) => setTiktokSound(event.target.value)}
-                placeholder="https://www.tiktok.com/music/…"
-                className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-              />
-              <span className="block text-[10px] text-ink-500">Attaches the post to a funny or trending sound without embedding it in the YouTube file.</span>
-            </label>
-            <Button variant="outline" onClick={uploadTikTok} disabled={uploading || !accounts.length || accounts.every((username) => publishedAccounts.includes(username))}>
-              {uploading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-              Publish to {accounts.length || 0} TikTok {accounts.length === 1 ? 'account' : 'accounts'}
-            </Button>
-            {uploadMessage && <p className="text-sm text-ink-200 whitespace-pre-wrap">{uploadMessage}</p>}
-          </section>
+          </div>
 
-          <YoutubePublisher
-            key={result.filename}
-            gameId={result.game}
-            filename={result.filename}
-            defaultTitle={result.youtubeTitle}
-            description={caption}
-            tags={result.tags}
-          />
-        </>
+          <div className="subpanel mt-4 space-y-4 p-4">
+            <div className="flex items-start gap-2">
+              <Music2 className="mt-0.5 size-4 text-cyan-300" />
+              <div>
+                <h4 className="text-sm font-semibold">
+                  Audio de la simulation
+                </h4>
+                <p className="mt-1 text-xs text-ink-500">
+                  Associe une musique sous licence et des effets de collision
+                  adaptés au jeu.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-4">
+              <label className="block space-y-1.5 text-xs text-ink-400">
+                <span>Jeu de sons de collision</span>
+                <select
+                  value={soundPack}
+                  disabled={game === "soft-body-slide"}
+                  onChange={(event) =>
+                    setSoundPack(event.target.value as SoundPack)
+                  }
+                  className="field-control h-11 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  <option value="auto">
+                    {game === "soft-body-slide"
+                      ? "Bruitage premium — glissade et impact"
+                      : "Automatique — adapté au jeu"}
+                  </option>
+                  <option value="meme">
+                    Mix mème — miaulements, boings et pops
+                  </option>
+                  <option value="funny">Drôle — boings et pops</option>
+                  <option value="arcade">Arcade — impacts musicaux</option>
+                  <option value="impact">Impact — rebonds lourds</option>
+                  <option value="asmr">ASMR paisible — tapotements doux</option>
+                </select>
+              </label>
+              <label className="block space-y-1.5 text-xs text-ink-400">
+                <span>Source musicale</span>
+                <div className="flex gap-2">
+                  <select
+                    value={musicFile}
+                    onChange={(event) => setMusicFile(event.target.value)}
+                    className="field-control h-11 min-w-0 flex-1"
+                  >
+                    <option value="__discover__">
+                      Découverte automatique — piste sous licence
+                    </option>
+                    <option value="">
+                      Piste électronique originale générée
+                    </option>
+                    {musicTracks.length > 0 && (
+                      <option value="__auto__">
+                        Rotation automatique de ma bibliothèque
+                      </option>
+                    )}
+                    {musicTracks.map((track) => (
+                      <option key={track.id} value={track.file}>
+                        {track.title}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => musicInputRef.current?.click()}
+                    disabled={uploadingMusic}
+                    aria-label="Importer une musique"
+                  >
+                    {uploadingMusic ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <UploadCloud className="size-4" />
+                    )}
+                    <span className="hidden sm:inline">Importer</span>
+                  </Button>
+                  <input
+                    ref={musicInputRef}
+                    type="file"
+                    accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg"
+                    className="hidden"
+                    onChange={uploadMusic}
+                  />
+                </div>
+              </label>
+            </div>
+            {musicFile && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>Comportement de la musique</span>
+                  <select
+                    value={musicMode}
+                    disabled={game === "soft-body-slide"}
+                    onChange={(event) =>
+                      setMusicMode(event.target.value as MusicMode)
+                    }
+                    className="field-control h-11 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <option value="hit-reveal">
+                      Révélation à l’impact — un fragment par collision
+                    </option>
+                    <option value="continuous">Bande-son continue</option>
+                  </select>
+                </label>
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>
+                    Volume de la piste :{" "}
+                    <strong className="text-white">
+                      {Math.round(musicVolume * 100)} %
+                    </strong>
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={85}
+                    value={Math.round(musicVolume * 100)}
+                    onChange={(event) =>
+                      setMusicVolume(Number(event.target.value) / 100)
+                    }
+                    className="h-11 w-full accent-cyan-400"
+                  />
+                </label>
+              </div>
+            )}
+            <p className="text-[11px] leading-4 text-amber-200/75">
+              La découverte automatique utilise uniquement des pistes CC BY
+              téléchargeables. Le mode continu est recommandé pour retenir
+              l’attention.
+            </p>
+          </div>
+        </section>
+
+        <aside className="space-y-4 xl:sticky xl:top-24">
+          <section className="panel p-5">
+            <div className="flex items-center gap-3">
+              <span className="grid size-7 place-items-center rounded-full bg-white/10 text-xs font-bold">
+                3
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold">Lancer la production</h3>
+                <p className="text-xs text-ink-500">
+                  Vérifie le résumé avant le rendu.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 rounded-2xl border border-white/10 bg-black/15 p-4">
+              <p className="text-sm font-semibold text-white">
+                {gameDefinition.uiName}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-ink-400">
+                {gameDefinition.objective}
+              </p>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <dt className="text-ink-500">Durée</dt>
+                  <dd className="mt-1 font-semibold text-white">
+                    {duration} s
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-500">
+                    {gameDefinition.uiMetricLabel}
+                  </dt>
+                  <dd className="mt-1 font-semibold text-white">
+                    {difficulty}
+                  </dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-ink-500">Audio</dt>
+                  <dd className="mt-1 font-semibold text-white">
+                    {musicSummary}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+            <details className="mt-4 rounded-2xl border border-white/10 bg-ink-900/45 p-3 open:bg-ink-900/70">
+              <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold text-ink-300">
+                <Settings2 className="size-4" /> Options avancées
+              </summary>
+              <div className="mt-4 space-y-4">
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>Graine aléatoire</span>
+                  <div className="flex gap-2">
+                    <input
+                      inputMode="numeric"
+                      value={seed}
+                      onChange={(event) =>
+                        setSeed(
+                          event.target.value.replace(/\D/g, "").slice(0, 10)
+                        )
+                      }
+                      placeholder="Aléatoire"
+                      className="field-control h-11 min-w-0 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={randomizeSeed}
+                      aria-label="Créer une nouvelle graine"
+                    >
+                      <RefreshCw className="size-4" />
+                    </Button>
+                  </div>
+                </label>
+                <label className="block space-y-1.5 text-xs text-ink-400">
+                  <span>Nombre de vidéos</span>
+                  <select
+                    value={batchSize}
+                    onChange={(event) =>
+                      setBatchSize(Number(event.target.value))
+                    }
+                    className="field-control h-11"
+                  >
+                    <option value={1}>1 vidéo</option>
+                    <option value={2}>2 vidéos uniques</option>
+                    <option value={3}>3 vidéos uniques</option>
+                  </select>
+                  <span className="block text-[10px] leading-4 text-ink-500">
+                    Chaque vidéo reçoit une graine et une sélection musicale
+                    différentes.
+                  </span>
+                </label>
+              </div>
+            </details>
+            <Button
+              onClick={generate}
+              disabled={rendering || !title.trim()}
+              className="mt-5 w-full"
+              size="lg"
+            >
+              {rendering ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <Sparkles className="size-5" />
+              )}
+              {rendering
+                ? `Encodage ${Math.min(
+                    batchProgress + 1,
+                    batchSize
+                  )}/${batchSize}… ${elapsed} s`
+                : `Générer ${
+                    batchSize === 1 ? "la vidéo" : `${batchSize} vidéos`
+                  }`}
+            </Button>
+            <p className="mt-3 text-center text-[11px] leading-4 text-ink-500">
+              Le rendu reste sur ton serveur. Aucune vidéo tierce n’est
+              utilisée.
+            </p>
+            {error && (
+              <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+                <p>La génération n’a pas abouti.</p>
+                <details className="mt-2 text-xs text-red-100/75">
+                  <summary className="cursor-pointer font-medium">
+                    Détails techniques
+                  </summary>
+                  <p className="mt-1 break-words">{error}</p>
+                </details>
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
+
+      {result && (
+        <section className="panel p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="grid size-7 place-items-center rounded-full bg-emerald-400 text-xs font-bold text-ink-950">
+                4
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold">
+                  Prévisualiser et publier
+                </h3>
+                <p className="text-xs text-ink-500">
+                  Le rendu est prêt pour TikTok et YouTube Shorts.
+                </p>
+              </div>
+            </div>
+            <a
+              href={`/api/renders/${encodeURIComponent(result.filename)}`}
+              download
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-semibold transition hover:bg-white/10"
+            >
+              <Download className="size-4" /> Télécharger
+            </a>
+          </div>
+
+          {batchResults.length > 1 && (
+            <div className="mt-5 rounded-2xl border border-white/10 bg-ink-900/45 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h4 className="text-xs font-semibold">Lot généré</h4>
+                <span className="text-[11px] text-emerald-300">
+                  {batchResults.length}/{batchSize} prêtes
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {batchResults.map((item, index) => (
+                  <button
+                    key={item.filename}
+                    type="button"
+                    onClick={() => selectResult(item)}
+                    className={`rounded-xl border p-2.5 text-left text-xs transition ${
+                      result.filename === item.filename
+                        ? "border-accent/60 bg-accent/10"
+                        : "border-white/10 bg-black/20 hover:bg-white/5"
+                    }`}
+                  >
+                    <span className="block font-semibold text-white">
+                      Vidéo {index + 1}
+                    </span>
+                    <span className="text-ink-500">
+                      Graine {item.seed} ·{" "}
+                      {(item.size / 1024 / 1024).toFixed(1)} Mo
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 grid items-start gap-6 lg:grid-cols-[minmax(280px,25rem)_minmax(0,1fr)]">
+            <div className="space-y-3 lg:sticky lg:top-24">
+              <div className="overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/30">
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <video
+                  src={`/api/renders/${encodeURIComponent(result.filename)}`}
+                  controls
+                  playsInline
+                  loop
+                  className="aspect-[9/16] w-full object-contain"
+                />
+              </div>
+              <div className="subpanel p-3.5">
+                <p className="text-sm font-semibold">Rendu #{result.seed}</p>
+                <p className="mt-1 text-xs leading-5 text-ink-400">
+                  {getGameDefinition(result.game).uiName} · {result.duration} s
+                  · {result.difficulty}{" "}
+                  {getGameDefinition(result.game).uiMetricLabel.toLowerCase()} ·{" "}
+                  {(result.size / 1024 / 1024).toFixed(1)} Mo
+                </p>
+                <p className="mt-1 text-[11px] text-cyan-200/80">
+                  {result.musicMode === "hit-reveal"
+                    ? `${result.musicHits} séquences déclenchées par collision`
+                    : result.musicMode === "continuous"
+                    ? "Bande-son continue"
+                    : "Bande-son originale générée"}
+                </p>
+                {result.musicTitle && (
+                  <p className="mt-2 text-[11px] text-ink-500">
+                    Musique : {result.musicTitle}
+                  </p>
+                )}
+                {result.musicNote && (
+                  <p className="mt-2 text-[11px] text-amber-200/80">
+                    {result.musicNote}
+                  </p>
+                )}
+                {result.musicCredit && (
+                  <p className="mt-2 break-words text-[10px] text-ink-500">
+                    {result.musicCredit}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-4">
+              <div className="grid grid-cols-2 rounded-2xl border border-white/10 bg-ink-900/55 p-1">
+                <button
+                  type="button"
+                  onClick={() => setPublishTab("tiktok")}
+                  className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
+                    publishTab === "tiktok"
+                      ? "bg-white/10 text-white shadow"
+                      : "text-ink-400 hover:text-white"
+                  }`}
+                >
+                  <UploadCloud className="size-4" /> TikTok
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPublishTab("youtube")}
+                  className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
+                    publishTab === "youtube"
+                      ? "bg-red-500/15 text-white shadow"
+                      : "text-ink-400 hover:text-white"
+                  }`}
+                >
+                  <Youtube className="size-4" /> YouTube
+                </button>
+              </div>
+
+              {publishTab === "tiktok" ? (
+                <section className="subpanel space-y-4 p-4 sm:p-5">
+                  <div>
+                    <h4 className="text-sm font-semibold">
+                      Publication TikTok
+                    </h4>
+                    <p className="mt-1 text-xs text-ink-500">
+                      Choisis les comptes cibles et vérifie la légende avant
+                      l’envoi.
+                    </p>
+                  </div>
+                  <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>
+                      Légende TikTok / Shorts{" "}
+                      <span className="text-ink-500">(contenu en anglais)</span>
+                    </span>
+                    <textarea
+                      value={caption}
+                      onChange={(event) => setCaption(event.target.value)}
+                      rows={4}
+                      className="field-control min-h-28 py-3"
+                    />
+                  </label>
+                  <TikTokTargetPicker value={accounts} onChange={setAccounts} />
+                  <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>
+                      Son TikTok officiel — URL ou identifiant facultatif
+                    </span>
+                    <input
+                      value={tiktokSound}
+                      onChange={(event) => setTiktokSound(event.target.value)}
+                      placeholder="https://www.tiktok.com/music/…"
+                      className="field-control h-11"
+                    />
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      Associe la publication à un son drôle ou tendance sans
+                      l’intégrer au fichier YouTube.
+                    </span>
+                  </label>
+                  <Button
+                    onClick={uploadTikTok}
+                    disabled={
+                      uploading ||
+                      !accounts.length ||
+                      accounts.every((username) =>
+                        publishedAccounts.includes(username)
+                      )
+                    }
+                  >
+                    {uploading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <UploadCloud className="size-4" />
+                    )}
+                    Publier sur {accounts.length || 0} compte
+                    {accounts.length === 1 ? "" : "s"} TikTok
+                  </Button>
+                  {uploadMessage && (
+                    <p className="whitespace-pre-wrap text-sm text-ink-200">
+                      {uploadMessage}
+                    </p>
+                  )}
+                </section>
+              ) : (
+                <YoutubePublisher
+                  key={result.filename}
+                  gameId={result.game}
+                  filename={result.filename}
+                  defaultTitle={result.youtubeTitle}
+                  description={caption}
+                  tags={result.tags}
+                />
+              )}
+            </div>
+          </div>
+        </section>
       )}
     </div>
   );

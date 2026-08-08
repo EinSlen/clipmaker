@@ -40,7 +40,7 @@ def run_ball_escape(*, seed: int, fps: int, duration: float = 10.0, rings: int =
 class GameCatalogTests(unittest.TestCase):
     def test_frontend_catalog_matches_python_engines(self):
         source = (ROOT / "lib" / "game-catalog.ts").read_text(encoding="utf-8")
-        catalog_ids = tuple(re.findall(r"\bid: '([a-z-]+)'", source))
+        catalog_ids = tuple(re.findall(r"\bid:\s*['\"]([a-z-]+)['\"]", source))
         self.assertEqual(catalog_ids, (*ENGINE_IDS, *PREMIUM_IDS))
         self.assertEqual(len(catalog_ids), len(set(catalog_ids)))
 

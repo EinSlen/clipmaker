@@ -1,22 +1,22 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { Loader2, RefreshCw, Plus } from 'lucide-react';
-import { Button } from './Button';
+import * as React from "react";
+import { Loader2, RefreshCw, Plus } from "lucide-react";
+import { Button } from "./Button";
 
 export function TextProposals({ onPick }: { onPick: (text: string) => void }) {
-  const [mood, setMood] = React.useState('mélancolique');
-  const [theme, setTheme] = React.useState('');
+  const [mood, setMood] = React.useState("mélancolique");
+  const [theme, setTheme] = React.useState("");
   const [items, setItems] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/ai/text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood, theme, count: 10 })
+      const r = await fetch("/api/ai/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood, theme, count: 10 }),
       });
       const j = await r.json();
       setItems(j.texts || []);
@@ -30,12 +30,13 @@ export function TextProposals({ onPick }: { onPick: (text: string) => void }) {
   }, []); // initial
 
   return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_auto]">
         <select
           value={mood}
           onChange={(e) => setMood(e.target.value)}
-          className="h-9 bg-ink-700/80 border border-white/10 rounded-lg px-2 text-sm"
+          aria-label="Ambiance du texte"
+          className="field-control h-10"
         >
           <option>mélancolique</option>
           <option>solitude</option>
@@ -47,20 +48,45 @@ export function TextProposals({ onPick }: { onPick: (text: string) => void }) {
         <input
           value={theme}
           onChange={(e) => setTheme(e.target.value)}
-          placeholder="thème optionnel (ex: pluie, ex copine…)"
-          className="flex-1 h-9 bg-ink-700/80 border border-white/10 rounded-lg px-3 text-sm"
+          placeholder="Thème facultatif : pluie, rupture…"
+          aria-label="Thème facultatif"
+          className="field-control h-10"
         />
-        <Button onClick={load} size="sm" variant="ghost" aria-label="Régénérer">
-          {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+        <Button
+          onClick={load}
+          size="sm"
+          variant="ghost"
+          className="h-10"
+          aria-label="Régénérer les propositions"
+        >
+          {loading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
         </Button>
       </div>
-      <ul className="space-y-2">
+      {loading && items.length === 0 && (
+        <p
+          className="flex items-center gap-2 py-3 text-sm text-ink-400"
+          aria-live="polite"
+        >
+          <Loader2 className="size-4 animate-spin" /> Préparation des
+          propositions…
+        </p>
+      )}
+      <ul className="space-y-2" aria-live="polite">
         {items.map((t, i) => (
-          <li key={i} className="rounded-xl bg-ink-700/60 border border-white/10 p-3 flex gap-3 items-start">
-            <p className="flex-1 text-sm whitespace-pre-wrap font-serif italic text-ink-50">{t}</p>
+          <li
+            key={i}
+            className="subpanel flex items-start gap-3 p-3 transition hover:border-white/20 hover:bg-white/[0.04]"
+          >
+            <p className="flex-1 whitespace-pre-wrap font-serif text-sm italic leading-5 text-ink-50">
+              {t}
+            </p>
             <button
               onClick={() => onPick(t)}
-              className="shrink-0 size-9 rounded-lg bg-accent/90 text-white grid place-items-center hover:bg-accent"
+              className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/50 bg-accent/90 text-white shadow-lg shadow-accent/15 transition hover:-translate-y-0.5 hover:bg-accent"
               aria-label="Ajouter ce texte"
               title="Ajouter à la vidéo"
             >

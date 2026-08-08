@@ -26,7 +26,7 @@ export async function GET() {
       .map((a) => ({ username: a.username as string, cookieFile: a.file }));
     return NextResponse.json({ accounts });
   } catch (err) {
-    return NextResponse.json({ accounts: [], note: 'CookiesDir introuvable. Lance `python cli.py login -n <username>` une fois pour ajouter un compte.' });
+    return NextResponse.json({ accounts: [], note: 'Dossier des sessions TikTok introuvable. Lance `python cli.py login -n <username>` une fois pour ajouter un compte.' });
   }
 }
 
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({} as { username?: string }));
   const username = String(body?.username || '').trim();
   if (!/^[A-Za-z0-9._]{2,32}$/.test(username)) {
-    return NextResponse.json({ ok: false, error: 'username invalide' }, { status: 400 });
+    return NextResponse.json({ ok: false, error: 'Nom d’utilisateur TikTok invalide.' }, { status: 400 });
   }
 
   return new Promise<Response>((resolve) => {

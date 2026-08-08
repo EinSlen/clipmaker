@@ -1,20 +1,23 @@
-import type { Metadata, Viewport } from 'next';
-import './globals.css';
+import type { Metadata, Viewport } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: 'clipMaker — sad/philo TikTok studio',
-  description: 'Upload, ajoute du texte philosophique, choisis ta musique triste tendance, et publie sur TikTok.'
+  title: "clipMaker — studio de vidéos verticales",
+  description:
+    "Génère, monte et publie des vidéos verticales originales pour TikTok et YouTube Shorts.",
 };
 
 export const viewport: Viewport = {
-  width: 'device-width',
+  width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  themeColor: '#0b0b10'
+  themeColor: "#08080c",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="fr">
       <body className="min-h-dvh">{children}</body>

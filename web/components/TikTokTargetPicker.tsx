@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { Check, Loader2, Plus, Users } from 'lucide-react';
-import { Button } from './Button';
-import type { TiktokAccount } from '@/lib/types';
+import * as React from "react";
+import { Check, Loader2, Plus, Users } from "lucide-react";
+import { Button } from "./Button";
+import type { TiktokAccount } from "@/lib/types";
 
 export function TikTokTargetPicker({
   value,
@@ -15,25 +15,29 @@ export function TikTokTargetPicker({
   const [accounts, setAccounts] = React.useState<TiktokAccount[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [adding, setAdding] = React.useState(false);
-  const [newName, setNewName] = React.useState('');
+  const [newName, setNewName] = React.useState("");
   const [note, setNote] = React.useState<string | null>(null);
 
   async function load(selection = value) {
     setLoading(true);
     try {
-      const response = await fetch('/api/tiktok/accounts');
+      const response = await fetch("/api/tiktok/accounts");
       const data = await response.json();
       const next = (data.accounts || []) as TiktokAccount[];
       setAccounts(next);
       setNote(data.note || null);
-      onChange(selection.filter((username) => next.some((account) => account.username === username)));
+      onChange(
+        selection.filter((username) =>
+          next.some((account) => account.username === username)
+        )
+      );
     } finally {
       setLoading(false);
     }
   }
 
   React.useEffect(() => {
-    fetch('/api/tiktok/accounts')
+    fetch("/api/tiktok/accounts")
       .then((response) => response.json())
       .then((data) => {
         const next = (data.accounts || []) as TiktokAccount[];
@@ -46,7 +50,11 @@ export function TikTokTargetPicker({
   }, []);
 
   function toggle(username: string) {
-    onChange(value.includes(username) ? value.filter((item) => item !== username) : [...value, username]);
+    onChange(
+      value.includes(username)
+        ? value.filter((item) => item !== username)
+        : [...value, username]
+    );
   }
 
   async function add() {
@@ -54,17 +62,20 @@ export function TikTokTargetPicker({
     if (!username) return;
     setAdding(true);
     try {
-      const response = await fetch('/api/tiktok/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/tiktok/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username }),
       });
       const data = await response.json();
       if (!data.ok) {
-        setNote(data.error || data.stderr || 'The TikTok login could not be started.');
+        console.error("Connexion TikTok impossible", data.error || data.stderr);
+        setNote(
+          "Impossible de démarrer la connexion TikTok. Vérifie la session et les journaux du serveur."
+        );
         return;
       }
-      setNewName('');
+      setNewName("");
       const selection = [...new Set([...value, username])];
       onChange(selection);
       await load(selection);
@@ -76,16 +87,37 @@ export function TikTokTargetPicker({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-sm font-medium"><Users className="size-4" /> TikTok targets</h3>
+        <h3 className="flex items-center gap-2 text-sm font-medium">
+          <Users className="size-4" aria-hidden="true" /> Comptes TikTok
+          destinataires
+        </h3>
         {accounts.length > 1 && (
-          <button type="button" onClick={() => onChange(value.length === accounts.length ? [] : accounts.map((account) => account.username))} className="text-[11px] text-cyan-300 hover:text-cyan-200">
-            {value.length === accounts.length ? 'Clear all' : 'Select all'}
+          <button
+            type="button"
+            onClick={() =>
+              onChange(
+                value.length === accounts.length
+                  ? []
+                  : accounts.map((account) => account.username)
+              )
+            }
+            className="text-[11px] text-cyan-300 hover:text-cyan-200"
+          >
+            {value.length === accounts.length
+              ? "Tout désélectionner"
+              : "Tout sélectionner"}
           </button>
         )}
       </div>
 
       {loading ? (
-        <p className="flex items-center gap-2 py-2 text-sm text-ink-400"><Loader2 className="size-4 animate-spin" /> Loading accounts…</p>
+        <p
+          className="flex items-center gap-2 py-2 text-sm text-ink-400"
+          role="status"
+        >
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />{" "}
+          Chargement des comptes…
+        </p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {accounts.map((account) => {
@@ -95,26 +127,56 @@ export function TikTokTargetPicker({
                 key={account.username}
                 type="button"
                 onClick={() => toggle(account.username)}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm transition ${selected ? 'border-accent bg-accent text-white' : 'border-white/15 text-ink-200 hover:bg-white/5'}`}
+                aria-pressed={selected}
+                className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
+                  selected
+                    ? "border-accent bg-accent text-white"
+                    : "border-white/15 text-ink-200 hover:bg-white/5"
+                }`}
               >
-                {selected && <Check className="size-3.5" />} @{account.username}
+                {selected && <Check className="size-3.5" aria-hidden="true" />}{" "}
+                @{account.username}
               </button>
             );
           })}
-          {!accounts.length && <p className="text-xs text-ink-400">No connected TikTok account.</p>}
+          {!accounts.length && (
+            <p className="text-xs text-ink-400">
+              Aucun compte TikTok connecté.
+            </p>
+          )}
         </div>
       )}
 
-      <details className="rounded-lg border border-white/10 bg-ink-700/40 p-2 open:bg-ink-700/60">
-        <summary className="cursor-pointer text-sm text-ink-200">Connect another account</summary>
-        <div className="flex gap-2 pt-2">
-          <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="TikTok username" className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-800 px-3 text-sm" />
-          <Button size="sm" onClick={add} disabled={adding || !newName.trim()}>
-            {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Connect
+      <details className="subpanel p-3 open:bg-white/[0.035]">
+        <summary className="cursor-pointer text-sm font-medium text-ink-200">
+          Connecter un autre compte
+        </summary>
+        <div className="flex gap-2 pt-3">
+          <input
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            placeholder="Nom d’utilisateur TikTok"
+            aria-label="Nom d’utilisateur TikTok"
+            className="field-control h-11 min-w-0 flex-1"
+          />
+          <Button
+            type="button"
+            onClick={add}
+            disabled={adding || !newName.trim()}
+          >
+            {adding ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Plus className="size-4" aria-hidden="true" />
+            )}{" "}
+            Connecter
           </Button>
         </div>
-        <p className="mt-2 text-[11px] text-ink-400">Targets are saved per game. Uploads run one account at a time and report a separate result for every target.</p>
-        {note && <p className="mt-1 text-[11px] text-amber-300">{note}</p>}
+        <p className="mt-2 text-xs leading-relaxed text-ink-400">
+          Les destinataires sont mémorisés pour chaque jeu. Les publications
+          sont envoyées compte par compte avec un résultat distinct pour chacun.
+        </p>
+        {note && <p className="mt-1 text-xs text-amber-300">{note}</p>}
       </details>
     </div>
   );
