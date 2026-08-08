@@ -88,12 +88,13 @@ export async function POST(request: Request) {
     }
     const game = isGameId(body.game) ? body.game : 'ball-escape';
     const definition = getGameDefinition(game);
-    const duration = numberInRange(body.duration, 45, 15, 60);
+    const requestedDuration = numberInRange(body.duration, 15, 15, 60);
+    const duration = game === 'soft-body-slide' ? 15 : requestedDuration;
     const difficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
     const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr'].includes(body.soundPack) ? body.soundPack : 'auto';
-    const musicMode = body.musicMode === 'continuous' ? 'continuous' : 'hit-reveal';
+    const musicMode = body.musicMode === 'hit-reveal' ? 'hit-reveal' : 'continuous';
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const filename = `${game}-${seed}-${randomId()}.mp4`;
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
     const requestedMusic = body.musicFile ?? '__discover__';
     if (requestedMusic === '__discover__') {
       try {
-        const discovered = await discoverLicensedMusic(seed, game === 'shape-tunnel' ? 'peaceful' : 'energetic');
+        const discovered = await discoverLicensedMusic(seed, game === 'shape-tunnel' || game === 'soft-body-slide' ? 'peaceful' : 'energetic');
         if (discovered) {
           musicPath = discovered.path;
           musicTitle = `${discovered.title} — ${discovered.artist}`;

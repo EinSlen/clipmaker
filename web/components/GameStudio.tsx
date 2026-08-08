@@ -12,6 +12,7 @@ import type { MusicTrack } from '@/lib/types';
 type Theme = 'neon' | 'sunset' | 'ice';
 type SoundPack = 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
 type MusicMode = 'hit-reveal' | 'continuous';
+type RenderedSoundPack = SoundPack | 'premium-foley';
 
 type GameResult = {
   filename: string;
@@ -26,7 +27,7 @@ type GameResult = {
   unitsTotal: number;
   rings?: number;
   theme: Theme;
-  soundPack: SoundPack;
+  soundPack: RenderedSoundPack;
   musicMode: MusicMode | 'original';
   musicHits: number;
   musicUsed: string | null;
@@ -48,13 +49,13 @@ const themes: { id: Theme; label: string; colors: string }[] = [
 
 export function GameStudio() {
   const [game, setGame] = React.useState<GameId>('ball-escape');
-  const [duration, setDuration] = React.useState(45);
-  const [difficulty, setDifficulty] = React.useState(240);
+  const [duration, setDuration] = React.useState(15);
+  const [difficulty, setDifficulty] = React.useState(GAME_CATALOG[0].metricDefault);
   const [theme, setTheme] = React.useState<Theme>('neon');
   const [soundPack, setSoundPack] = React.useState<SoundPack>('auto');
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
   const [musicFile, setMusicFile] = React.useState('__discover__');
-  const [musicMode, setMusicMode] = React.useState<MusicMode>('hit-reveal');
+  const [musicMode, setMusicMode] = React.useState<MusicMode>('continuous');
   const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -123,6 +124,8 @@ export function GameStudio() {
     }
     setGame(nextGame);
     setDifficulty(definition.metricDefault);
+    setMusicMode('continuous');
+    if (nextGame === 'soft-body-slide') setDuration(15);
     setTitle(definition.defaultHook);
     setResult(null);
     setBatchResults([]);
@@ -312,7 +315,7 @@ export function GameStudio() {
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-ink-400 space-y-1 block">
               <span>Duration</span>
-              <select value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
+              <select value={duration} disabled={game === 'soft-body-slide'} onChange={(event) => setDuration(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
                 <option value={15}>15 seconds</option>
                 <option value={30}>30 seconds</option>
                 <option value={45}>45 seconds</option>
@@ -352,8 +355,8 @@ export function GameStudio() {
             </div>
             <label className="text-xs text-ink-400 space-y-1 block">
               <span>Collision sound pack</span>
-              <select value={soundPack} onChange={(event) => setSoundPack(event.target.value as SoundPack)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
-                <option value="auto">Auto — matched to each game</option>
+              <select value={soundPack} disabled={game === 'soft-body-slide'} onChange={(event) => setSoundPack(event.target.value as SoundPack)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
+                <option value="auto">{game === 'soft-body-slide' ? 'Premium Foley — slide, squash and impact' : 'Auto — matched to each game'}</option>
                 <option value="meme">Meme Mix — meows, boings and pops</option>
                 <option value="funny">Funny — boings and pops</option>
                 <option value="arcade">Arcade — musical hits</option>
@@ -380,7 +383,7 @@ export function GameStudio() {
               <div className="grid grid-cols-2 gap-3">
                 <label className="text-xs text-ink-400 space-y-1 block">
                   <span>Music behavior</span>
-                  <select value={musicMode} onChange={(event) => setMusicMode(event.target.value as MusicMode)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
+                  <select value={musicMode} disabled={game === 'soft-body-slide'} onChange={(event) => setMusicMode(event.target.value as MusicMode)} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
                     <option value="hit-reveal">Hit Reveal — unlock each beat</option>
                     <option value="continuous">Continuous soundtrack</option>
                   </select>
@@ -391,7 +394,7 @@ export function GameStudio() {
                 </label>
               </div>
             )}
-            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Without one, ClipMaker composes a new original electronic song and still reveals it one hit at a time.</p>
+            <p className="text-[10px] text-amber-200/80">Auto Discovery only accepts downloadable CC BY tracks. Continuous music is the default; Hit Reveal remains available for beat-by-beat experiments.</p>
           </div>
 
           <label className="text-xs text-ink-400 space-y-1 block">

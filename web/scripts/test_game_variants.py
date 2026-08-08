@@ -27,6 +27,16 @@ def build(game_id: str, seed: int = 424242):
     return GAME_CLASSES[game_id](*arguments)
 
 
+def run_ball_escape(*, seed: int, fps: int, duration: float = 10.0, rings: int = 8, until: float | None = None):
+    game = BallEscape(270, 480, fps, duration, rings, seed, "neon", "WILL IT ESCAPE?")
+    end_time = duration if until is None else until
+    for frame_index in range(round(end_time * fps) + 1):
+        game.update(min(end_time, frame_index / fps))
+    # Exercise the exact same timestamp for render rates that do not divide it.
+    game.update(end_time)
+    return game
+
+
 class GameCatalogTests(unittest.TestCase):
     def test_frontend_catalog_matches_python_engines(self):
         source = (ROOT / "lib" / "game-catalog.ts").read_text(encoding="utf-8")
@@ -80,6 +90,77 @@ class GameEngineTests(unittest.TestCase):
                     game.update(2.25)
                     digests.append(hashlib.sha256(game.frame(2.25).tobytes()).hexdigest())
                 self.assertNotEqual(digests[0], digests[1])
+
+
+class BallEscapeRegressionTests(unittest.TestCase):
+    def test_fixed_timestep_is_independent_from_render_fps(self):
+        states = []
+        for fps in (12, 15, 24, 30, 60):
+            game = run_ball_escape(seed=101, fps=fps, until=7.5)
+            states.append({
+                "active": game.active,
+                "completed_at": game.completed_at,
+                "position": tuple(game.position),
+                "velocity": tuple(game.velocity),
+                "events": tuple(game.events),
+                "music_hits": tuple(game.music_hits),
+                "frame": hashlib.sha256(game.frame(7.5).tobytes()).hexdigest(),
+            })
+        self.assertTrue(all(state == states[0] for state in states[1:]))
+
+    def test_winning_seeds_only_escape_in_the_late_window(self):
+        duration = 10.0
+        for seed in (101, 102, 103):
+            with self.subTest(seed=seed):
+                game = run_ball_escape(seed=seed, fps=30, duration=duration)
+                self.assertTrue(game.will_escape)
+                self.assertIsNotNone(game.completed_at)
+                assert game.completed_at is not None
+                self.assertGreaterEqual(game.completed_at, duration * 0.85)
+                self.assertGreaterEqual(game.completed_at, game.final_unlock)
+                self.assertLessEqual(game.completed_at, duration)
+
+    def test_failure_seed_stays_blocked_at_the_final_ring(self):
+        rings = 8
+        game = run_ball_escape(seed=100, fps=30, rings=rings)
+        self.assertFalse(game.will_escape)
+        self.assertEqual(game.active, rings - 1)
+        self.assertIsNone(game.completed_at)
+        self.assertIsNotNone(game.failed_at)
+        self.assertEqual(sum(event[3] == "clear" for event in game.events), rings - 1)
+
+    def test_catalog_default_always_reaches_a_decisive_final_gate(self):
+        for seed in range(1000, 1020):
+            with self.subTest(seed=seed):
+                game = BallEscape(360, 640, 15, 15.0, 14, seed, "neon", "WILL IT ESCAPE?")
+                for frame_index in range(15 * 15 + 1):
+                    game.update(min(15.0, frame_index / 15))
+                self.assertEqual(game.frame(15.0).size, (360, 640))
+                if seed % 4 == 0:
+                    self.assertEqual(game.active, 13)
+                    self.assertIsNone(game.completed_at)
+                    self.assertIsNotNone(game.failed_at)
+                else:
+                    self.assertEqual(game.active, 14)
+                    self.assertIsNotNone(game.completed_at)
+                    assert game.completed_at is not None
+                    self.assertGreaterEqual(game.completed_at, game.final_unlock)
+
+    def test_each_clear_advances_exactly_one_ring(self):
+        duration = 10.0
+        rings = 8
+        game = BallEscape(270, 480, 30, duration, rings, 101, "neon", "WILL IT ESCAPE?")
+        fixed_dt = 1.0 / 120.0
+        for step in range(round(duration / fixed_dt)):
+            active_before = game.active
+            clears_before = sum(event[3] == "clear" for event in game.events)
+            game.update((step + 1) * fixed_dt)
+            active_delta = game.active - active_before
+            clear_delta = sum(event[3] == "clear" for event in game.events) - clears_before
+            self.assertLessEqual(active_delta, 1)
+            self.assertEqual(active_delta, clear_delta)
+        self.assertEqual(game.active, rings)
+        self.assertEqual(sum(event[3] == "clear" for event in game.events), rings)
 
 
 if __name__ == "__main__":
