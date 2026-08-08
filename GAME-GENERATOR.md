@@ -68,9 +68,10 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
 
 Valeurs de `game` : `ball-escape`, `shape-tunnel`, `soft-body-slide`.
 
-Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il est volontairement plus lent
-que les deux moteurs 2D, mais produit une vraie scène 3D avec matériaux, ombres et déformations. Blender
-est inclus dans l'image Docker officielle du projet.
+Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais canoniques
+(`0 / 25 / 50 / 75 / 100 %`) avec une rampe mobile, une capsule à contraintes physiques et un vrai
+réceptacle ouvert. Son mix par défaut privilégie les Foley ASMR synchronisés ; une musique choisie ou
+sous licence reste facultative. Blender est inclus dans l'image Docker officielle du projet.
 
 Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
 `PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES`. Les valeurs par défaut privilégient un rendu final

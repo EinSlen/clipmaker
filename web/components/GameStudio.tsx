@@ -30,6 +30,7 @@ type Theme = "neon" | "sunset" | "ice";
 type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
 type RenderedSoundPack = SoundPack | "premium-foley";
+type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed";
 
 type GameResult = {
   filename: string;
@@ -45,7 +46,7 @@ type GameResult = {
   rings?: number;
   theme: Theme;
   soundPack: RenderedSoundPack;
-  musicMode: MusicMode | "original";
+  musicMode: RenderedMusicMode;
   musicHits: number;
   musicUsed: string | null;
   musicTitle: string | null;
@@ -175,7 +176,12 @@ export function GameStudio() {
     setGame(nextGame);
     setDifficulty(definition.metricDefault);
     setMusicMode("continuous");
-    if (nextGame === "soft-body-slide") setDuration(15);
+    if (nextGame === "soft-body-slide") {
+      setDuration(15);
+      setMusicFile("");
+    } else if (!musicFile) {
+      setMusicFile("__discover__");
+    }
     setTitle(definition.defaultHook);
     setResult(null);
     setBatchResults([]);
@@ -321,6 +327,8 @@ export function GameStudio() {
       ? "rotation de la bibliothèque"
       : musicFile
       ? "piste choisie"
+      : game === "soft-body-slide"
+      ? "Foley ASMR original"
       : "piste générée";
 
   return (
@@ -481,23 +489,32 @@ export function GameStudio() {
                     <option value={60}>60 s</option>
                   </select>
                 </label>
-                <label className="block space-y-1.5 text-xs text-ink-400">
-                  <span>
-                    {gameDefinition.uiMetricLabel} :{" "}
-                    <strong className="text-white">{difficulty}</strong>
-                  </span>
-                  <input
-                    type="range"
-                    min={gameDefinition.metricMin}
-                    max={gameDefinition.metricMax}
-                    step={gameDefinition.metricStep}
-                    value={difficulty}
-                    onChange={(event) =>
-                      setDifficulty(Number(event.target.value))
-                    }
-                    className="h-11 w-full accent-accent"
-                  />
-                </label>
+                {game === "soft-body-slide" ? (
+                  <div className="space-y-1.5 text-xs text-ink-400">
+                    <span>Niveaux de souplesse</span>
+                    <div className="field-control flex h-11 items-center justify-center font-semibold text-white">
+                      0 · 25 · 50 · 75 · 100 %
+                    </div>
+                  </div>
+                ) : (
+                  <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>
+                      {gameDefinition.uiMetricLabel} :{" "}
+                      <strong className="text-white">{difficulty}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min={gameDefinition.metricMin}
+                      max={gameDefinition.metricMax}
+                      step={gameDefinition.metricStep}
+                      value={difficulty}
+                      onChange={(event) =>
+                        setDifficulty(Number(event.target.value))
+                      }
+                      className="h-11 w-full accent-accent"
+                    />
+                  </label>
+                )}
               </div>
             </div>
 
@@ -506,33 +523,50 @@ export function GameStudio() {
                 <Palette className="size-4 text-accent-soft" />
                 <h4 className="text-sm font-semibold">Style visuel</h4>
               </div>
-              <p className="text-xs leading-5 text-ink-500">
-                Le thème recolore le décor, les anneaux et les effets sans
-                modifier la simulation.
-              </p>
-              <div className="grid gap-2">
-                {themes.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setTheme(item.id)}
-                    aria-pressed={theme === item.id}
-                    className={`flex h-11 items-center gap-3 rounded-xl border px-3 text-xs font-medium transition ${
-                      theme === item.id
-                        ? "border-white/35 bg-white/10 text-white"
-                        : "border-white/10 text-ink-400 hover:border-white/20 hover:bg-white/5"
-                    }`}
-                  >
-                    <span
-                      className={`h-3 w-16 rounded-full bg-gradient-to-r ${item.colors}`}
-                    />
-                    <span>{item.label}</span>
-                    {theme === item.id && (
-                      <CheckCircle2 className="ml-auto size-4" />
-                    )}
-                  </button>
-                ))}
-              </div>
+              {game === "soft-body-slide" ? (
+                <>
+                  <p className="text-xs leading-5 text-ink-500">
+                    Direction artistique fixe, calée sur la simulation de
+                    référence : studio gris perle, marbre ivoire et métal
+                    champagne.
+                  </p>
+                  <div className="flex h-11 items-center gap-3 rounded-xl border border-amber-200/20 bg-amber-200/5 px-3 text-xs font-medium text-white">
+                    <span className="h-3 w-16 rounded-full bg-gradient-to-r from-slate-300 via-amber-200 to-yellow-600" />
+                    <span>Studio premium</span>
+                    <CheckCircle2 className="ml-auto size-4 text-amber-200" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs leading-5 text-ink-500">
+                    Le thème recolore le décor, les anneaux et les effets sans
+                    modifier la simulation.
+                  </p>
+                  <div className="grid gap-2">
+                    {themes.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setTheme(item.id)}
+                        aria-pressed={theme === item.id}
+                        className={`flex h-11 items-center gap-3 rounded-xl border px-3 text-xs font-medium transition ${
+                          theme === item.id
+                            ? "border-white/35 bg-white/10 text-white"
+                            : "border-white/10 text-ink-400 hover:border-white/20 hover:bg-white/5"
+                        }`}
+                      >
+                        <span
+                          className={`h-3 w-16 rounded-full bg-gradient-to-r ${item.colors}`}
+                        />
+                        <span>{item.label}</span>
+                        {theme === item.id && (
+                          <CheckCircle2 className="ml-auto size-4" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -544,8 +578,9 @@ export function GameStudio() {
                   Audio de la simulation
                 </h4>
                 <p className="mt-1 text-xs text-ink-500">
-                  Associe une musique sous licence et des effets de collision
-                  adaptés au jeu.
+                  {game === "soft-body-slide"
+                    ? "Foley ASMR dynamique calé sur la rampe et le réceptacle. La musique reste facultative."
+                    : "Associe une musique sous licence et des effets de collision adaptés au jeu."}
                 </p>
               </div>
             </div>
@@ -575,7 +610,9 @@ export function GameStudio() {
                 </select>
               </label>
               <label className="block space-y-1.5 text-xs text-ink-400">
-                <span>Source musicale</span>
+                <span>
+                  Source musicale {game === "soft-body-slide" && "(facultative)"}
+                </span>
                 <div className="flex gap-2">
                   <select
                     value={musicFile}
@@ -586,7 +623,9 @@ export function GameStudio() {
                       Découverte automatique — piste sous licence
                     </option>
                     <option value="">
-                      Piste électronique originale générée
+                      {game === "soft-body-slide"
+                        ? "Foley ASMR original — recommandé"
+                        : "Piste électronique originale générée"}
                     </option>
                     {musicTracks.length > 0 && (
                       <option value="__auto__">
@@ -874,8 +913,12 @@ export function GameStudio() {
                 <p className="text-sm font-semibold">Rendu #{result.seed}</p>
                 <p className="mt-1 text-xs leading-5 text-ink-400">
                   {getGameDefinition(result.game).uiName} · {result.duration} s
-                  · {result.difficulty}{" "}
-                  {getGameDefinition(result.game).uiMetricLabel.toLowerCase()} ·{" "}
+                  ·{" "}
+                  {result.game === "soft-body-slide"
+                    ? "5 niveaux · 0–100 %"
+                    : `${result.difficulty} ${getGameDefinition(
+                        result.game
+                      ).uiMetricLabel.toLowerCase()}`} ·{" "}
                   {(result.size / 1024 / 1024).toFixed(1)} Mo
                 </p>
                 <p className="mt-1 text-[11px] text-cyan-200/80">
@@ -883,6 +926,10 @@ export function GameStudio() {
                     ? `${result.musicHits} séquences déclenchées par collision`
                     : result.musicMode === "continuous"
                     ? "Bande-son continue"
+                    : result.musicMode === "foley-only"
+                    ? "Foley ASMR original, sans musique"
+                    : result.musicMode === "subtle-bed"
+                    ? "Foley ASMR avec musique discrète"
                     : "Bande-son originale générée"}
                 </p>
                 {result.musicTitle && (
