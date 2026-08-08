@@ -220,7 +220,7 @@ export function GameStudio() {
     setDifficulty(definition.metricDefault);
     setMusicMode("continuous");
     if (nextGame === "soft-body-slide") {
-      setDuration(15);
+      setDuration(30);
       setMusicFile("");
     } else if (!musicFile) {
       setMusicFile("__discover__");
@@ -507,7 +507,9 @@ export function GameStudio() {
               </div>
               <label className="block space-y-1.5 text-xs text-ink-400">
                 <span>
-                  Accroche dans la vidéo{" "}
+                  {game === "soft-body-slide"
+                    ? "Titre de publication"
+                    : "Accroche dans la vidéo"}{" "}
                   <span className="text-ink-500">(anglais)</span>
                 </span>
                 <input
@@ -517,7 +519,9 @@ export function GameStudio() {
                   className="field-control h-11"
                 />
                 <span className="block text-[10px] text-ink-500">
-                  Ce texte est intégré à la première image du Short.
+                  {game === "soft-body-slide"
+                    ? "Utilisé pour TikTok et YouTube ; la vidéo conserve uniquement le niveau de souplesse, comme la référence."
+                    : "Ce texte est intégré à la première image du Short."}
                 </span>
               </label>
               <div className="grid grid-cols-2 gap-3">

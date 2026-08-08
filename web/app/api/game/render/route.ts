@@ -10,7 +10,7 @@ import { randomId } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 600;
+export const maxDuration = 259_200;
 
 type RenderRequest = {
   game?: GameId;
@@ -35,14 +35,18 @@ function numberInRange(value: unknown, fallback: number, min: number, max: numbe
 
 function runRenderer(args: string[]): Promise<{ stdout: string; stderr: string }> {
   const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+  const configuredTimeout = Number(process.env.PREMIUM_RENDER_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : 72 * 60 * 60 * 1000;
   return new Promise((resolve, reject) => {
     const child = spawn(python, args, { windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error('The render exceeded the 10-minute limit.'));
-    }, 10 * 60 * 1000);
+      reject(new Error(`The render exceeded its ${Math.round(timeoutMs / 3_600_000)}-hour limit.`));
+    }, timeoutMs);
     child.stdout.on('data', (chunk) => (stdout += chunk.toString()));
     child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
     child.on('error', (error) => {
@@ -89,7 +93,7 @@ export async function POST(request: Request) {
     const game = isGameId(body.game) ? body.game : 'ball-escape';
     const definition = getGameDefinition(game);
     const requestedDuration = numberInRange(body.duration, 15, 15, 60);
-    const duration = game === 'soft-body-slide' ? 15 : requestedDuration;
+    const duration = game === 'soft-body-slide' ? 30 : requestedDuration;
     const requestedDifficulty = numberInRange(body.difficulty ?? body.rings, definition.metricDefault, definition.metricMin, definition.metricMax);
     const difficulty = game === 'soft-body-slide' ? 100 : requestedDifficulty;
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);

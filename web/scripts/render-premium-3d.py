@@ -18,16 +18,22 @@ from soft_body_variants import variant_for_seed, variant_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-FOLEY_EVENT_RATIOS = (0.23, 0.39, 0.96)
-FOLEY_EVENT_TYPES = ("ramp-contact-1", "ramp-contact-2", "receiver-outcome")
+FOLEY_EVENT_RATIOS = (0.13, 0.30, 0.52, 0.75, 0.94)
+FOLEY_EVENT_TYPES = (
+    "ramp-contact-1",
+    "ramp-contact-2",
+    "ramp-contact-3",
+    "ramp-contact-4",
+    "receiver-outcome",
+)
 
 
 def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
 
 
-def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, float, float]]:
-    """Return the two ramp contacts and receiver outcome for each trial."""
+def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, ...]]:
+    """Return four ramp contacts and the receiver outcome for each trial."""
     segment = duration / stage_count
     return [
         tuple(min(duration - 0.01, (index + ratio) * segment) for ratio in FOLEY_EVENT_RATIOS)
@@ -37,12 +43,12 @@ def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, fl
 
 def synth_premium_foley(
     duration: float,
-    event_times: list[tuple[float, float, float]],
+    event_times: list[tuple[float, ...]],
     stages: tuple[int, ...],
     output: Path,
     seed: int,
 ) -> None:
-    """Create three distinct, synchronized stereo foley cues for each trial."""
+    """Create layered, synchronized stereo Foley cues for each trial."""
     rate = 48_000
     sample_count = math.ceil(duration * rate) + 1
     left = array("f", [0.0]) * sample_count
@@ -101,7 +107,7 @@ def synth_premium_foley(
 
     for index, (softness_percent, trial_events) in enumerate(zip(stages, event_times)):
         softness = softness_percent / 100.0
-        contact_one, contact_two, outcome = trial_events
+        contact_one, contact_two, contact_three, contact_four, outcome = trial_events
         trial_pan = -0.12 + index * 0.06
 
         # First ramp contact: a quick whoosh into a bright clink.
@@ -124,6 +130,39 @@ def synth_premium_foley(
             0.18 + softness * 0.05,
             trial_pan,
             0.25 + softness * 0.30,
+        )
+
+        # Longer cinematic trials expose the intermediate relaunches instead
+        # of leaving a dead audio bed between the first contact and the cup.
+        add_texture(
+            contact_three - 0.10,
+            0.31 + softness * 0.10,
+            0.034 + softness * 0.030,
+            -0.08 + trial_pan,
+            0.38 + softness * 0.45,
+        )
+        add_tone(
+            contact_three,
+            350.0 - softness * 170.0,
+            0.15 + softness * 0.08,
+            0.15 + softness * 0.07,
+            -0.08 + trial_pan,
+            0.30 + softness * 0.28,
+        )
+        add_texture(
+            contact_four - 0.08,
+            0.23 + softness * 0.13,
+            0.038 + softness * 0.040,
+            0.15 + trial_pan,
+            0.42 + softness * 0.48,
+        )
+        add_tone(
+            contact_four,
+            460.0 - softness * 245.0,
+            0.12 + softness * 0.09,
+            0.17 + softness * 0.08,
+            0.15 + trial_pan,
+            0.26 + softness * 0.34,
         )
 
         # Receptacle/outcome: a compact plop whose body follows the softness.
@@ -192,21 +231,13 @@ def premium_font_file() -> str:
     return ffmpeg_filter_path(Path(selected))
 
 
-def build_video_filter(duration: float, stages: tuple[int, ...], title_file: Path, title_length: int) -> str:
-    """Upscale cleanly and add only restrained, high-positioned labels."""
+def build_video_filter(duration: float, stages: tuple[int, ...]) -> str:
+    """Upscale cleanly and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
-    title_path = ffmpeg_filter_path(title_file)
-    title_size = max(22, min(30, round(650 / (max(16, title_length) * 0.62))))
     filters = [
         "fps=30:round=up",
         "scale=1080:1920:flags=lanczos",
-        "unsharp=5:5:0.28:3:3:0.0",
-        (
-            f"drawtext=fontfile='{font_file}':textfile='{title_path}':expansion=none:"
-            f"fontcolor=white@0.68:fontsize={title_size}:x=(w-text_w)/2:y=224:"
-            "shadowcolor=black@0.40:shadowx=2:shadowy=2:"
-            "enable='between(t\\,0\\,0.800)'"
-        ),
+        "unsharp=5:5:0.18:3:3:0.0",
     ]
     segment = duration / len(stages)
     for index, softness in enumerate(stages):
@@ -226,10 +257,12 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     blender = os.environ.get("BLENDER_BIN", "blender")
     ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg")
-    width = int(os.environ.get("PREMIUM_RENDER_WIDTH", "360"))
-    height = int(os.environ.get("PREMIUM_RENDER_HEIGHT", "640"))
-    fps = int(os.environ.get("PREMIUM_RENDER_FPS", "15"))
-    samples = int(os.environ.get("PREMIUM_RENDER_SAMPLES", "5"))
+    width = int(os.environ.get("PREMIUM_RENDER_WIDTH", "1080"))
+    height = int(os.environ.get("PREMIUM_RENDER_HEIGHT", "1920"))
+    fps = int(os.environ.get("PREMIUM_RENDER_FPS", "30"))
+    samples = int(os.environ.get("PREMIUM_RENDER_SAMPLES", "128"))
+    video_preset = os.environ.get("PREMIUM_VIDEO_PRESET", "slow")
+    video_crf = os.environ.get("PREMIUM_VIDEO_CRF", "14")
     frame_count = round(args.duration * fps)
     variant = variant_for_seed(args.seed)
     stages = variant.stages
@@ -241,9 +274,6 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         frames.mkdir()
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
-        title_file = root / "title.txt"
-        display_title = (args.title.strip() or "Soft Body Landing Test")[:52]
-        title_file.write_text(display_title, encoding="utf-8")
         blender_command = [
             blender, "--background", "--factory-startup", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
             "--frames", str(frames), "--duration", str(args.duration), "--fps", str(fps),
@@ -251,12 +281,18 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             "--softness", str(args.difficulty), "--theme", args.theme, "--title", args.title,
         ]
         subprocess.run(blender_command, check=True)
-        video_filter = build_video_filter(args.duration, stages, title_file, len(display_title))
+        expected_last_frame = frames / f"frame_{frame_count:04d}.png"
+        if not expected_last_frame.is_file():
+            raise RuntimeError(
+                f"Blender did not produce the expected final frame: {expected_last_frame.name}"
+            )
+        video_filter = build_video_filter(args.duration, stages)
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
             "-i", str(frames / "frame_%04d.png"),
             "-vf", video_filter,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", str(silent),
+            "-c:v", "libx264", "-preset", video_preset, "-crf", video_crf,
+            "-pix_fmt", "yuv420p", "-an", str(silent),
         ], check=True)
         synth_premium_foley(args.duration, event_times, stages, effects, args.seed)
         external_music = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
@@ -313,7 +349,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--game", default="soft-body-slide")
-    parser.add_argument("--duration", type=float, default=15.0)
+    parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--theme", choices=("neon", "sunset", "ice"), default="sunset")
