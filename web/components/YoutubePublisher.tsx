@@ -24,11 +24,13 @@ type YouTubeAccount = {
 };
 
 export function YoutubePublisher({
+  gameId = 'editor',
   filename,
   defaultTitle,
   description,
   tags
 }: {
+  gameId?: string;
   filename: string;
   defaultTitle: string;
   description: string;
@@ -43,15 +45,36 @@ export function YoutubePublisher({
   const [uploading, setUploading] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [releaseUrl, setReleaseUrl] = React.useState<string | null>(null);
+  const [routeHydrated, setRouteHydrated] = React.useState(false);
 
   React.useEffect(() => {
     const saved = window.sessionStorage.getItem('clipmaker-upload-token');
     if (saved) setAdminToken(saved);
     fetch('/api/youtube/accounts')
       .then((response) => response.json())
-      .then((data) => setAccounts(data.accounts || []))
-      .catch(() => setAccounts([{ id: 'default', label: 'Default channel', configured: false }]));
-  }, []);
+      .then((data) => {
+        const next = (data.accounts || []) as YouTubeAccount[];
+        setAccounts(next);
+        try {
+          const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-youtube-routes') || '{}') as Record<string, string>;
+          if (next.some((item) => item.id === routes[gameId])) setAccount(routes[gameId]);
+        } catch {}
+        setRouteHydrated(true);
+      })
+      .catch(() => {
+        setAccounts([{ id: 'default', label: 'Default channel', configured: false }]);
+        setRouteHydrated(true);
+      });
+  }, [gameId]);
+
+  React.useEffect(() => {
+    if (!routeHydrated) return;
+    try {
+      const routes = JSON.parse(window.localStorage.getItem('clipmaker-game-youtube-routes') || '{}') as Record<string, string>;
+      routes[gameId] = account;
+      window.localStorage.setItem('clipmaker-game-youtube-routes', JSON.stringify(routes));
+    } catch {}
+  }, [account, gameId, routeHydrated]);
 
   React.useEffect(() => {
     setStatus(null);
@@ -138,7 +161,7 @@ export function YoutubePublisher({
             <option key={item.id} value={item.id}>{item.label}{item.configured ? '' : ' — login required'}</option>
           ))}
         </select>
-        <span className="block text-[10px] text-ink-500">Create another profile with <code>node scripts/youtube-agent.mjs auth --account channel-name</code>.</span>
+        <span className="block text-[10px] text-ink-500">This route is remembered for {gameId}. Create another profile with <code>node scripts/youtube-agent.mjs auth --account channel-name</code>.</span>
       </label>
 
       <label className="text-xs text-ink-400 space-y-1 block">

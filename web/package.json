@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "tsc --noEmit",
+    "test": "npm run lint && npm run test:games",
+    "test:games": "node scripts/test-game-renders.mjs",
+    "test:render-smoke": "node scripts/test-game-renders.mjs --smoke",
     "youtube:doctor": "node scripts/youtube-agent.mjs doctor",
     "youtube:auth": "node scripts/youtube-agent.mjs auth"
   },

@@ -394,13 +394,301 @@ class MelodyDrop(BaseGame):
         return image.convert("RGB")
 
 
+class ColorSwitch(BaseGame):
+    game_name = "COLOR SWITCH"
+    unit_name = "GATES"
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.palette = [color_for(self.theme, index, 4) for index in range(4)]
+        self.ball_color = self.seed % 4
+        self.gate_flash = 0.0
+
+    def update(self, time_sec: float):
+        target = min(self.total, int(time_sec / max(0.1, self.duration * 0.88) * self.total))
+        while self.active < target:
+            self.active += 1
+            self.ball_color = (self.ball_color + 1 + (self.active % 3 == 0)) % 4
+            self.gate_flash = time_sec
+            self.record_hit(time_sec, 330 * 2 ** (self.ball_color / 6), 0.44, "clear")
+            angle = time_sec * 2.8 + self.active
+            self.burst(
+                self.cx + math.cos(angle) * self.width * 0.18,
+                self.cy + math.sin(angle) * self.width * 0.18,
+                self.palette[self.ball_color],
+                11,
+            )
+        progress = self.active / self.total
+        self.max_speed_ratio = 1.0 + progress * 4.8
+        self.gravity_g = 1.0 + progress * 1.7
+        if self.active >= self.total and self.completed_at is None:
+            self.completed_at = time_sec
+            self.burst(self.cx, self.cy, (255, 255, 255), 64)
+        self.update_particles()
+
+    def frame(self, time_sec: float) -> Image.Image:
+        image = self.canvas(time_sec)
+        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+        progress = self.active / self.total
+        flash = clamp(1.0 - (time_sec - self.gate_flash) * 7.5, 0.0, 1.0)
+        for gate in range(8, 0, -1):
+            radius = self.width * (0.075 + gate * 0.047)
+            phase = time_sec * (44 + progress * 125) * (-1 if gate % 2 else 1) + gate * 27
+            box = (self.cx - radius, self.cy - radius, self.cx + radius, self.cy + radius)
+            for segment, color in enumerate(self.palette):
+                start = phase + segment * 90 + 3
+                draw.arc(box, start=start, end=start + 82, fill=(*color, 235), width=max(4, round(self.width * 0.012)))
+                gd.arc(box, start=start, end=start + 82, fill=(*color, 100), width=max(12, round(self.width * 0.034)))
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(10)))
+        image = Image.alpha_composite(image, crisp)
+        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        orbit = time_sec * (3.4 + progress * 4.0)
+        bx = self.cx + math.sin(orbit) * self.width * 0.055
+        by = self.cy + math.cos(orbit * 1.35) * self.height * 0.035
+        radius = 18 + 5 * flash
+        color = self.palette[self.ball_color]
+        draw.ellipse((bx - radius * 2.0, by - radius * 2.0, bx + radius * 2.0, by + radius * 2.0), fill=(*color, 75))
+        draw.ellipse((bx - radius, by - radius, bx + radius, by + radius), fill=(255, 255, 255, 255), outline=(*color, 255), width=5)
+        image = Image.alpha_composite(image, layer.filter(ImageFilter.GaussianBlur(7)))
+        image = Image.alpha_composite(image, layer)
+        if self.completed_at is not None:
+            centered(ImageDraw.Draw(image), self.cx, self.cy, "PERFECT MATCH!", font(round(self.width * 0.050), True), (255, 255, 255, 255), 2)
+        self.hud(image, time_sec, "SPEED", f"{self.max_speed_ratio:.1f}X", "GATES", str(max(0, self.total - self.active)), "MATCH THE NEXT COLOR")
+        return image.convert("RGB")
+
+
+class OrbitMerge(BaseGame):
+    game_name = "ORBIT MERGE"
+    unit_name = "MERGES"
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.last_merge = 0.0
+        self.orbiters = 14
+
+    def update(self, time_sec: float):
+        target = min(self.total, int(time_sec / max(0.1, self.duration * 0.88) * self.total))
+        while self.active < target:
+            self.active += 1
+            self.last_merge = time_sec
+            frequency = 180 * 2 ** ((self.active % 10) / 12)
+            self.record_hit(time_sec, frequency, 0.45, "impact")
+            angle = self.active * 2.399963
+            radius = self.width * (0.16 + 0.14 * ((self.active % 7) / 7))
+            self.burst(self.cx + math.cos(angle) * radius, self.cy + math.sin(angle) * radius, color_for(self.theme, self.active, self.total), 10)
+        progress = self.active / self.total
+        self.max_speed_ratio = 1.0 + progress * 3.9
+        self.gravity_g = 1.0 + progress * 7.0
+        if self.active >= self.total and self.completed_at is None:
+            self.completed_at = time_sec
+            self.burst(self.cx, self.cy, (255, 245, 180), 72)
+        self.update_particles()
+
+    def frame(self, time_sec: float) -> Image.Image:
+        image = self.canvas(time_sec)
+        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+        progress = self.active / self.total
+        pulse = clamp(1.0 - (time_sec - self.last_merge) * 5.5, 0.0, 1.0)
+        planet_radius = self.width * (0.070 + progress * 0.115) + pulse * 8
+        for ring in range(4):
+            rx = self.width * (0.16 + ring * 0.064)
+            ry = rx * (0.42 + ring * 0.035)
+            color = color_for(self.theme, ring * 19 + self.active, self.total)
+            box = (self.cx - rx, self.cy - ry, self.cx + rx, self.cy + ry)
+            draw.ellipse(box, outline=(*color, 100), width=2)
+            gd.ellipse(box, outline=(*color, 50), width=9)
+        for index in range(self.orbiters):
+            lane = index % 4
+            angle = time_sec * (1.15 + progress * 2.6) * (1 if lane % 2 else -1) + index * 1.73
+            rx = self.width * (0.16 + lane * 0.064)
+            ry = rx * (0.42 + lane * 0.035)
+            x = self.cx + math.cos(angle) * rx
+            y = self.cy + math.sin(angle) * ry
+            size = 5 + (index % 4) * 2
+            color = color_for(self.theme, index * 11 + self.active, self.total)
+            gd.ellipse((x - size * 2, y - size * 2, x + size * 2, y + size * 2), fill=(*color, 100))
+            draw.ellipse((x - size, y - size, x + size, y + size), fill=(*color, 245))
+        planet = color_for(self.theme, self.active + 12, self.total, 0.08)
+        gd.ellipse((self.cx - planet_radius * 1.45, self.cy - planet_radius * 1.45, self.cx + planet_radius * 1.45, self.cy + planet_radius * 1.45), fill=(*planet, 120))
+        draw.ellipse((self.cx - planet_radius, self.cy - planet_radius, self.cx + planet_radius, self.cy + planet_radius), fill=(*planet, 245), outline=(255, 255, 255, 210), width=4)
+        for band in (-0.46, -0.12, 0.24, 0.52):
+            band_y = self.cy + planet_radius * band
+            band_width = planet_radius * math.sqrt(max(0.0, 1.0 - band * band))
+            draw.arc(
+                (self.cx - band_width, band_y - planet_radius * 0.18, self.cx + band_width, band_y + planet_radius * 0.18),
+                start=8,
+                end=172,
+                fill=(5, 12, 30, 90),
+                width=max(2, round(planet_radius * 0.055)),
+            )
+        for spot in range(5):
+            angle = self.seed * 0.001 + spot * 2.399963 + time_sec * 0.03
+            distance = planet_radius * (0.22 + (spot % 3) * 0.16)
+            sx = self.cx + math.cos(angle) * distance
+            sy = self.cy + math.sin(angle) * distance * 0.72
+            size = planet_radius * (0.07 + (spot % 2) * 0.035)
+            draw.ellipse((sx - size, sy - size * 0.7, sx + size, sy + size * 0.7), fill=(5, 12, 30, 70))
+        highlight = planet_radius * 0.34
+        draw.ellipse((self.cx - planet_radius * 0.48, self.cy - planet_radius * 0.50, self.cx - planet_radius * 0.48 + highlight, self.cy - planet_radius * 0.50 + highlight), fill=(255, 255, 255, 115))
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(9)))
+        image = Image.alpha_composite(image, crisp)
+        if self.completed_at is not None:
+            centered(ImageDraw.Draw(image), self.cx, self.cy - self.height * 0.19, "MAXIMUM MASS!", font(round(self.width * 0.050), True), (255, 255, 255, 255), 2)
+        self.hud(image, time_sec, "GRAVITY", f"{self.gravity_g:.1f}G", "MERGES", str(max(0, self.total - self.active)), "EVERY COLLISION ADDS MASS")
+        return image.convert("RGB")
+
+
+class LaserDodge(BaseGame):
+    game_name = "LASER DODGE"
+    unit_name = "LASERS"
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.last_dodge = 0.0
+        self.runner = [self.cx, self.cy]
+        self.trail: list[tuple[float, float]] = []
+
+    def update(self, time_sec: float):
+        target = min(self.total, int(time_sec / max(0.1, self.duration * 0.88) * self.total))
+        while self.active < target:
+            self.active += 1
+            self.last_dodge = time_sec
+            self.record_hit(time_sec, 610 + (self.active % 7) * 55, 0.38, "clear")
+            self.burst(*self.runner, color_for(self.theme, self.active, self.total), 8)
+        progress = self.active / self.total
+        speed = 2.4 + progress * 5.3
+        self.runner = [
+            self.cx + math.sin(time_sec * speed) * self.width * (0.18 + 0.04 * math.sin(time_sec * 0.7)),
+            self.cy + math.sin(time_sec * speed * 0.63 + 1.2) * self.height * 0.16,
+        ]
+        self.trail.append(tuple(self.runner))
+        self.trail = self.trail[-38:]
+        self.max_speed_ratio = 1.0 + progress * 5.4
+        if self.active >= self.total and self.completed_at is None:
+            self.completed_at = time_sec
+            self.burst(*self.runner, (255, 255, 255), 68)
+        self.update_particles()
+
+    def frame(self, time_sec: float) -> Image.Image:
+        image = self.canvas(time_sec)
+        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+        progress = self.active / self.total
+        arena = (self.width * 0.08, self.height * 0.25, self.width * 0.92, self.height * 0.82)
+        draw.rounded_rectangle(arena, radius=18, fill=(2, 4, 12, 125), outline=(255, 255, 255, 35), width=2)
+        for index in range(11):
+            angle = time_sec * (0.34 + progress * 0.85) * (-1 if index % 2 else 1) + index * math.pi / 11
+            anchor_x = self.cx + math.sin(index * 2.1) * self.width * 0.15
+            anchor_y = self.cy + math.cos(index * 1.7) * self.height * 0.13
+            length = self.width * 0.46
+            dx, dy = math.cos(angle) * length, math.sin(angle) * length
+            color = (255, 48 + (index % 3) * 35, 80 + (index % 4) * 30)
+            gd.line((anchor_x - dx, anchor_y - dy, anchor_x + dx, anchor_y + dy), fill=(*color, 95), width=15)
+            draw.line((anchor_x - dx, anchor_y - dy, anchor_x + dx, anchor_y + dy), fill=(*color, 210), width=3)
+        comet = color_for(self.theme, self.active + 8, self.total)
+        for index, (x, y) in enumerate(self.trail):
+            age = (index + 1) / max(1, len(self.trail))
+            radius = 2 + age * 7
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*comet, round(120 * age)))
+        x, y = self.runner
+        dodge_pulse = clamp(1.0 - (time_sec - self.last_dodge) * 7.0, 0.0, 1.0)
+        radius = 14 + dodge_pulse * 5
+        gd.ellipse((x - radius * 2.2, y - radius * 2.2, x + radius * 2.2, y + radius * 2.2), fill=(*comet, 150))
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(255, 255, 255, 255), outline=(*comet, 255), width=4)
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(8)))
+        image = Image.alpha_composite(image, crisp)
+        if self.completed_at is not None:
+            centered(ImageDraw.Draw(image), self.cx, self.height * 0.74, "FLAWLESS RUN!", font(round(self.width * 0.052), True), (255, 255, 255, 255), 2)
+        self.hud(image, time_sec, "SPEED", f"{self.max_speed_ratio:.1f}X", "DODGED", str(self.active), "ZERO CONTACT ALLOWED")
+        return image.convert("RGB")
+
+
+class BrickCascade(BaseGame):
+    game_name = "BRICK CASCADE"
+    unit_name = "BRICKS"
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.columns = 10
+        self.rows = 14
+        self.last_fall = 0.0
+
+    def update(self, time_sec: float):
+        target = min(self.total, int(time_sec / max(0.1, self.duration * 0.88) * self.total))
+        while self.active < target:
+            self.active += 1
+            self.last_fall = time_sec
+            self.record_hit(time_sec, 210 + (self.active % 12) * 30, 0.40, "bounce")
+            if self.active % max(1, self.total // 28) == 0:
+                visible_index = self.active % (self.columns * self.rows)
+                row, column = divmod(visible_index, self.columns)
+                x = self.width * 0.10 + (column + 0.5) * self.width * 0.80 / self.columns
+                y = self.height * 0.29 + (row + 0.5) * self.height * 0.50 / self.rows
+                self.burst(x, y, color_for(self.theme, self.active, self.total), 8)
+        progress = self.active / self.total
+        self.max_speed_ratio = 1.0 + progress * 6.0
+        if self.active >= self.total and self.completed_at is None:
+            self.completed_at = time_sec
+            self.burst(self.cx, self.height * 0.76, (255, 255, 255), 76)
+        self.update_particles()
+
+    def frame(self, time_sec: float) -> Image.Image:
+        image = self.canvas(time_sec)
+        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        grid_total = self.columns * self.rows
+        visible_fallen = round(self.active / self.total * grid_total)
+        x1, x2 = self.width * 0.10, self.width * 0.90
+        y1, y2 = self.height * 0.28, self.height * 0.80
+        cell_w = (x2 - x1) / self.columns
+        cell_h = (y2 - y1) / self.rows
+        for order in range(grid_total):
+            row, path_column = divmod(order, self.columns)
+            column = path_column if row % 2 == 0 else self.columns - 1 - path_column
+            fallen = order < visible_fallen
+            progress = clamp(visible_fallen - order, 0.0, 1.0)
+            cx = x1 + (column + 0.5) * cell_w
+            cy = y1 + (row + 0.5) * cell_h + (cell_h * 0.28 * progress if fallen else 0)
+            color = color_for(self.theme, order + self.active, grid_total)
+            brick_w = cell_w * (0.76 if fallen else 0.58)
+            brick_h = cell_h * (0.28 if fallen else 0.76)
+            alpha = 100 if fallen else 235
+            draw.rounded_rectangle((cx - brick_w / 2, cy - brick_h / 2, cx + brick_w / 2, cy + brick_h / 2), radius=4, fill=(*color, alpha), outline=(255, 255, 255, 80), width=1)
+        wave_order = min(grid_total - 1, visible_fallen)
+        wave_row, wave_path_column = divmod(wave_order, self.columns)
+        wave_column = wave_path_column if wave_row % 2 == 0 else self.columns - 1 - wave_path_column
+        wx = x1 + (wave_column + 0.5) * cell_w
+        wy = y1 + (wave_row + 0.5) * cell_h
+        pulse = clamp(1.0 - (time_sec - self.last_fall) * 6.0, 0.0, 1.0)
+        radius = 10 + pulse * 8
+        draw.ellipse((wx - radius, wy - radius, wx + radius, wy + radius), fill=(255, 255, 255, 235), outline=(*color_for(self.theme, self.active, self.total), 255), width=4)
+        image = Image.alpha_composite(image, layer.filter(ImageFilter.GaussianBlur(4)))
+        image = Image.alpha_composite(image, layer)
+        if self.completed_at is not None:
+            centered(ImageDraw.Draw(image), self.cx, self.cy, "CHAIN COMPLETE!", font(round(self.width * 0.052), True), (255, 255, 255, 255), 2)
+        self.hud(image, time_sec, "CHAIN", f"{self.active}X", "LEFT", str(max(0, self.total - self.active)), "ONE HIT STARTS EVERYTHING")
+        return image.convert("RGB")
+
+
+GAME_CLASSES = {
+    "shape-tunnel": ShapeTunnel,
+    "boss-battle": BossBattle,
+    "melody-drop": MelodyDrop,
+    "color-switch": ColorSwitch,
+    "orbit-merge": OrbitMerge,
+    "laser-dodge": LaserDodge,
+    "brick-cascade": BrickCascade,
+}
+
+
 def create_game(game_id: str, width: int, height: int, fps: int, duration: float, difficulty: int, seed: int, theme: str, title: str):
-    classes = {
-        "shape-tunnel": ShapeTunnel,
-        "boss-battle": BossBattle,
-        "melody-drop": MelodyDrop,
-    }
-    game_class = classes.get(game_id)
+    game_class = GAME_CLASSES.get(game_id)
     if game_class is None:
         raise ValueError(f"Unknown game variant: {game_id}")
     return game_class(width, height, fps, duration, difficulty, seed, theme, title)

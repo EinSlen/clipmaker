@@ -61,8 +61,11 @@ export function GameStudio() {
   const [seed, setSeed] = React.useState('');
   const [rendering, setRendering] = React.useState(false);
   const [elapsed, setElapsed] = React.useState(0);
+  const [batchSize, setBatchSize] = React.useState(1);
+  const [batchProgress, setBatchProgress] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<GameResult | null>(null);
+  const [batchResults, setBatchResults] = React.useState<GameResult[]>([]);
   const [caption, setCaption] = React.useState('');
   const [accounts, setAccounts] = React.useState<string[]>([]);
   const [publishedAccounts, setPublishedAccounts] = React.useState<string[]>([]);
@@ -121,6 +124,7 @@ export function GameStudio() {
     setDifficulty(definition.metricDefault);
     setTitle(definition.defaultHook);
     setResult(null);
+    setBatchResults([]);
     setPublishedAccounts([]);
     setUploadMessage(null);
   }
@@ -128,35 +132,51 @@ export function GameStudio() {
   async function generate() {
     setRendering(true);
     setResult(null);
+    setBatchResults([]);
+    setBatchProgress(0);
     setError(null);
     setUploadMessage(null);
     try {
-      const response = await fetch('/api/game/render', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          game,
-          duration,
-          difficulty,
-          theme,
-          soundPack,
-          musicFile: musicFile || undefined,
-          musicMode,
-          musicVolume,
-          title,
-          seed: seed.trim() ? Number(seed) : undefined,
-        }),
-      });
-      const data = await response.json();
-      if (!data.ok) throw new Error(data.error || 'The render failed.');
-      setResult(data);
-      setCaption(`${data.caption} ${data.tags.join(' ')}`);
-      setSeed(String(data.seed));
+      const generated: GameResult[] = [];
+      const requestedSeed = seed.trim() ? Number(seed) : undefined;
+      for (let index = 0; index < batchSize; index += 1) {
+        const response = await fetch('/api/game/render', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            game,
+            duration,
+            difficulty,
+            theme,
+            soundPack,
+            musicFile: musicFile || undefined,
+            musicMode,
+            musicVolume,
+            title,
+            seed: requestedSeed ? ((requestedSeed + index - 1) % 2_147_483_647) + 1 : undefined,
+          }),
+        });
+        const data = await response.json();
+        if (!data.ok) throw new Error(`Video ${index + 1}: ${data.error || 'The render failed.'}`);
+        generated.push(data);
+        setBatchResults([...generated]);
+        setResult(data);
+        setCaption(`${data.caption} ${data.tags.join(' ')}`);
+        setSeed(String(data.seed));
+        setBatchProgress(index + 1);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setRendering(false);
     }
+  }
+
+  function selectResult(next: GameResult) {
+    setResult(next);
+    setCaption(`${next.caption} ${next.tags.join(' ')}`);
+    setPublishedAccounts([]);
+    setUploadMessage(null);
   }
 
   async function uploadMusic(event: React.ChangeEvent<HTMLInputElement>) {
@@ -237,7 +257,7 @@ export function GameStudio() {
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-ink-300">Game format</span>
-              <span className="text-[10px] text-emerald-300">4 original engines</span>
+              <span className="text-[10px] text-emerald-300">{GAME_CATALOG.length} original engines</span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {GAME_CATALOG.map((item) => (
@@ -365,9 +385,19 @@ export function GameStudio() {
             </div>
           </label>
 
+          <label className="text-xs text-ink-400 space-y-1 block">
+            <span>Batch size</span>
+            <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))} className="w-full bg-ink-900 border border-white/10 rounded-lg px-3 h-10 text-sm text-white">
+              <option value={1}>1 video</option>
+              <option value={2}>2 unique videos</option>
+              <option value={3}>3 unique videos</option>
+            </select>
+            <span className="block text-[10px] text-ink-500">Each video gets a different deterministic seed and soundtrack selection. Publishing always remains manual.</span>
+          </label>
+
           <Button onClick={generate} disabled={rendering || !title.trim()} className="w-full" size="lg">
             {rendering ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
-            {rendering ? `Simulating and encoding… ${elapsed}s` : 'Generate video'}
+            {rendering ? `Encoding ${Math.min(batchProgress + 1, batchSize)}/${batchSize}… ${elapsed}s` : `Generate ${batchSize === 1 ? 'video' : `${batchSize} videos`}`}
           </Button>
           <p className="text-[11px] text-ink-500 text-center">Rendering stays on your server. No third-party video is used.</p>
           {error && <p className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-200">{error}</p>}
@@ -376,6 +406,22 @@ export function GameStudio() {
 
       {result && (
         <>
+          {batchResults.length > 1 && (
+            <section className="rounded-xl border border-white/10 bg-ink-800/70 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium">Generated batch</h3>
+                <span className="text-[11px] text-emerald-300">{batchResults.length}/{batchSize} ready</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {batchResults.map((item, index) => (
+                  <button key={item.filename} type="button" onClick={() => selectResult(item)} className={`rounded-lg border p-2 text-left text-xs transition ${result.filename === item.filename ? 'border-cyan-300/60 bg-cyan-400/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}>
+                    <span className="block font-medium text-white">Video {index + 1}</span>
+                    <span className="text-ink-400">Seed {item.seed} · {(item.size / 1024 / 1024).toFixed(1)} MB</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="rounded-2xl border border-white/10 bg-black overflow-hidden">
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video src={`/api/renders/${encodeURIComponent(result.filename)}`} controls playsInline loop className="w-full max-h-[72vh] aspect-[9/16] object-contain" />
@@ -418,6 +464,7 @@ export function GameStudio() {
 
           <YoutubePublisher
             key={result.filename}
+            gameId={result.game}
             filename={result.filename}
             defaultTitle={result.youtubeTitle}
             description={caption}

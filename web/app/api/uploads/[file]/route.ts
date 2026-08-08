@@ -1,23 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { UPLOADS_DIR } from '@/lib/server-paths';
+import { videoFileResponse } from '@/lib/video-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ file: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ file: string }> }) {
   const { file } = await params;
   const safe = path.basename(file);
   const full = path.join(UPLOADS_DIR, safe);
   if (!fs.existsSync(full)) return new Response('Not found', { status: 404 });
-  const stat = fs.statSync(full);
-  const stream = fs.createReadStream(full);
-  return new Response(stream as unknown as ReadableStream, {
-    headers: {
-      'Content-Type': 'video/mp4',
-      'Content-Length': String(stat.size),
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache'
-    }
-  });
+  return videoFileResponse(request, full, safe);
 }
