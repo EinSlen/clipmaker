@@ -14,27 +14,24 @@ import wave
 from array import array
 from pathlib import Path
 
+from soft_body_variants import variant_for_seed, variant_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-SOFTNESS_RATIOS = (0.0, 0.25, 0.50, 0.75, 1.0)
 FOLEY_EVENT_RATIOS = (0.23, 0.39, 0.96)
 FOLEY_EVENT_TYPES = ("ramp-contact-1", "ramp-contact-2", "receiver-outcome")
 
 
-def softness_stages(max_softness: int) -> tuple[int, ...]:
-    # The recognizable comparison always uses the same five canonical levels.
-    # The difficulty argument is retained for API compatibility and metadata.
-    del max_softness
-    return (0, 25, 50, 75, 100)
+def softness_stages(seed: int) -> tuple[int, ...]:
+    return variant_for_seed(seed).stages
 
 
-def stage_event_times(duration: float) -> list[tuple[float, float, float]]:
+def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, float, float]]:
     """Return the two ramp contacts and receiver outcome for each trial."""
-    segment = duration / len(SOFTNESS_RATIOS)
+    segment = duration / stage_count
     return [
         tuple(min(duration - 0.01, (index + ratio) * segment) for ratio in FOLEY_EVENT_RATIOS)
-        for index in range(len(SOFTNESS_RATIOS))
+        for index in range(stage_count)
     ]
 
 
@@ -234,8 +231,9 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     fps = int(os.environ.get("PREMIUM_RENDER_FPS", "15"))
     samples = int(os.environ.get("PREMIUM_RENDER_SAMPLES", "5"))
     frame_count = round(args.duration * fps)
-    stages = softness_stages(args.difficulty)
-    event_times = stage_event_times(args.duration)
+    variant = variant_for_seed(args.seed)
+    stages = variant.stages
+    event_times = stage_event_times(args.duration, len(stages))
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-premium-", dir=str(output.parent)) as temporary:
         root = Path(temporary)
@@ -299,7 +297,6 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "events_per_trial": len(FOLEY_EVENT_RATIOS),
         "event_ratios": list(FOLEY_EVENT_RATIOS),
         "foley_event_types": list(FOLEY_EVENT_TYPES),
-        "softness_stages": list(stages),
         "units_completed": args.difficulty,
         "units_total": 100,
         "renderer": "Blender Eevee",
@@ -308,6 +305,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "render_height": height,
         "render_fps": fps,
         "output_fps": 30,
+        **variant_summary(variant),
     }
 
 

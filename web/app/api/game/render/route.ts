@@ -173,7 +173,24 @@ export async function POST(request: Request) {
     ];
     if (musicPath) rendererArgs.push('--music', musicPath);
     const renderer = await runRenderer(rendererArgs);
-    let rendererMetadata: { sound_pack?: string; duration?: number; music?: string; music_generated?: boolean; music_mode?: string; music_hits?: number; units_completed?: number; units_total?: number } = {};
+    let rendererMetadata: {
+      sound_pack?: string;
+      duration?: number;
+      music?: string;
+      music_generated?: boolean;
+      music_mode?: string;
+      music_hits?: number;
+      units_completed?: number;
+      units_total?: number;
+      variant_key?: string;
+      variant_label?: string;
+      variant_shape?: string;
+      variant_ramp?: string;
+      variant_palette?: string;
+      variant_receiver?: string;
+      stage_preset?: string;
+      softness_stages?: number[];
+    } = {};
     try {
       const lastLine = renderer.stdout.trim().split(/\r?\n/).at(-1);
       if (lastLine) rendererMetadata = JSON.parse(lastLine);
@@ -203,6 +220,14 @@ export async function POST(request: Request) {
       musicSource,
       musicCredit,
       musicNote,
+      variantKey: rendererMetadata.variant_key || null,
+      variantLabel: rendererMetadata.variant_label || null,
+      variantShape: rendererMetadata.variant_shape || null,
+      variantRamp: rendererMetadata.variant_ramp || null,
+      variantPalette: rendererMetadata.variant_palette || null,
+      variantReceiver: rendererMetadata.variant_receiver || null,
+      stagePreset: rendererMetadata.stage_preset || null,
+      softnessStages: rendererMetadata.softness_stages || null,
       title,
       youtubeTitle: `${title} #shorts`,
       caption: musicCredit ? `${captionBase}\n${musicCredit}` : captionBase,

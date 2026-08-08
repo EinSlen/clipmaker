@@ -73,7 +73,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     uiName: "Test de souplesse 3D",
     shortName: "Soft Body",
     description:
-      "Cinq niveaux Blender comparent l’écrasement, la flexion et le rebond du même objet.",
+      "Chaque graine combine une nouvelle forme, rampe, palette, physique et progression de souplesse.",
     objective: "Comparer cinq atterrissages de 0 % à 100 % de souplesse.",
     defaultHook: "0% to 100% softness — which landing is best?",
     metricLabel: "Max softness",

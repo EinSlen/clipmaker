@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from game_variants import GAME_CLASSES
+from soft_body_variants import variant_for_seed
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -43,6 +44,31 @@ class GameCatalogTests(unittest.TestCase):
         catalog_ids = tuple(re.findall(r"\bid:\s*['\"]([a-z-]+)['\"]", source))
         self.assertEqual(catalog_ids, (*ENGINE_IDS, *PREMIUM_IDS))
         self.assertEqual(len(catalog_ids), len(set(catalog_ids)))
+
+
+class SoftBodyVariantTests(unittest.TestCase):
+    def test_same_seed_resolves_to_same_variant(self):
+        self.assertEqual(variant_for_seed(424242), variant_for_seed(424242))
+
+    def test_adjacent_batch_seeds_change_all_major_visual_axes(self):
+        variants = [variant_for_seed(seed) for seed in range(910100, 910105)]
+        self.assertEqual(len({variant.key for variant in variants}), len(variants))
+        for previous, current in zip(variants, variants[1:]):
+            self.assertNotEqual(previous.shape.key, current.shape.key)
+            self.assertNotEqual(previous.ramp.key, current.ramp.key)
+            self.assertNotEqual(previous.palette.key, current.palette.key)
+
+    def test_every_variant_keeps_clear_rigid_and_soft_extremes(self):
+        for seed in range(1000, 1200):
+            stages = variant_for_seed(seed).stages
+            self.assertEqual(len(stages), 5)
+            self.assertEqual(stages[0], 0)
+            self.assertEqual(stages[-1], 100)
+            self.assertEqual(tuple(sorted(stages)), stages)
+
+    def test_variant_catalog_has_at_least_2500_discrete_combinations(self):
+        keys = {variant_for_seed(seed).key for seed in range(10_000)}
+        self.assertGreaterEqual(len(keys), 2_500)
 
 
 class GameEngineTests(unittest.TestCase):
