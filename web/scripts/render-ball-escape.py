@@ -747,7 +747,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         silent = Path(temp_dir) / "silent.mp4"
         audio = Path(temp_dir) / "effects.wav"
         generated_music = Path(temp_dir) / "original-generated-track.wav"
-        video_crf = "22" if args.game in {"shape-tunnel", "laser-dodge"} else "19"
+        video_crf = "22" if args.game == "shape-tunnel" else "19"
         encode = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
