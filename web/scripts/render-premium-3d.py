@@ -308,7 +308,6 @@ def build_video_filter(duration: float, stages: tuple[int, ...]) -> str:
     filters = [
         "fps=30:round=up",
         "scale=1080:1920:flags=lanczos",
-        "unsharp=5:5:0.18:3:3:0.0",
     ]
     segment = duration / len(stages)
     for index, softness in enumerate(stages):

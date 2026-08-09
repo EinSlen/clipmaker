@@ -18,7 +18,7 @@ from mathutils import Vector
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from soft_body_variants import SoftBodyVariant, variant_for_seed
+from soft_body_variants import SoftBodyVariant, solver_timing, variant_for_seed
 
 
 
@@ -36,6 +36,11 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--events")
     parser.add_argument("--theme", choices=("neon", "sunset", "ice"), required=True)
     parser.add_argument("--title", required=True)
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        help="Save the fully simulated .blend without rendering frames (for chunked native rendering).",
+    )
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1 :])
 
 
@@ -163,7 +168,7 @@ def background_material(variant: SoftBodyVariant):
 
 def liquid_gold_material(seed: int, variant: SoftBodyVariant):
     variation = ((seed % 997) / 996.0 - 0.5) * 0.025
-    base = mix_color(variant.palette.metal, (0.84, 0.58, 0.17), 0.74)
+    base = mix_color(variant.palette.metal, (0.93, 0.72, 0.32), 0.84)
     value = material(
         f"{variant.palette.label} liquid metal",
         (
@@ -173,8 +178,8 @@ def liquid_gold_material(seed: int, variant: SoftBodyVariant):
             1,
         ),
         metallic=1.0,
-        roughness=max(0.105, min(0.145, variant.palette.metal_roughness * 0.82)),
-        clearcoat=0.36,
+        roughness=max(0.18, min(0.23, variant.palette.metal_roughness * 1.28)),
+        clearcoat=0.24,
     )
     nodes, links = value.node_tree.nodes, value.node_tree.links
     shader = nodes.get("Principled BSDF")
@@ -243,7 +248,7 @@ def effective_ramp_exit_time(variant: SoftBodyVariant, trial_duration: float) ->
     # Presets were authored for three-second trials.  Longer cinematic trials
     # keep the ramp alive for multiple sweeps, then reserve the same natural
     # fall/landing window at the end.
-    landing_window = 3.0 - variant.ramp.exit_time
+    landing_window = max(1.72, 3.0 - variant.ramp.exit_time)
     return max(0.8, trial_duration - landing_window)
 
 
@@ -425,7 +430,7 @@ def constrain_distance(points, first: int, second: int, target: float, strength:
 
 def constrain_self_collision(points, radii, neighbor_skip: int, softness: float) -> None:
     """Prevent distant sections of the capsule from passing through each other."""
-    separation_scale = 0.76 - softness * 0.08
+    separation_scale = 0.96 - softness * 0.04
     for first in range(len(points) - neighbor_skip):
         for second in range(first + neighbor_skip, len(points)):
             delta = points[second] - points[first]
@@ -435,6 +440,29 @@ def constrain_self_collision(points, radii, neighbor_skip: int, softness: float)
                 correction = delta * ((minimum - distance) / distance * 0.34)
                 points[first] -= correction
                 points[second] += correction
+
+
+def smooth_centerline(points, rest: float, passes: int):
+    """Remove solver chatter without shortening the physical rod."""
+    result = [point.copy() for point in points]
+    for _ in range(passes):
+        center_before = sum(result, Vector((0.0, 0.0))) / len(result)
+        smoothed = [result[0] * 0.84 + result[1] * 0.16]
+        for index in range(1, len(result) - 1):
+            smoothed.append(
+                result[index - 1] * 0.14
+                + result[index] * 0.72
+                + result[index + 1] * 0.14
+            )
+        smoothed.append(result[-1] * 0.84 + result[-2] * 0.16)
+        for projection in range(5):
+            direction = range(len(smoothed) - 1) if projection % 2 == 0 else range(len(smoothed) - 2, -1, -1)
+            for index in direction:
+                constrain_distance(smoothed, index, index + 1, rest, 0.72)
+        center_after = sum(smoothed, Vector((0.0, 0.0))) / len(smoothed)
+        shift = center_before - center_after
+        result = [point + shift for point in smoothed]
+    return result
 
 
 def collide_point(
@@ -516,7 +544,10 @@ def collide_point(
 def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: SoftBodyVariant):
     softness = softness_percent / 100.0
     node_count = 41
-    half_length = variant.shape.cylinder_half + variant.shape.radius
+    # The simulated spine covers the cylindrical section only.  Hemispherical
+    # caps are reconstructed around its endpoints, so their collision radius
+    # never collapses into the needle-like poles produced by the old solver.
+    half_length = variant.shape.cylinder_half
     rest = 2.0 * half_length / (node_count - 1)
     rotation = variant.start_rotation
     points = []
@@ -536,22 +567,18 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: S
     node_impact_memory = [0.0] * node_count
     trial_duration = frame_count / fps
     exit_time = effective_ramp_exit_time(variant, trial_duration)
-    substeps = 24
-    dt = 1.0 / (fps * substeps)
+    # Render FPS must never change the game outcome.  The previous code used
+    # 24 solver steps *per rendered frame*, so a 30 FPS production render had
+    # ten times more damping/constraints than a 3 FPS scout.  Keep a stable
+    # physics clock and only sample it at the requested render cadence.
+    substeps, dt, horizontal_damping, vertical_damping = solver_timing(fps, softness)
     iterations = max(40, round(88 - softness * 44))
-    target_bend = max(0.12, 1.0 - 0.88 * softness ** 1.5)
+    target_bend = max(0.30, 1.0 - 0.70 * softness ** 1.35)
     bend_strength = 1.0 - (1.0 - target_bend) ** (1.0 / iterations)
-    horizontal_damping = 0.974 - softness * 0.064
-    vertical_damping = 0.993 - softness * 0.005
-    collision_radii = []
-    for index in range(node_count):
-        axial = -half_length + 2.0 * half_length * index / (node_count - 1)
-        cap_distance = max(0.0, abs(axial) - variant.shape.cylinder_half)
-        cross_radius = math.sqrt(
-            max(0.0, variant.shape.radius * variant.shape.radius - cap_distance * cap_distance)
-        )
-        collision_radii.append(max(variant.shape.radius * 0.055, cross_radius))
-    neighbor_skip = max(6, math.ceil(2.0 * variant.shape.radius * 0.76 / rest) + 1)
+    target_long_bend = max(0.16, 1.0 - 0.84 * softness ** 1.28)
+    long_bend_strength = 1.0 - (1.0 - target_long_bend) ** (1.0 / iterations)
+    collision_radii = [variant.shape.radius] * node_count
+    neighbor_skip = max(5, math.ceil(2.0 * variant.shape.radius * 0.86 / rest) + 1)
 
     for frame in range(frame_count):
         frame_intensity = 0.0
@@ -589,6 +616,13 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: S
                     bend_direction = range(node_count - 2) if iteration % 2 == 0 else range(node_count - 3, -1, -1)
                     for index in bend_direction:
                         constrain_distance(points, index, index + 2, rest * 2.0, bend_strength)
+                    for index in range(node_count - 4):
+                        constrain_distance(points, index, index + 4, rest * 4.0, long_bend_strength)
+                    if iteration % 2 == 0:
+                        for index in range(node_count - 8):
+                            constrain_distance(
+                                points, index, index + 8, rest * 8.0, long_bend_strength * 0.30
+                            )
                     if softness >= 0.45 and iteration % 4 == 0:
                         constrain_self_collision(points, collision_radii, neighbor_skip, softness)
                     for index in range(node_count):
@@ -675,11 +709,12 @@ def skin_capsule(
     frame: int,
     variant: SoftBodyVariant,
 ):
-    half_length = variant.shape.cylinder_half + variant.shape.radius
+    half_length = variant.shape.cylinder_half
     node_count = len(chain_points)
+    rest = 2.0 * half_length / (node_count - 1)
     center = sum(chain_points, Vector((0.0, 0.0))) / node_count
     rigid_tangent = (chain_points[-1] - chain_points[0]).normalized()
-    visible_deformation = softness ** 1.18
+    visible_deformation = softness ** 1.18 * (0.96 - 0.06 * softness)
     displayed_points = []
     for index, point in enumerate(chain_points):
         local_x = -half_length + 2.0 * half_length * index / (node_count - 1)
@@ -688,16 +723,11 @@ def skin_capsule(
     # Reconstruct a continuous rod rather than exposing individual solver
     # particles.  Broad folds survive while the bead-like high frequencies do
     # not, which is the defining visual difference in the OopsiLab reference.
-    for _ in range(max(0, round(softness * 9.0))):
-        smoothed = [displayed_points[0] * 0.80 + displayed_points[1] * 0.20]
-        for index in range(1, node_count - 1):
-            smoothed.append(
-                displayed_points[index - 1] * 0.17
-                + displayed_points[index] * 0.66
-                + displayed_points[index + 1] * 0.17
-            )
-        smoothed.append(displayed_points[-1] * 0.80 + displayed_points[-2] * 0.20)
-        displayed_points = smoothed
+    displayed_points = smooth_centerline(
+        displayed_points,
+        rest,
+        max(0, round(softness * 6.0)),
+    )
     smoothed_impacts = list(node_impacts)
     for _ in range(7):
         smoothed_impacts = [smoothed_impacts[0]] + [
@@ -709,26 +739,40 @@ def skin_capsule(
     result = []
     for base in base_vertices:
         x, y, z = base
-        coordinate = max(0.0, min(node_count - 1.000001, (x + half_length) / (2.0 * half_length) * (node_count - 1)))
-        first = int(math.floor(coordinate))
-        second = min(node_count - 1, first + 1)
-        blend = coordinate - first
+        axial_offset = 0.0
+        if x <= -half_length:
+            first = second = 0
+            blend = 0.0
+            axial_offset = x + half_length
+        elif x >= half_length:
+            first = second = node_count - 1
+            blend = 0.0
+            axial_offset = x - half_length
+        else:
+            coordinate = (x + half_length) / (2.0 * half_length) * (node_count - 1)
+            first = int(math.floor(coordinate))
+            second = min(node_count - 1, first + 1)
+            blend = coordinate - first
         center = displayed_points[first].lerp(displayed_points[second], blend)
         local_impact = smoothed_impacts[first] * (1.0 - blend) + smoothed_impacts[second] * blend
         before = displayed_points[max(0, first - 1)]
         after = displayed_points[min(node_count - 1, second + 1)]
         tangent = (after - before).normalized()
         normal = Vector((-tangent.y, tangent.x))
+        center += tangent * axial_offset
+        before_index = max(0, first - 1)
+        after_index = min(node_count - 1, second + 1)
+        expected_span = max(rest, (after_index - before_index) * rest)
         local_stretch = max(
-            0.58,
+            0.72,
             min(
-                1.55,
+                1.38,
                 (after - before).length
-                / max(0.001, 4.0 * half_length / (node_count - 1)),
+                / max(0.001, expected_span),
             ),
         )
-        volume_scale = max(0.78, min(1.28, 1.0 / math.sqrt(local_stretch)))
-        contact_compression = min(0.78, local_impact * (0.24 + softness * 0.62))
+        volume_scale = max(0.88, min(1.15, 1.0 / math.sqrt(local_stretch)))
+        contact_compression = min(0.62, local_impact * (0.18 + softness * 0.45))
         cross_radius = max(1e-5, math.sqrt(y * y + z * z))
         lower_weight = max(0.0, -z / cross_radius) ** 1.55
         upper_weight = max(0.0, z / cross_radius) ** 1.8
@@ -736,11 +780,11 @@ def skin_capsule(
         # orthogonal expansion approximates incompressible gel and removes the
         # implausible shrinking seen in the previous mesh.
         normal_scale = max(
-            0.50,
-            1.0 - contact_compression * (0.54 * lower_weight + 0.10 * upper_weight),
+            0.62,
+            1.0 - contact_compression * (0.46 * lower_weight + 0.08 * upper_weight),
         )
-        mean_height_scale = max(0.56, 1.0 - contact_compression * 0.30)
-        depth_scale = min(1.34, 1.0 / math.sqrt(mean_height_scale))
+        mean_height_scale = max(0.68, 1.0 - contact_compression * 0.24)
+        depth_scale = min(1.22, 1.0 / math.sqrt(mean_height_scale))
         radius_scale = volume_scale
         result.append(
             (
@@ -876,7 +920,7 @@ def add_receiver(marble, gold, variant: SoftBodyVariant):
         minor_segments=16,
         location=(receiver.x, 0.0, top),
         major_radius=(outer_radius + inner_radius) * 0.5,
-        minor_radius=(outer_radius - inner_radius) * 0.42,
+        minor_radius=(outer_radius - inner_radius) * 0.28,
     )
     rim = bpy.context.object
     rim.name = "Champagne receiver rim"
@@ -957,13 +1001,13 @@ def main() -> None:
             encoding="utf-8",
         )
 
-    bpy.ops.object.camera_add(location=(0.0, -14.8, 4.55))
+    bpy.ops.object.camera_add(location=(1.05, -14.8, 7.25))
     camera = bpy.context.object
     camera.name = "Fixed reference camera"
     camera.data.type = "ORTHO"
     camera.data.ortho_scale = 8.35
     camera.data.lens = 70
-    look_at(camera, (0.0, 0.0, 3.18))
+    look_at(camera, (0.0, 0.0, 3.12))
     bpy.context.scene.camera = camera
 
     key_color = mix_color(variant.palette.key_light, (1.0, 0.93, 0.83), 0.72)
@@ -987,7 +1031,7 @@ def main() -> None:
     if hasattr(scene.eevee, "use_high_quality_normals"):
         scene.eevee.use_high_quality_normals = True
     scene.eevee.use_motion_blur = True
-    scene.eevee.motion_blur_shutter = 0.18
+    scene.eevee.motion_blur_shutter = 0.08
     scene.eevee.taa_render_samples = args.samples
     scene.eevee.shadow_cube_size = "4096"
     scene.eevee.shadow_cascade_size = "4096"
@@ -1014,8 +1058,8 @@ def main() -> None:
     )
     scene.world.color = studio_world
     scene.view_settings.view_transform = "Filmic"
-    scene.view_settings.look = "High Contrast"
-    scene.view_settings.exposure = 0.22
+    scene.view_settings.look = "Medium High Contrast"
+    scene.view_settings.exposure = 0.38
     scene.view_settings.gamma = 1.0
     scene.render.use_file_extension = True
 
@@ -1023,7 +1067,8 @@ def main() -> None:
     frames.mkdir(parents=True, exist_ok=True)
     suffix = str(stages[0]) if len(stages) == 1 else "comparison"
     bpy.ops.wm.save_as_mainfile(filepath=str(frames / f"soft-body-{suffix}.blend"))
-    bpy.ops.render.render(animation=True)
+    if not args.build_only:
+        bpy.ops.render.render(animation=True)
 
 
 if __name__ == "__main__":
