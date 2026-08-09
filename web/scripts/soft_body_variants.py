@@ -11,6 +11,18 @@ import random
 
 
 Color = tuple[float, float, float]
+PHYSICS_HZ = 240
+
+
+def solver_timing(fps: int, softness: float) -> tuple[int, float, float, float]:
+    """Return a render-FPS-independent solver clock and per-step damping."""
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    substeps = max(1, round(PHYSICS_HZ / fps))
+    actual_hz = fps * substeps
+    horizontal = (0.974 - softness * 0.064) ** (60.0 / actual_hz)
+    vertical = (0.993 - softness * 0.005) ** (60.0 / actual_hz)
+    return substeps, 1.0 / actual_hz, horizontal, vertical
 
 
 @dataclass(frozen=True)
@@ -92,11 +104,11 @@ class SoftBodyVariant:
 
 
 SHAPES = (
-    ShapePreset("classic-pill", "Classic pill", 0.37, 0.66, 0.15, 0.00),
-    ShapePreset("slender-cylinder", "Slender cylinder", 0.30, 0.84, 0.10, 0.02),
-    ShapePreset("plush-capsule", "Plush capsule", 0.43, 0.50, 0.055, 0.08),
-    ShapePreset("rounded-barrel", "Rounded barrel", 0.39, 0.58, 0.18, 0.14),
-    ShapePreset("rolled-gel", "Rolled gel", 0.35, 0.73, 0.08, -0.045),
+    ShapePreset("classic-pill", "Classic pill", 0.285, 0.58, 0.12, 0.00),
+    ShapePreset("slender-cylinder", "Slender cylinder", 0.235, 0.72, 0.08, 0.015),
+    ShapePreset("plush-capsule", "Plush capsule", 0.315, 0.56, 0.045, 0.055),
+    ShapePreset("rounded-barrel", "Rounded barrel", 0.295, 0.57, 0.13, 0.085),
+    ShapePreset("rolled-gel", "Rolled gel", 0.270, 0.62, 0.065, -0.025),
 )
 
 

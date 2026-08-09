@@ -11,7 +11,7 @@ import wave
 from pathlib import Path
 
 from game_variants import GAME_CLASSES
-from soft_body_variants import variant_for_seed
+from soft_body_variants import SHAPES, solver_timing, variant_for_seed
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -78,6 +78,27 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_variant_catalog_has_at_least_2500_discrete_combinations(self):
         keys = {variant_for_seed(seed).key for seed in range(10_000)}
         self.assertGreaterEqual(len(keys), 2_500)
+
+    def test_capsule_presets_remain_slender_and_reference_scaled(self):
+        for shape in SHAPES:
+            total_length = 2.0 * (shape.cylinder_half + shape.radius)
+            diameter = 2.0 * shape.radius
+            self.assertGreaterEqual(total_length / diameter, 2.75, shape.key)
+            self.assertLessEqual(total_length, 1.95, shape.key)
+
+    def test_native_filter_does_not_amplify_render_artifacts(self):
+        value = PREMIUM_RENDERER.build_video_filter(15.0, (0, 25, 50, 75, 100))
+        self.assertNotIn("unsharp", value)
+
+    def test_soft_body_solver_clock_is_render_fps_independent(self):
+        expected_horizontal = (0.974 - 0.064) ** 60.0
+        expected_vertical = (0.993 - 0.005) ** 60.0
+        for fps in (3, 24, 30, 60):
+            substeps, dt, horizontal, vertical = solver_timing(fps, 1.0)
+            steps_per_second = fps * substeps
+            self.assertAlmostEqual(dt * steps_per_second, 1.0, places=12)
+            self.assertAlmostEqual(horizontal ** steps_per_second, expected_horizontal, places=12)
+            self.assertAlmostEqual(vertical ** steps_per_second, expected_vertical, places=12)
 
 
 class SoftBodyAudioTests(unittest.TestCase):
