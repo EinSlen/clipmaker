@@ -41,14 +41,30 @@ def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, ..
     ]
 
 
+def fallback_foley_events(duration: float, stages: tuple[int, ...]) -> list[dict[str, object]]:
+    """Build deterministic cues only when Blender cannot export collision data."""
+    events = []
+    for stage_index, (softness, times) in enumerate(zip(stages, stage_event_times(duration, len(stages)))):
+        for event_index, timestamp in enumerate(times):
+            events.append(
+                {
+                    "time": timestamp,
+                    "kind": "receiver-contact" if event_index == len(times) - 1 else "ramp-contact",
+                    "strength": 0.72 if event_index == len(times) - 1 else 0.58,
+                    "pan": -0.18 + stage_index * 0.07,
+                    "softness": softness,
+                }
+            )
+    return events
+
+
 def synth_premium_foley(
     duration: float,
-    event_times: list[tuple[float, ...]],
-    stages: tuple[int, ...],
+    events: list[dict[str, object]],
     output: Path,
     seed: int,
 ) -> None:
-    """Create layered, synchronized stereo Foley cues for each trial."""
+    """Create layered ASMR Foley at the collisions exported by Blender."""
     rate = 48_000
     sample_count = math.ceil(duration * rate) + 1
     left = array("f", [0.0]) * sample_count
@@ -105,78 +121,46 @@ def synth_premium_foley(
         left[sample_index] += ambience_left * 0.0014
         right[sample_index] += ambience_right * 0.0014
 
-    for index, (softness_percent, trial_events) in enumerate(zip(stages, event_times)):
-        softness = softness_percent / 100.0
-        contact_one, contact_two, contact_three, contact_four, outcome = trial_events
-        trial_pan = -0.12 + index * 0.06
+    for event in sorted(events, key=lambda item: float(item["time"])):
+        timestamp = max(0.0, min(duration - 0.005, float(event["time"])))
+        softness = max(0.0, min(1.0, float(event.get("softness", 50)) / 100.0))
+        strength = max(0.16, min(1.0, float(event.get("strength", 0.55))))
+        pan = max(-0.82, min(0.82, float(event.get("pan", 0.0))))
+        kind = str(event.get("kind", "ramp-contact"))
 
-        # First ramp contact: a quick whoosh into a bright clink.
-        add_texture(contact_one - 0.16, 0.18, 0.028 + softness * 0.010, -0.34 + trial_pan, 0.20 + softness * 0.25)
-        add_tone(
-            contact_one,
-            760.0 - softness * 250.0,
-            0.085 + softness * 0.035,
-            0.13 + softness * 0.025,
-            -0.34 + trial_pan,
-            0.14 + softness * 0.16,
-        )
-
-        # Second ramp contact: a lower friction burst with a separate knock.
-        add_texture(contact_two - 0.12, 0.25, 0.045 + softness * 0.022, trial_pan, 0.30 + softness * 0.42)
-        add_tone(
-            contact_two,
-            420.0 - softness * 195.0,
-            0.13 + softness * 0.07,
-            0.18 + softness * 0.05,
-            trial_pan,
-            0.25 + softness * 0.30,
-        )
-
-        # Longer cinematic trials expose the intermediate relaunches instead
-        # of leaving a dead audio bed between the first contact and the cup.
-        add_texture(
-            contact_three - 0.10,
-            0.31 + softness * 0.10,
-            0.034 + softness * 0.030,
-            -0.08 + trial_pan,
-            0.38 + softness * 0.45,
-        )
-        add_tone(
-            contact_three,
-            350.0 - softness * 170.0,
-            0.15 + softness * 0.08,
-            0.15 + softness * 0.07,
-            -0.08 + trial_pan,
-            0.30 + softness * 0.28,
-        )
-        add_texture(
-            contact_four - 0.08,
-            0.23 + softness * 0.13,
-            0.038 + softness * 0.040,
-            0.15 + trial_pan,
-            0.42 + softness * 0.48,
-        )
-        add_tone(
-            contact_four,
-            460.0 - softness * 245.0,
-            0.12 + softness * 0.09,
-            0.17 + softness * 0.08,
-            0.15 + trial_pan,
-            0.26 + softness * 0.34,
-        )
-
-        # Receptacle/outcome: a compact plop whose body follows the softness.
-        add_tone(outcome, 500.0 - softness * 315.0, 0.17 + softness * 0.14, 0.24 + softness * 0.09, 0.30 + trial_pan, 0.46)
-        add_tone(outcome, 94.0 - softness * 26.0, 0.25, 0.28 + softness * 0.11, 0.30 + trial_pan, 0.56)
-        add_texture(outcome, 0.13 + softness * 0.19, 0.042 + softness * 0.084, 0.30 + trial_pan, softness, fade=False)
-        add_tone(
-            outcome + 0.10,
-            330.0 - softness * 170.0,
-            0.10 + softness * 0.07,
-            0.09 + (1.0 - softness) * 0.07,
-            0.12 - trial_pan,
-            0.28,
-        )
+        if kind == "receiver-contact":
+            # Marble rim/bowl: a low body transient, soft metallic ring and a
+            # short gel squash.  All layers share the exact collision frame.
+            add_tone(timestamp, 114.0 - softness * 30.0, 0.30 + softness * 0.10, 0.34 * strength, pan, 0.58)
+            add_tone(timestamp, 520.0 - softness * 260.0, 0.18 + softness * 0.12, 0.24 * strength, pan, 0.43)
+            add_texture(timestamp, 0.15 + softness * 0.24, 0.11 * strength, pan, softness, fade=False)
+            add_tone(timestamp + 0.075, 310.0 - softness * 130.0, 0.12, 0.10 * strength, -pan * 0.35, 0.24)
+        else:
+            # Ramp impacts remain crisp at 0% and progressively become broad,
+            # damped rubs at 100%, just like the reference waveform.
+            add_texture(
+                timestamp - (0.055 + softness * 0.055),
+                0.17 + softness * 0.27,
+                (0.040 + softness * 0.050) * strength,
+                pan,
+                0.24 + softness * 0.66,
+            )
+            add_tone(
+                timestamp,
+                690.0 - softness * 410.0,
+                0.09 + softness * 0.12,
+                (0.16 + softness * 0.055) * strength,
+                pan,
+                0.18 + softness * 0.33,
+            )
+            add_tone(
+                timestamp,
+                205.0 - softness * 72.0,
+                0.13 + softness * 0.09,
+                0.105 * strength,
+                pan * 0.7,
+                0.38,
+            )
 
     peak = max(0.001, max(max(abs(value) for value in left), max(abs(value) for value in right)))
     gain = min(0.86 / peak, 1.0)
@@ -191,10 +175,96 @@ def synth_premium_foley(
         destination.writeframes(pcm.tobytes())
 
 
+def synth_soft_body_bed(duration: float, output: Path, seed: int) -> None:
+    """Create a different, calm stereo music bed for every seeded simulation."""
+    rate = 48_000
+    sample_count = math.ceil(duration * rate) + 1
+    left = array("f", [0.0]) * sample_count
+    right = array("f", [0.0]) * sample_count
+    rng = random.Random(seed ^ 0x5AF7B0D7)
+    bpm = rng.choice((72.0, 76.0, 80.0, 84.0))
+    beat = 60.0 / bpm
+    key = rng.choice((130.81, 146.83, 164.81, 174.61, 196.0))
+    progressions = (
+        (0, 5, 3, 7),
+        (0, 3, 7, 5),
+        (0, 7, 5, 3),
+        (0, 5, 7, 3),
+    )
+    progression = rng.choice(progressions)
+    ratios = (1.0, 1.189207, 1.498307)
+
+    # Slowly cross-faded triads create an elegant studio bed without drawing
+    # attention away from the collision Foley.
+    for index in range(sample_count):
+        time_sec = index / rate
+        chord_position = time_sec / (beat * 4.0)
+        chord_index = math.floor(chord_position)
+        phase = chord_position - chord_index
+        degree = progression[chord_index % len(progression)]
+        next_degree = progression[(chord_index + 1) % len(progression)]
+        fade = 0.5 - 0.5 * math.cos(math.pi * min(1.0, phase * 1.7))
+        value_left = 0.0
+        value_right = 0.0
+        for voice, ratio in enumerate(ratios):
+            frequency = key * (2.0 ** (degree / 12.0)) * ratio
+            next_frequency = key * (2.0 ** (next_degree / 12.0)) * ratio
+            detune = 1.0 + (voice - 1) * 0.0018
+            current_left = math.sin(math.tau * frequency * detune * time_sec + voice * 0.72)
+            current_right = math.sin(math.tau * frequency / detune * time_sec + voice * 0.72 + 0.24)
+            next_left = math.sin(math.tau * next_frequency * detune * time_sec + voice * 0.72)
+            next_right = math.sin(math.tau * next_frequency / detune * time_sec + voice * 0.72 + 0.24)
+            harmonic = 0.56 / (voice + 1)
+            value_left += ((1.0 - fade) * current_left + fade * next_left) * harmonic
+            value_right += ((1.0 - fade) * current_right + fade * next_right) * harmonic
+        breathing = 0.72 + 0.18 * math.sin(math.tau * time_sec / (beat * 8.0) - math.pi / 2)
+        left[index] += value_left * breathing * 0.19
+        right[index] += value_right * breathing * 0.19
+
+    # Seeded glassy notes supply a memorable motif, while leaving deliberate
+    # gaps so every ramp hit remains the foreground event.
+    scale = (0, 2, 3, 5, 7, 10, 12)
+    note_time = beat * 0.5
+    note_index = 0
+    while note_time < duration:
+        if note_index % 4 != 2 or rng.random() > 0.36:
+            degree = scale[(note_index * 3 + rng.randrange(len(scale))) % len(scale)]
+            frequency = key * 2.0 ** (degree / 12.0) * rng.choice((1.0, 2.0))
+            length = min(beat * 1.35, duration - note_time)
+            start = round(note_time * rate)
+            count = max(0, min(round(length * rate), sample_count - start))
+            pan = rng.uniform(-0.48, 0.48)
+            gain_left = math.cos((pan + 1.0) * math.pi / 4.0)
+            gain_right = math.sin((pan + 1.0) * math.pi / 4.0)
+            for offset in range(count):
+                elapsed = offset / rate
+                envelope = min(1.0, elapsed * 80.0) * math.exp(-elapsed * 4.6 / max(length, 0.001))
+                shimmer = math.sin(math.tau * frequency * elapsed)
+                shimmer += 0.28 * math.sin(math.tau * frequency * 2.01 * elapsed + 0.4)
+                shimmer += 0.10 * math.sin(math.tau * frequency * 3.98 * elapsed + 1.1)
+                value = shimmer * envelope * 0.12
+                left[start + offset] += value * gain_left
+                right[start + offset] += value * gain_right
+        note_time += beat * rng.choice((0.5, 1.0, 1.5))
+        note_index += 1
+
+    peak = max(0.001, max(max(abs(value) for value in left), max(abs(value) for value in right)))
+    gain = 0.82 / peak
+    pcm = array("h")
+    for left_value, right_value in zip(left, right):
+        pcm.append(round(max(-1.0, min(1.0, left_value * gain)) * 32767))
+        pcm.append(round(max(-1.0, min(1.0, right_value * gain)) * 32767))
+    with wave.open(str(output), "wb") as destination:
+        destination.setnchannels(2)
+        destination.setsampwidth(2)
+        destination.setframerate(rate)
+        destination.writeframes(pcm.tobytes())
+
+
 def build_continuous_audio_filter(music_volume: float) -> str:
     """Keep only a very low stereo bed beneath the dynamic foley bursts."""
     bounded_volume = max(0.0, min(1.5, music_volume))
-    ambient_volume = bounded_volume * 0.055
+    ambient_volume = bounded_volume * 0.55
     return (
         "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
         "volume=1.35,asplit=2[fxmix][fxkey];"
@@ -202,7 +272,8 @@ def build_continuous_audio_filter(music_volume: float) -> str:
         f"highpass=f=90,lowpass=f=4800,haas=side_gain=0.18,volume={ambient_volume:.4f}[music];"
         "[music][fxkey]sidechaincompress=threshold=0.020:ratio=2.8:attack=8:release=190:makeup=1[ducked];"
         "[ducked][fxmix]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
-        "[mix]alimiter=limit=0.891:attack=5:release=70:level=false[a]"
+        "[mix]alimiter=limit=0.891:attack=5:release=70:level=false[limited];"
+        "[limited]loudnorm=I=-20:TP=-1.5:LRA=10[a]"
     )
 
 
@@ -266,7 +337,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     frame_count = round(args.duration * fps)
     variant = variant_for_seed(args.seed)
     stages = variant.stages
-    event_times = stage_event_times(args.duration, len(stages))
+    events: list[dict[str, object]] = []
+    event_source = "simulated-collision-peaks"
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-premium-", dir=str(output.parent)) as temporary:
         root = Path(temporary)
@@ -274,11 +346,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         frames.mkdir()
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
+        generated_bed = root / "original-soft-body-bed.wav"
+        motion_events = root / "motion-events.json"
         blender_command = [
             blender, "--background", "--factory-startup", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
             "--frames", str(frames), "--duration", str(args.duration), "--fps", str(fps),
             "--width", str(width), "--height", str(height), "--samples", str(samples), "--seed", str(args.seed),
             "--softness", str(args.difficulty), "--theme", args.theme, "--title", args.title,
+            "--events", str(motion_events),
         ]
         subprocess.run(blender_command, check=True)
         expected_last_frame = frames / f"frame_{frame_count:04d}.png"
@@ -286,6 +361,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError(
                 f"Blender did not produce the expected final frame: {expected_last_frame.name}"
             )
+        if motion_events.is_file():
+            payload = json.loads(motion_events.read_text(encoding="utf-8"))
+            exported_events = payload.get("events", [])
+            if isinstance(exported_events, list):
+                events = [event for event in exported_events if isinstance(event, dict)]
+        if not events:
+            events = fallback_foley_events(args.duration, stages)
+            event_source = "timeline-fallback"
         video_filter = build_video_filter(args.duration, stages)
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
@@ -294,20 +377,16 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             "-c:v", "libx264", "-preset", video_preset, "-crf", video_crf,
             "-pix_fmt", "yuv420p", "-an", str(silent),
         ], check=True)
-        synth_premium_foley(args.duration, event_times, stages, effects, args.seed)
+        synth_premium_foley(args.duration, events, effects, args.seed)
         external_music = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
         if external_music is None:
-            audio_filter = build_foley_only_audio_filter()
-            audio_command = [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
-                "-filter_complex", audio_filter,
-            ]
-        else:
-            audio_filter = build_continuous_audio_filter(args.music_volume)
-            audio_command = [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
-                "-stream_loop", "-1", "-i", str(external_music), "-filter_complex", audio_filter,
-            ]
+            synth_soft_body_bed(args.duration, generated_bed, args.seed)
+        music_source = external_music or generated_bed
+        audio_filter = build_continuous_audio_filter(args.music_volume)
+        audio_command = [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
+            "-stream_loop", "-1", "-i", str(music_source), "-filter_complex", audio_filter,
+        ]
         subprocess.run(audio_command + [
             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000",
             "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(output),
@@ -322,20 +401,22 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "difficulty": args.difficulty,
         "sound_pack": "premium-foley",
         "requested_sound_pack": args.sound_pack,
-        "music": external_music.name if external_music else "Foley-only ASMR mix",
-        "music_generated": False,
-        "music_mode": "subtle-bed" if external_music else "foley-only",
+        "music": external_music.name if external_music else "Original seeded ambient bed",
+        "music_generated": external_music is None,
+        "music_mode": "subtle-bed",
         "requested_music_mode": args.music_mode,
-        "music_hits": len(event_times) * len(FOLEY_EVENT_RATIOS),
-        "events": len(event_times) * len(FOLEY_EVENT_RATIOS),
+        "music_hits": len(events),
+        "events": len(events),
         "trials": len(stages),
         "trial_duration": args.duration / len(stages),
-        "events_per_trial": len(FOLEY_EVENT_RATIOS),
-        "event_ratios": list(FOLEY_EVENT_RATIOS),
-        "foley_event_types": list(FOLEY_EVENT_TYPES),
+        "events_per_trial": round(len(events) / max(1, len(stages)), 2),
+        "event_ratios": None,
+        "event_source": event_source,
+        "foley_event_times": [round(float(event["time"]), 3) for event in events],
+        "foley_event_types": sorted({str(event.get("kind", "contact")) for event in events}),
         "units_completed": args.difficulty,
         "units_total": 100,
-        "renderer": "Blender Eevee",
+        "renderer": "Blender Eevee cinematic rod",
         "frames": frame_count,
         "render_width": width,
         "render_height": height,

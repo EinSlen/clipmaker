@@ -10,7 +10,7 @@ import { randomId } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 259_200;
+export const maxDuration = 604_800;
 
 type RenderRequest = {
   game?: GameId;
@@ -38,7 +38,7 @@ function runRenderer(args: string[]): Promise<{ stdout: string; stderr: string }
   const configuredTimeout = Number(process.env.PREMIUM_RENDER_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
     ? configuredTimeout
-    : 72 * 60 * 60 * 1000;
+    : 7 * 24 * 60 * 60 * 1000;
   return new Promise((resolve, reject) => {
     const child = spawn(python, args, { windowsHide: true });
     let stdout = '';

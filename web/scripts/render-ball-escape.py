@@ -97,18 +97,40 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
                 tone = math.sin(2 * math.pi * bent_frequency * elapsed)
                 tone += 0.28 * math.sin(2 * math.pi * bent_frequency * 1.5 * elapsed)
             elif kind == "impact":
-                envelope = math.exp(-elapsed * 27.0) * min(1.0, elapsed * 90.0)
-                bent_frequency = max(45.0, frequency * 0.42 * (1.0 - elapsed * 2.4))
+                # A short click on top of a descending low body reads like a
+                # physical impact even under a loud social-media music bed.
+                progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
+                envelope = math.exp(-elapsed * 18.0) * min(1.0, elapsed * 110.0)
+                bent_frequency = max(42.0, frequency * 0.62 * (1.0 - progress * 0.58))
                 tone = math.sin(2 * math.pi * bent_frequency * elapsed)
-                tone += 0.18 * math.sin(2 * math.pi * bent_frequency * 0.51 * elapsed)
+                tone += 0.32 * math.sin(2 * math.pi * bent_frequency * 0.51 * elapsed)
+                tone += 0.12 * math.sin(2 * math.pi * 1_850.0 * elapsed) * math.exp(-elapsed * 72.0)
+            elif kind == "glass":
+                # Inharmonic partials create a clean glass/marble click rather
+                # than the recognisable cheap sine beep of an arcade prototype.
+                progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
+                envelope = min(1.0, elapsed * 180.0) * math.exp(-progress * 5.6)
+                phase = 2 * math.pi * frequency * (1.0 - progress * 0.012) * elapsed
+                tone = 0.72 * math.sin(phase)
+                tone += 0.31 * math.sin(phase * 2.756)
+                tone += 0.17 * math.sin(phase * 5.404)
+                tone += 0.08 * math.sin(phase * 8.933)
             elif kind == "asmr":
                 progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
                 envelope = min(1.0, elapsed * 120.0) * math.exp(-progress * 4.8)
                 bent_frequency = frequency * (1.025 - progress * 0.025)
                 phase = 2 * math.pi * bent_frequency * elapsed
-                tone = math.sin(phase)
-                tone += 0.22 * math.sin(phase * 2.0)
-                tone += 0.08 * math.sin(phase * 3.01)
+                tone = 0.78 * math.sin(phase)
+                tone += 0.20 * math.sin(phase * 2.01)
+                tone += 0.09 * math.sin(phase * 3.97)
+                tone += 0.07 * math.sin(2 * math.pi * 2_300.0 * elapsed) * math.exp(-elapsed * 85.0)
+            elif kind == "arcade":
+                progress = clamp(elapsed / max(0.001, tone_length), 0.0, 1.0)
+                envelope = min(1.0, elapsed * 150.0) * math.exp(-progress * 4.4)
+                phase = 2 * math.pi * frequency * (1.0 + progress * 0.035) * elapsed
+                tone = 0.82 * math.sin(phase)
+                tone += 0.16 * math.sin(phase * 2.005)
+                tone += 0.06 * math.sin(phase * 3.01)
             else:
                 envelope = math.exp(-elapsed * 27.0) * min(1.0, elapsed * 90.0)
                 tone = math.sin(2 * math.pi * frequency * elapsed)
@@ -122,10 +144,12 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
     scale = [220.0, 261.63, 329.63, 392.0, 329.63, 523.25, 392.0, 261.63]
     beat_index = 0
     time_sec = 0.0
-    # Three-note hook in the first half-second: useful before viewers can swipe.
-    for hook_time, hook_note in ((0.0, 392.0), (0.14, 523.25), (0.30, 783.99)):
-        add_tone(hook_time, hook_note, 0.14, 0.22, "arcade")
     if include_bed:
+        # Only the standalone effects-bed mode owns an intro hook. Normal game
+        # renders already have music and should open without three synthetic
+        # beeps fighting it.
+        for hook_time, hook_note in ((0.0, 392.0), (0.14, 523.25), (0.30, 783.99)):
+            add_tone(hook_time, hook_note, 0.14, 0.22, "arcade")
         while time_sec < duration:
             note = scale[beat_index % len(scale)] * (1.0 + audio_rng.uniform(-0.002, 0.002))
             add_tone(time_sec, note, 0.055, 0.17, "arcade")
@@ -158,6 +182,24 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
             event_sound = "asmr"
             event_strength = min(0.34, strength)
             event_length = 0.16
+        elif sound_pack == "glass":
+            event_sound = "glass"
+            if event_kind == "bounce":
+                event_frequency = 610.0 + ((event_index + seed) % 7) * 31.0
+                event_strength = min(0.42, strength * 1.05)
+                event_length = 0.13
+            elif event_kind == "clear":
+                event_frequency = 880.0 + ((event_index + seed) % 9) * 37.0
+                event_strength = min(0.54, strength * 1.02)
+                event_length = 0.21
+            elif event_kind == "victory":
+                event_frequency *= 1.12
+                event_strength = min(0.68, strength)
+                event_length = 0.44
+            else:
+                event_sound = "impact"
+                event_frequency = max(110.0, frequency)
+                event_length = 0.24
         add_tone(start, event_frequency, event_strength, event_length, event_sound)
 
     peak = max(0.001, max(abs(sample) for sample in samples))
@@ -354,19 +396,30 @@ class BallEscape:
         self.ring_count = rings
         self.seed = seed
         self.theme = theme
-        self.title = title.strip().upper()[:52] or "WILL THE BALL ESCAPE?"
+        self.title = title.strip()[:52] or "Will the ball escape?"
         self.rng = random.Random(seed)
         self.cx = width / 2
-        self.cy = height * 0.55
-        self.ball_radius = max(7, round(width * 0.015))
-        inner = width * 0.140
-        outer = width * 0.455
-        self.radii = [inner + (outer - inner) * i / max(1, rings - 1) for i in range(rings)]
+        self.cy = height * 0.505
+        self.ball_radius = max(4, round(width * 0.0105))
+
+        # The 5.7M-view reference fills the vertical canvas with a dense rainbow
+        # vortex. Logical gates stay untouched for API/tests, while each gate is
+        # rendered as a small ribbon of aligned physical-looking bands. This
+        # gives the catalog's 10-20 gate range the visual density of successful
+        # 80+ ring clips without lying about completion metadata.
+        self.inner_radius = width * 0.066
+        self.outer_radius = min(width * 0.78, height * 0.47)
+        self.radial_step = (self.outer_radius - self.inner_radius) / max(1, rings)
+        self.radii = [self.inner_radius + self.radial_step * i for i in range(rings)]
+        self.bands_per_ring = 7 if rings <= 24 else 4 if rings <= 48 else 2 if rings <= 96 else 1
+        self.band_span = self.radial_step * (0.84 if self.bands_per_ring > 1 else 0.0)
         spiral_start = self.rng.uniform(0, 360)
         spiral_step = self.rng.choice((-1, 1)) * self.rng.uniform(9.0, 19.0)
+        self.spiral_direction = 1 if spiral_step > 0 else -1
         self.base_gaps = [(spiral_start + index * spiral_step + self.rng.uniform(-11.0, 11.0)) % 360 for index in range(rings)]
-        self.rotations = [self.rng.choice((-1, 1)) * self.rng.uniform(18.0, 46.0) for _ in range(rings)]
-        self.gap_widths = [self.rng.uniform(62.0, 74.0) for _ in range(rings)]
+        rotation_direction = self.rng.choice((-1, 1))
+        self.rotations = [rotation_direction * self.rng.uniform(21.0, 42.0) for _ in range(rings)]
+        self.gap_widths = [self.rng.uniform(57.0, 70.0) for _ in range(rings)]
         self.active = 0
         self.level = 1
         self.last_clear = 0.0
@@ -376,7 +429,7 @@ class BallEscape:
         # into an arc instead of looking like random linear movement.
         launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
         start_angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
-        speed = width * 0.50
+        speed = width * 0.46
         self.velocity = [math.cos(start_angle) * speed, math.sin(start_angle) * speed]
         self.trail: list[tuple[float, float]] = []
         self.particles: list[dict[str, float | tuple[int, int, int]]] = []
@@ -394,17 +447,18 @@ class BallEscape:
         self.final_unlock = duration * (0.850 + (seed % 5) * 0.006)
         self.failed_at: float | None = None
         self.simulation_time = 0.0
+        self.camera_zoom = 1.0
         self.level_started_at = 0.0
         self.min_clear_interval = max(0.22, duration * 0.033)
         self.stars = [
             (
                 self.rng.uniform(0, width),
                 self.rng.uniform(0, height),
-                self.rng.uniform(0.7, 2.2),
+                self.rng.uniform(0.5, 1.7),
                 self.rng.uniform(0, math.tau),
                 self.rng.uniform(4, 18),
             )
-            for _ in range(64)
+            for _ in range(34)
         ]
         self.background = self.make_background()
 
@@ -418,10 +472,34 @@ class BallEscape:
         draw = ImageDraw.Draw(background)
         for y in range(self.height):
             center_distance = abs(y - self.cy) / max(1, self.height)
-            glow = round(max(0.0, 1.0 - center_distance * 2.1) * 7)
+            glow = round(max(0.0, 1.0 - center_distance * 2.0) * 4)
             line = tuple(min(255, channel + glow) for channel in base)
             draw.line((0, y, self.width, y), fill=line)
-        return background
+        # A restrained radial pool makes the saturated rings feel emissive but
+        # preserves the near-black negative space of the reference.
+        pool = Image.new("RGBA", background.size, (0, 0, 0, 0))
+        pool_draw = ImageDraw.Draw(pool)
+        pool_radius = self.width * 0.58
+        pool_draw.ellipse(
+            (self.cx - pool_radius, self.cy - pool_radius, self.cx + pool_radius, self.cy + pool_radius),
+            fill=(22, 28, 52, 34),
+        )
+        pool = pool.filter(ImageFilter.GaussianBlur(radius=max(12, round(self.width * 0.12))))
+        return Image.alpha_composite(background.convert("RGBA"), pool).convert("RGB")
+
+    def target_camera_scale(self) -> float:
+        """Keep the active collision visible while the giant vortex opens up."""
+        if self.active >= self.ring_count:
+            active_outer = self.outer_radius
+        else:
+            active_outer = self.radii[self.active] + self.band_span
+        return min(1.0, self.width * 0.465 / max(self.width * 0.14, active_outer))
+
+    def camera_scale(self) -> float:
+        return self.camera_zoom
+
+    def screen_point(self, x: float, y: float, scale: float) -> tuple[float, float]:
+        return self.cx + (x - self.cx) * scale, self.cy + (y - self.cy) * scale
 
     def ring_gap(self, index: int, time_sec: float) -> float:
         natural = (self.base_gaps[index] + self.rotations[index] * time_sec) % 360
@@ -458,7 +536,7 @@ class BallEscape:
         self.position = [self.cx, self.cy]
         launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
         angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
-        speed = self.width * 0.54
+        speed = self.width * 0.50
         self.velocity = [math.cos(angle) * speed, math.sin(angle) * speed]
         self.base_gaps = [(gap + self.rng.uniform(70, 210)) % 360 for gap in self.base_gaps]
         self.streak = 0
@@ -467,7 +545,7 @@ class BallEscape:
         self.failed_at = None
 
     def add_particles(self, angle: float, color: tuple[int, int, int]) -> None:
-        for _ in range(18):
+        for _ in range(24):
             spread = angle + self.rng.uniform(-0.55, 0.55)
             speed = self.rng.uniform(55, 190)
             self.particles.append({
@@ -499,19 +577,20 @@ class BallEscape:
         progress = self.active / max(1, self.ring_count)
         time_progress = clamp(time_sec / max(1.0, self.duration), 0.0, 1.0)
 
-        # Real downward gravity creates visible parabolic falls. A small,
-        # continuous energy gain plus the progress floor makes every run speed
-        # up from roughly 1x to 3x-5x instead of staying mechanically constant.
-        self.gravity_g = 1.0 + progress * 0.42 + time_progress * 0.22
+        # Real downward gravity creates readable parabolic falls. The ceiling
+        # opens progressively, so the first seconds are legible and the final
+        # third becomes genuinely frantic instead of merely changing a HUD
+        # number.
+        self.gravity_g = 0.88 + progress * 0.52 + time_progress * 0.24
         gravity = self.height * self.gravity_g
         self.velocity[1] += gravity * dt
-        continuous_boost = 1.0 + dt * (0.018 + progress * 0.026 + time_progress * 0.040)
+        continuous_boost = 1.0 + dt * (0.016 + progress * 0.055 + time_progress * 0.072)
         self.velocity[0] *= continuous_boost
         self.velocity[1] *= continuous_boost
 
         speed = math.hypot(*self.velocity)
-        min_speed = self.width * (0.43 + progress * 0.36 + time_progress * 0.14)
-        max_speed = self.width * (0.64 + progress * 0.56 + time_progress * 0.18)
+        min_speed = self.width * (0.42 + progress * 0.70 + time_progress * 0.24)
+        max_speed = self.width * (0.72 + progress * 1.08 + time_progress * 0.34)
         if speed < min_speed:
             scale = min_speed / max(speed, 0.001)
             self.velocity[0] *= scale
@@ -597,7 +676,7 @@ class BallEscape:
                         else:
                             self.streak = clear_batch
                         self.last_streak_at = time_sec
-                        acceleration = min(1.045, 1.015 + self.active / max(1, self.ring_count) * 0.030)
+                        acceleration = min(1.060, 1.018 + self.active / max(1, self.ring_count) * 0.042)
                         self.velocity[0] *= acceleration
                         self.velocity[1] *= acceleration
                         self.last_clear = time_sec
@@ -662,153 +741,362 @@ class BallEscape:
         self.pulses = next_pulses
         self.flash = max(0.0, self.flash - dt * 1.8)
         self.impact_squash = max(0.0, self.impact_squash - dt * 5.5)
+        zoom_blend = 1.0 - math.exp(-dt * 2.8)
+        self.camera_zoom += (self.target_camera_scale() - self.camera_zoom) * zoom_blend
 
     def frame(self, time_sec: float) -> Image.Image:
-        image = self.background.copy()
+        """Render the reference-led, full-canvas satisfying composition."""
+        scale = self.camera_scale()
+        image = self.background.copy().convert("RGBA")
+
+        # Sparse dust only: the vortex and its growing black centre own the shot.
         atmosphere = Image.new("RGBA", image.size, (0, 0, 0, 0))
         atmosphere_draw = ImageDraw.Draw(atmosphere)
         for x, base_y, radius, phase, speed in self.stars:
             y = (base_y + time_sec * speed) % self.height
-            alpha = round(45 + 65 * (0.5 + 0.5 * math.sin(time_sec * 1.7 + phase)))
-            atmosphere_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(170, 200, 255, alpha))
-        image = Image.alpha_composite(image.convert("RGBA"), atmosphere)
+            alpha = round(18 + 38 * (0.5 + 0.5 * math.sin(time_sec * 1.35 + phase)))
+            atmosphere_draw.ellipse(
+                (x - radius, y - radius, x + radius, y + radius),
+                fill=(175, 195, 235, alpha),
+            )
+        image = Image.alpha_composite(image, atmosphere)
+
         rings_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         rings_draw = ImageDraw.Draw(rings_layer)
         glow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         glow_draw = ImageDraw.Draw(glow_layer)
+        visual_total = max(1, self.ring_count * self.bands_per_ring)
+        dense = visual_total > 130
+        base_width = max(1, round(self.width * (0.0018 if dense else 0.0027)))
 
         for index in range(self.active, self.ring_count):
-            radius = self.radii[index]
             gap = self.ring_gap(index, time_sec)
             gap_width = self.gap_widths[index]
-            if index == self.active == self.ring_count - 1:
-                if time_sec < self.final_unlock or not self.will_escape:
-                    gap_width = 0.25
-                else:
-                    unlock_progress = clamp((time_sec - self.final_unlock) / max(0.25, self.duration * 0.08), 0.0, 1.0)
-                    gap_width += unlock_progress * 70.0
-            start = gap + gap_width / 2
-            end = gap + 360 - gap_width / 2
-            color = color_for(self.theme, index, self.ring_count, self.level * 0.015)
-            active_pulse = 1.0 + (0.22 * (0.5 + 0.5 * math.sin(time_sec * 6.5)) if index == self.active else 0.0)
-            dense = self.ring_count > 80
-            strokes = ((0, 255),) if dense else ((-3, 125), (0, 255), (3, 125))
-            for offset, alpha in strokes:
-                current = radius + offset
-                bbox = (self.cx - current, self.cy - current, self.cx + current, self.cy + current)
-                base_width = 1 if self.ring_count > 180 else 2 if dense else 4
-                rings_draw.arc(bbox, start=start, end=end, fill=(*color, alpha), width=max(1, round(base_width * active_pulse)) if not offset else 2)
-            bbox = (self.cx - radius, self.cy - radius, self.cx + radius, self.cy + radius)
-            if not dense or index == self.active or index % 12 == 0:
-                glow_draw.arc(bbox, start=start, end=end, fill=(*color, 145 if index == self.active else 55), width=10 if index == self.active else 5)
+            final_active = index == self.active == self.ring_count - 1
+            gate_locked = final_active and (time_sec < self.final_unlock or not self.will_escape)
+            if final_active and not gate_locked:
+                unlock_progress = clamp(
+                    (time_sec - self.final_unlock) / max(0.25, self.duration * 0.08),
+                    0.0,
+                    1.0,
+                )
+                gap_width += unlock_progress * 70.0
 
-        blurred = glow_layer.filter(ImageFilter.GaussianBlur(radius=9))
-        image = Image.alpha_composite(image.convert("RGBA"), blurred)
+            for band in range(self.bands_per_ring):
+                band_fraction = band / max(1, self.bands_per_ring - 1)
+                world_radius = self.radii[index] + self.band_span * band_fraction
+                radius = world_radius * scale
+                if radius < 2:
+                    continue
+                visual_index = index * self.bands_per_ring + band
+                color = color_for(self.theme, visual_index, visual_total, self.level * 0.012)
+                active_wave = 0.5 + 0.5 * math.sin(time_sec * 7.5 + band * 0.35)
+                core_width = base_width + (1 if index == self.active and active_wave > 0.56 else 0)
+                glow_alpha = 108 if index == self.active else 48
+                if gate_locked:
+                    glow_alpha = round(110 + active_wave * 55)
+
+                # Tiny offsets inside each ribbon create one continuous spiral.
+                band_gap = gap + self.spiral_direction * (
+                    band - (self.bands_per_ring - 1) / 2
+                ) * 1.15
+                start = band_gap + gap_width / 2
+                end = band_gap + 360 - gap_width / 2
+                bbox = (
+                    self.cx - radius,
+                    self.cy - radius,
+                    self.cx + radius,
+                    self.cy + radius,
+                )
+                light = tuple(min(255, round(channel * 1.08 + 18)) for channel in color)
+
+                if gate_locked:
+                    glow_draw.ellipse(
+                        bbox,
+                        outline=(*color, glow_alpha),
+                        width=max(3, core_width * 4),
+                    )
+                    rings_draw.ellipse(bbox, outline=(0, 0, 0, 210), width=core_width + 2)
+                    rings_draw.ellipse(bbox, outline=(*color, 255), width=core_width)
+                else:
+                    glow_draw.arc(
+                        bbox,
+                        start=start,
+                        end=end,
+                        fill=(*color, glow_alpha),
+                        width=max(3, core_width * 4),
+                    )
+                    rings_draw.arc(
+                        bbox,
+                        start=start,
+                        end=end,
+                        fill=(0, 0, 0, 220),
+                        width=core_width + 2,
+                    )
+                    rings_draw.arc(
+                        bbox,
+                        start=start,
+                        end=end,
+                        fill=(*color, 255),
+                        width=core_width,
+                    )
+                    highlight_radius = max(1.0, radius - core_width * 0.42)
+                    highlight_box = (
+                        self.cx - highlight_radius,
+                        self.cy - highlight_radius,
+                        self.cx + highlight_radius,
+                        self.cy + highlight_radius,
+                    )
+                    rings_draw.arc(
+                        highlight_box,
+                        start=start,
+                        end=end,
+                        fill=(*light, 175),
+                        width=1,
+                    )
+                    cap_radius = max(1.0, core_width * 0.58)
+                    for angle in (start, end):
+                        angle_rad = math.radians(angle)
+                        cap_x = self.cx + math.cos(angle_rad) * radius
+                        cap_y = self.cy + math.sin(angle_rad) * radius
+                        rings_draw.ellipse(
+                            (
+                                cap_x - cap_radius,
+                                cap_y - cap_radius,
+                                cap_x + cap_radius,
+                                cap_y + cap_radius,
+                            ),
+                            fill=(*light, 255),
+                        )
+
+        ring_glow = glow_layer.filter(
+            ImageFilter.GaussianBlur(radius=max(2, round(self.width * 0.0065)))
+        )
+        image = Image.alpha_composite(image, ring_glow)
         image = Image.alpha_composite(image, rings_layer)
 
         effects = Image.new("RGBA", image.size, (0, 0, 0, 0))
         effects_draw = ImageDraw.Draw(effects)
-        ball_color = color_for(self.theme, self.active + 2, self.ring_count, time_sec * 0.025)
-        for index, (x, y) in enumerate(self.trail):
-            age = (index + 1) / max(1, len(self.trail))
-            radius = max(2, round(self.ball_radius * age * 0.75))
-            effects_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*ball_color, round(120 * age)))
+        ball_color = color_for(
+            self.theme,
+            self.active * self.bands_per_ring + 2,
+            visual_total,
+            time_sec * 0.018,
+        )
+        screen_trail = [self.screen_point(x, y, scale) for x, y in self.trail]
+        for trail_index in range(1, len(screen_trail)):
+            age = trail_index / max(1, len(screen_trail) - 1)
+            if trail_index % 2 == 0 or trail_index == len(screen_trail) - 1:
+                effects_draw.line(
+                    (*screen_trail[trail_index - 1], *screen_trail[trail_index]),
+                    fill=(*ball_color, round(18 + 126 * age * age)),
+                    width=max(1, round(self.ball_radius * (0.18 + age * 0.48))),
+                )
         for particle in self.particles:
-            life = clamp(float(particle["life"]) / float(particle["max_life"]), 0.0, 1.0)
-            radius = 2 + 4 * life
+            life = clamp(
+                float(particle["life"]) / float(particle["max_life"]),
+                0.0,
+                1.0,
+            )
+            particle_radius = max(
+                1.0,
+                (1.5 + self.width * 0.004 * life) * (0.72 + scale * 0.28),
+            )
             color = particle["color"]
-            x, y = float(particle["x"]), float(particle["y"])
-            effects_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*color, round(255 * life)))
+            particle_x, particle_y = self.screen_point(
+                float(particle["x"]),
+                float(particle["y"]),
+                scale,
+            )
+            effects_draw.ellipse(
+                (
+                    particle_x - particle_radius,
+                    particle_y - particle_radius,
+                    particle_x + particle_radius,
+                    particle_y + particle_radius,
+                ),
+                fill=(*color, round(245 * life)),
+            )
         for pulse in self.pulses:
-            life = clamp(float(pulse["life"]) / float(pulse["max_life"]), 0.0, 1.0)
-            radius = float(pulse["radius"])
+            life = clamp(
+                float(pulse["life"]) / float(pulse["max_life"]),
+                0.0,
+                1.0,
+            )
+            pulse_radius = float(pulse["radius"]) * scale
             color = pulse["color"]
             effects_draw.ellipse(
-                (self.cx - radius, self.cy - radius, self.cx + radius, self.cy + radius),
-                outline=(*color, round(190 * life)),
-                width=max(2, round(7 * life)),
+                (
+                    self.cx - pulse_radius,
+                    self.cy - pulse_radius,
+                    self.cx + pulse_radius,
+                    self.cy + pulse_radius,
+                ),
+                outline=(*color, round(170 * life)),
+                width=max(2, round(self.width * 0.006 * life)),
             )
-        bx, by = self.position
+
+        bx, by = self.screen_point(self.position[0], self.position[1], scale)
         ball_speed = math.hypot(*self.velocity)
-        speed_ratio = ball_speed / max(1.0, self.width * 0.50)
+        speed_ratio = ball_speed / max(1.0, self.width * 0.46)
+        display_ball_radius = max(3.0, self.ball_radius * (0.82 + scale * 0.18))
         if ball_speed > 0:
-            streak_length = self.ball_radius * clamp(speed_ratio * 1.65, 1.4, 6.0)
+            streak_length = display_ball_radius * clamp(speed_ratio * 2.0, 1.8, 9.0)
             ux, uy = self.velocity[0] / ball_speed, self.velocity[1] / ball_speed
             effects_draw.line(
                 (bx - ux * streak_length, by - uy * streak_length, bx, by),
-                fill=(*ball_color, round(80 + 22 * clamp(speed_ratio, 1.0, 5.0))),
-                width=max(3, round(self.ball_radius * 0.95)),
+                fill=(*ball_color, round(92 + 23 * clamp(speed_ratio, 1.0, 5.0))),
+                width=max(2, round(display_ball_radius * 0.72)),
             )
-        effects_draw.ellipse((bx - self.ball_radius * 2.1, by - self.ball_radius * 2.1, bx + self.ball_radius * 2.1, by + self.ball_radius * 2.1), fill=(*ball_color, 100))
-        image = Image.alpha_composite(image, effects.filter(ImageFilter.GaussianBlur(radius=5)))
+        halo_radius = display_ball_radius * (2.8 + min(1.5, speed_ratio * 0.18))
+        effects_draw.ellipse(
+            (bx - halo_radius, by - halo_radius, bx + halo_radius, by + halo_radius),
+            fill=(*ball_color, 34),
+        )
+        image = Image.alpha_composite(
+            image,
+            effects.filter(
+                ImageFilter.GaussianBlur(radius=max(2, round(self.width * 0.0055)))
+            ),
+        )
         image = Image.alpha_composite(image, effects)
-        draw = ImageDraw.Draw(image)
-        ball_rx = self.ball_radius * (1.0 + self.impact_squash * 0.22)
-        ball_ry = self.ball_radius * (1.0 - self.impact_squash * 0.16)
-        draw.ellipse((bx - ball_rx, by - ball_ry, bx + ball_rx, by + ball_ry), fill=(245, 250, 255, 255), outline=(*ball_color, 255), width=3)
-        draw.ellipse((bx - ball_rx * 0.45, by - ball_ry * 0.55, bx - ball_rx * 0.05, by - ball_ry * 0.15), fill=(255, 255, 255, 220))
+
+        # Layered sphere shading plus real impact squash replaces the flat icon.
+        ball_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        ball_draw = ImageDraw.Draw(ball_layer)
+        ball_rx = display_ball_radius * (1.0 + self.impact_squash * 0.24)
+        ball_ry = display_ball_radius * (1.0 - self.impact_squash * 0.18)
+        shadow_offset = display_ball_radius * 0.38
+        ball_draw.ellipse(
+            (
+                bx - ball_rx + shadow_offset,
+                by - ball_ry + shadow_offset,
+                bx + ball_rx + shadow_offset,
+                by + ball_ry + shadow_offset,
+            ),
+            fill=(0, 0, 0, 175),
+        )
+        gradient_steps = max(4, round(display_ball_radius))
+        for gradient_index in range(gradient_steps, 0, -1):
+            fraction = gradient_index / gradient_steps
+            shade = 0.58 + (1.0 - fraction) * 0.52
+            sphere_color = tuple(
+                min(255, round(channel * shade + (1.0 - fraction) * 12))
+                for channel in ball_color
+            )
+            ball_draw.ellipse(
+                (
+                    bx - ball_rx * fraction,
+                    by - ball_ry * fraction,
+                    bx + ball_rx * fraction,
+                    by + ball_ry * fraction,
+                ),
+                fill=(*sphere_color, 255),
+            )
+        ball_draw.ellipse(
+            (bx - ball_rx, by - ball_ry, bx + ball_rx, by + ball_ry),
+            outline=(245, 250, 255, 225),
+            width=max(1, round(self.width * 0.0016)),
+        )
+        highlight_radius = display_ball_radius * 0.24
+        highlight_x = bx - ball_rx * 0.30
+        highlight_y = by - ball_ry * 0.34
+        ball_draw.ellipse(
+            (
+                highlight_x - highlight_radius,
+                highlight_y - highlight_radius,
+                highlight_x + highlight_radius,
+                highlight_y + highlight_radius,
+            ),
+            fill=(255, 255, 255, 235),
+        )
+        image = Image.alpha_composite(image, ball_layer)
 
         if self.flash > 0:
-            flash_alpha = round(clamp(self.flash, 0.0, 1.0) * 45)
-            flash_layer = Image.new("RGBA", image.size, (255, 255, 255, flash_alpha))
-            image = Image.alpha_composite(image, flash_layer)
-            draw = ImageDraw.Draw(image)
+            flash_alpha = round(clamp(self.flash, 0.0, 1.0) * 34)
+            image = Image.alpha_composite(
+                image,
+                Image.new("RGBA", image.size, (255, 255, 255, flash_alpha)),
+            )
 
-        title_font = fitted_font(self.title, max(20, round(self.width * 0.052)), max(13, round(self.width * 0.029)), round(self.width * 0.90), bold=True)
-        label_font = font(max(10, round(self.width * 0.018)), bold=True)
-        value_font = font(max(16, round(self.width * 0.032)), bold=True)
-        small_font = font(max(11, round(self.width * 0.022)), bold=True)
-        cta_text = "FOLLOW FOR THE NEXT RUN"
-        cta_font = fitted_font(cta_text, max(13, round(self.width * 0.024)), max(10, round(self.width * 0.018)), round(self.width * 0.80), bold=True)
-        accent = (*ball_color, 255)
-
-        # Purpose-built mobile-game HUD: no development metadata is rendered.
-        header_y = self.height * 0.052
-        draw.line((self.width * 0.08, header_y, self.width * 0.31, header_y), fill=(*ball_color, 150), width=2)
-        draw.line((self.width * 0.69, header_y, self.width * 0.92, header_y), fill=(*ball_color, 150), width=2)
-        draw_centered(draw, (self.cx, header_y), "BALL ESCAPE", label_font, accent)
-        draw_centered(draw, (self.cx, self.height * 0.095), self.title, title_font, (255, 255, 255, 255), stroke=2)
-
-        panel_y1, panel_y2 = self.height * 0.135, self.height * 0.184
-        left_panel = (self.width * 0.08, panel_y1, self.width * 0.46, panel_y2)
-        right_panel = (self.width * 0.54, panel_y1, self.width * 0.92, panel_y2)
-        for panel in (left_panel, right_panel):
-            draw.rounded_rectangle(panel, radius=max(6, round(self.width * 0.012)), fill=(3, 6, 12, 220), outline=(*ball_color, 120), width=2)
-        speed_ratio = self.max_speed_ratio
+        # One hook plus one central count: no cards, timer, streak or CTA.
+        draw = ImageDraw.Draw(image)
         remaining = max(0, self.ring_count - self.active)
-        draw.text((left_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "SPEED", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
-        draw.text((left_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), f"{speed_ratio:.1f}X", font=value_font, fill=accent, anchor="rm")
-        draw.text((right_panel[0] + self.width * 0.025, (panel_y1 + panel_y2) / 2), "RINGS", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
-        draw.text((right_panel[2] - self.width * 0.025, (panel_y1 + panel_y2) / 2), str(remaining), font=value_font, fill=(255, 255, 255, 255), anchor="rm")
-        final_ring = self.active == self.ring_count - 1 and self.completed_at is None
-        if final_ring and (time_sec < self.final_unlock or not self.will_escape):
-            status_text = "FINAL GATE LOCKED"
-        elif final_ring:
-            status_text = "FINAL GATE OPEN — LAST CHANCE"
+        title_font = fitted_font(
+            self.title,
+            max(22, round(self.width * 0.044)),
+            max(15, round(self.width * 0.027)),
+            round(self.width * 0.88),
+            bold=True,
+        )
+        if self.completed_at is None and self.failed_at is None:
+            draw_centered(
+                draw,
+                (self.cx, self.height * 0.087),
+                self.title,
+                title_font,
+                (255, 255, 255, 245),
+                stroke=max(1, round(self.width * 0.0022)),
+            )
+            counter_pulse = 1.0
+            if remaining == 1:
+                counter_pulse += 0.07 * (0.5 + 0.5 * math.sin(time_sec * 8.0))
+            counter_font = font(
+                max(15, round(self.width * 0.031 * counter_pulse)),
+                bold=True,
+            )
+            counter_color = (
+                (*ball_color, 248)
+                if remaining == 1
+                else (245, 248, 255, 225)
+            )
+            # The reference keeps the count central, but it must never disappear
+            # under the ball. A small continuous repulsion moves it only during
+            # a centre crossing and returns it smoothly afterwards.
+            counter_x, counter_y = self.cx, self.cy
+            counter_dx, counter_dy = bx - self.cx, by - self.cy
+            counter_distance = math.hypot(counter_dx, counter_dy)
+            counter_safe_radius = self.width * 0.052
+            if counter_distance < counter_safe_radius:
+                if counter_distance < 0.001:
+                    velocity_length = max(0.001, ball_speed)
+                    counter_dx = self.velocity[0] / velocity_length
+                    counter_dy = self.velocity[1] / velocity_length
+                    counter_distance = 1.0
+                push = counter_safe_radius - counter_distance
+                counter_x -= counter_dx / counter_distance * push
+                counter_y -= counter_dy / counter_distance * push
+            draw_centered(
+                draw,
+                (counter_x, counter_y),
+                str(remaining),
+                counter_font,
+                counter_color,
+                stroke=max(1, round(self.width * 0.0015)),
+            )
         else:
-            status_text = f"GRAVITY {self.gravity_g:.1f}G  •  ACCELERATING"
-        draw_centered(draw, (self.cx, self.height * 0.205), status_text, label_font, accent)
-
-        victory_pulse = 1.0 + (0.11 * math.sin(time_sec * 12.0) if self.completed_at is not None else 0.0)
-        counter_font = font(max(32, round(self.width * 0.072 * victory_pulse)), bold=True)
-        center_text = "ESCAPED!" if self.completed_at is not None else "SO CLOSE!" if self.failed_at is not None else str(remaining)
-        center_color = (255, 255, 255, 255) if remaining else accent
-        draw_centered(draw, (self.cx, self.cy), center_text, counter_font, center_color, stroke=2)
-        if remaining:
-            draw_centered(draw, (self.cx, self.cy + self.height * 0.040), "RINGS LEFT", label_font, (150, 165, 195, 230))
-
-        footer_y1, footer_y2 = self.height * 0.885, self.height * 0.935
-        footer = (self.width * 0.08, footer_y1, self.width * 0.92, footer_y2)
-        draw.rounded_rectangle(footer, radius=max(6, round(self.width * 0.012)), fill=(3, 6, 12, 225), outline=(255, 255, 255, 40), width=2)
-        time_left = max(0, math.ceil(self.duration - time_sec))
-        clock = f"{time_left // 60:02d}:{time_left % 60:02d}"
-        draw.text((footer[0] + self.width * 0.025, (footer_y1 + footer_y2) / 2), "TIME LEFT", font=label_font, fill=(135, 150, 180, 255), anchor="lm")
-        draw.text((self.width * 0.38, (footer_y1 + footer_y2) / 2), clock, font=value_font, fill=(255, 255, 255, 255), anchor="mm")
-        streak_text = f"STREAK ×{self.streak}" if self.streak >= 2 else "NO MISSES"
-        draw.text((footer[2] - self.width * 0.025, (footer_y1 + footer_y2) / 2), streak_text, font=small_font, fill=accent, anchor="rm")
-        draw_centered(draw, (self.cx, self.height * 0.965), cta_text, cta_font, (210, 220, 245, 255), stroke=1)
+            outcome = "ESCAPED" if self.completed_at is not None else "SO CLOSE"
+            outcome_font = fitted_font(
+                outcome,
+                max(34, round(self.width * 0.070)),
+                max(22, round(self.width * 0.045)),
+                round(self.width * 0.82),
+                bold=True,
+            )
+            outcome_time = self.completed_at if self.completed_at is not None else self.failed_at
+            outcome_age = time_sec - (outcome_time if outcome_time is not None else time_sec)
+            outcome_y = self.cy + math.sin(
+                clamp(outcome_age / 0.28, 0.0, 1.0) * math.pi
+            ) * self.height * 0.009
+            draw_centered(
+                draw,
+                (self.cx, outcome_y),
+                outcome,
+                outcome_font,
+                (255, 255, 255, 255),
+                stroke=max(2, round(self.width * 0.003)),
+            )
         return image.convert("RGB")
-
 
 def render(args: argparse.Namespace) -> dict[str, object]:
     width = int(os.environ.get("GAME_RENDER_WIDTH", args.width))
@@ -828,12 +1116,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         silent = Path(temp_dir) / "silent.mp4"
         audio = Path(temp_dir) / "effects.wav"
         generated_music = Path(temp_dir) / "original-generated-track.wav"
-        video_crf = "22" if args.game == "shape-tunnel" else "19"
+        video_crf = os.environ.get("GAME_VIDEO_CRF", "15")
+        video_preset = os.environ.get("GAME_VIDEO_PRESET", "slow")
         encode = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
             "-vf", "scale=1080:1920:flags=lanczos",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", video_crf, "-pix_fmt", "yuv420p", "-an", str(silent),
+            "-c:v", "libx264", "-preset", video_preset, "-tune", "animation", "-crf", video_crf,
+            "-profile:v", "high", "-pix_fmt", "yuv420p", "-an", str(silent),
         ]
         process = subprocess.Popen(encode, stdin=subprocess.PIPE)
         assert process.stdin is not None
@@ -860,8 +1150,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             elif args.game == "boss-battle":
                 selected_sound_pack = "impact"
             else:
-                selector = args.seed % 10
-                selected_sound_pack = "meme" if selector < 6 else "funny" if selector < 8 else "arcade" if selector < 9 else "impact"
+                selected_sound_pack = "glass"
         else:
             selected_sound_pack = args.sound_pack
         actual_duration = rendered_frames / fps
@@ -920,14 +1209,14 @@ def main() -> None:
     parser.add_argument("--difficulty", type=int)
     parser.add_argument("--rings", type=int, default=240)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
-    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
+    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr", "glass"), default="auto")
     parser.add_argument("--music")
     parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="continuous")
     parser.add_argument("--music-volume", type=float, default=0.62)
     parser.add_argument("--title", default="WILL THE BALL ESCAPE?")
-    parser.add_argument("--width", type=int, default=720)
-    parser.add_argument("--height", type=int, default=1280)
-    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--width", type=int, default=1080)
+    parser.add_argument("--height", type=int, default=1920)
+    parser.add_argument("--fps", type=int, default=60)
     args = parser.parse_args()
     args.duration = clamp(args.duration, 5.0, 60.0)
     args.rings = round(clamp(args.rings, 40, 300))

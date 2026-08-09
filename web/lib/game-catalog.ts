@@ -35,8 +35,8 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     uiName: "Évasion circulaire",
     shortName: "Escape",
     description:
-      "Une balle accélère sous l’effet de la gravité au milieu d’anneaux néon en rotation.",
-    objective: "Franchir tous les anneaux avant la fin du chrono.",
+      "Une balle accélère dans un vortex hypnotique dont les anneaux éclatent à chaque passage.",
+    objective: "Détruire toute la spirale avant le dernier rebond.",
     defaultHook: "Will the ball escape?",
     metricLabel: "Rings",
     uiMetricLabel: "Anneaux",
@@ -95,9 +95,9 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     uiName: "Combat de boss",
     shortName: "Boss",
     description:
-      "Deux combattants procéduraux échangent des attaques télégraphiées jusqu’au coup final.",
-    objective: "Suivre les points de vie et prédire le vainqueur du duel.",
-    defaultHook: "Who wins this battle?",
+      "Une arme articulée affronte un Warden blindé dans une arène aux collisions physiques.",
+    objective: "Suivre chaque impact et prédire qui survivra au coup critique.",
+    defaultHook: "Who wins this physics battle?",
     metricLabel: "Boss HP",
     uiMetricLabel: "PV du boss",
     metricMin: 100,
@@ -107,7 +107,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     tags: ["#bossbattle", "#battlesimulation", "#whowins"],
     accent: "from-cyan-400 via-violet-500 to-red-500",
     preview: "/game-previews/boss-battle.webp",
-    engineLabel: "COMBAT 2D",
+    engineLabel: "ARÈNE PHYSIQUE",
   },
   {
     id: "soft-body-slide",

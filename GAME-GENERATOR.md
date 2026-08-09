@@ -5,10 +5,10 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 
 ## Jeux disponibles
 
-- **Ball Escape** — balle soumise à la gravité, anneaux rotatifs et accélération progressive.
+- **Ball Escape** — vortex d’anneaux plein écran, gravité, accélération et issue tardive variable.
 - **Organic Escape** — balle à traînée qui brise des contours organiques avec impacts ASMR accordés.
 - **Laser Dodge** — pilote néon, lasers mobiles, collisions géométriques et échecs tardifs variables.
-- **Boss Battle** — duel de combattants procéduraux, attaques télégraphiées, dégâts et vainqueur déterministes.
+- **Boss Battle** — arène physique, arme articulée, Warden blindé, impacts et vainqueur déterministes.
 - **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
 
 Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
@@ -48,7 +48,7 @@ docker compose exec clipmaker npm run youtube:doctor
 Les rendus persistent dans `web/renders/`. Un seul rendu est encodé à la fois pour ne pas saturer un
 petit VPS.
 
-Les moteurs 2D calculent par défaut en 720×1280 à 30 FPS puis encodent en 1080×1920. Les variables
+Les moteurs 2D calculent et encodent par défaut nativement en 1080×1920 à 60 FPS. Les variables
 `GAME_RENDER_WIDTH`, `GAME_RENDER_HEIGHT` et `GAME_RENDER_FPS` permettent de créer des smokes plus
 rapides pendant le développement.
 
@@ -73,14 +73,17 @@ Valeurs de `game` : `ball-escape`, `shape-tunnel`, `laser-dodge`, `boss-battle`,
 Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais progressifs
 avec une rampe mobile, une capsule à contraintes physiques et un vrai réceptacle ouvert. La graine
 sélectionne une combinaison reproductible parmi plus de 2 000 variantes : forme, parcours, palette,
-réceptacle, progression de souplesse et paramètres physiques. Son mix par défaut privilégie les Foley
-ASMR synchronisés ; une musique choisie ou sous licence reste facultative. Blender est inclus dans
-l'image Docker officielle du projet.
+réceptacle, progression de souplesse et paramètres physiques. Son mix par défaut associe les Foley
+ASMR synchronisés à une musique ambiante originale qui change avec la graine ; une piste choisie ou
+sous licence peut la remplacer. Blender est inclus dans l'image Docker officielle du projet.
 
 Le profil Soft Body par défaut privilégie désormais le réalisme sans contrainte de temps : 30 secondes,
-source native 1080×1920 à 30 i/s, 128 échantillons Eevee, ombres 4K, géométrie subdivisée et
-encodage H.264 CRF 14. Les
+source native 1080×1920 à 30 i/s, 128 échantillons Eevee, ombres 4K, géométrie subdivisée,
+collisions exportées par Blender et encodage H.264 CRF 14. Les
 variables `PREMIUM_RENDER_*` servent uniquement à créer des smokes plus rapides pendant le développement.
+
+Le délai serveur par défaut autorise jusqu’à sept jours pour un rendu Soft Body final. Il reste
+configurable avec `PREMIUM_RENDER_TIMEOUT_MS` pour les machines plus rapides ou une file externe.
 
 Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
 `PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES`. Les valeurs par défaut privilégient un rendu final
