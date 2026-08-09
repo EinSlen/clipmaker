@@ -222,8 +222,9 @@ export function GameStudio() {
     if (nextGame === "soft-body-slide") {
       setDuration(30);
       setMusicFile("");
-    } else if (!musicFile) {
-      setMusicFile("__discover__");
+    } else {
+      setDuration(15);
+      if (!musicFile) setMusicFile("__discover__");
     }
     setTitle(definition.defaultHook);
     setResult(null);
@@ -408,7 +409,7 @@ export function GameStudio() {
             </p>
           </div>
         </div>
-        <div className="scroll-pretty mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:overflow-visible md:pb-0">
+        <div className="scroll-pretty mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:overflow-visible md:pb-0 xl:grid-cols-5">
           {GAME_CATALOG.map((item) => {
             const selected = game === item.id;
             return (
@@ -451,6 +452,11 @@ export function GameStudio() {
                   {item.id === "soft-body-slide" && (
                     <span className="absolute bottom-3 right-3 rounded-full border border-amber-200/20 bg-black/60 px-2.5 py-1 text-[9px] font-semibold text-amber-100 backdrop-blur">
                       2 500+ variantes
+                    </span>
+                  )}
+                  {(item.id === "laser-dodge" || item.id === "boss-battle") && (
+                    <span className="absolute bottom-3 right-3 rounded-full border border-cyan-200/20 bg-black/60 px-2.5 py-1 text-[9px] font-semibold text-cyan-100 backdrop-blur">
+                      Issues variables
                     </span>
                   )}
                   {selected && (
@@ -836,6 +842,18 @@ export function GameStudio() {
                     <span className="block text-[10px] leading-4 text-ink-500">
                       La graine change la forme, la rampe, le métal, le décor,
                       le réceptacle, la physique et les niveaux.
+                    </span>
+                  )}
+                  {game === "laser-dodge" && (
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      La graine change le parcours, les angles, les marges
+                      d’esquive et la réussite du dernier passage.
+                    </span>
+                  )}
+                  {game === "boss-battle" && (
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      La graine change les combattants, les attaques, les
+                      dégâts et le vainqueur.
                     </span>
                   )}
                 </label>
