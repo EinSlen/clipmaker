@@ -855,6 +855,10 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if args.sound_pack == "auto":
             if args.game == "shape-tunnel":
                 selected_sound_pack = "asmr"
+            elif args.game == "laser-dodge":
+                selected_sound_pack = "arcade"
+            elif args.game == "boss-battle":
+                selected_sound_pack = "impact"
             else:
                 selector = args.seed % 10
                 selected_sound_pack = "meme" if selector < 6 else "funny" if selector < 8 else "arcade" if selector < 9 else "impact"

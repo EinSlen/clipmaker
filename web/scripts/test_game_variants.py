@@ -118,6 +118,49 @@ class GameEngineTests(unittest.TestCase):
                 self.assertNotEqual(digests[0], digests[1])
 
 
+class LaserDodgeRegressionTests(unittest.TestCase):
+    def run_game(self, seed: int):
+        game = GAME_CLASSES["laser-dodge"](270, 480, 30, 10.0, 150, seed, "neon", "CAN IT DODGE EVERY LASER?")
+        for frame_index in range(301):
+            game.update(frame_index / 30)
+        return game
+
+    def test_successful_run_clears_every_real_collision(self):
+        game = self.run_game(424243)
+        self.assertTrue(game.will_survive)
+        self.assertFalse(game.crashed)
+        self.assertEqual(game.active, game.total)
+        for laser, event_time in zip(game.lasers, game.event_times):
+            point = game.position_at(event_time)
+            self.assertGreater(game.collision_distance(laser, point, event_time), game.runner_radius)
+
+    def test_failure_is_a_late_decisive_collision(self):
+        game = self.run_game(424245)
+        self.assertFalse(game.will_survive)
+        self.assertTrue(game.crashed)
+        self.assertIsNotNone(game.completed_at)
+        self.assertGreater(game.active, game.total * 0.85)
+        self.assertEqual(game.events[-1][3], "impact")
+
+
+class BossBattleRegressionTests(unittest.TestCase):
+    def run_game(self, seed: int):
+        game = GAME_CLASSES["boss-battle"](270, 480, 30, 10.0, 300, seed, "sunset", "WHO WINS THIS BATTLE?")
+        for frame_index in range(301):
+            game.update(frame_index / 30)
+        return game
+
+    def test_seeded_outcomes_are_decisive(self):
+        player_win = self.run_game(424243)
+        boss_win = self.run_game(424244)
+        self.assertEqual(player_win.boss_hp, 0)
+        self.assertGreater(player_win.player_hp, 0)
+        self.assertEqual(boss_win.player_hp, 0)
+        self.assertGreater(boss_win.boss_hp, 0)
+        self.assertIsNotNone(player_win.completed_at)
+        self.assertIsNotNone(boss_win.completed_at)
+
+
 class BallEscapeRegressionTests(unittest.TestCase):
     def test_fixed_timestep_is_independent_from_render_fps(self):
         states = []

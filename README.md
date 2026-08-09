@@ -3,8 +3,9 @@
 Génération de jeux hypnotiques et compilation de vidéos verticales, avec publication automatisée
 sur TikTok et YouTube Shorts.
 
-Le studio propose trois formats originaux sélectionnés pour leur qualité : **Ball Escape**,
-**Organic Escape** et le moteur premium Blender **Soft Body Slide 3D**, en 1080×1920 avec audio synchronisé. Il peut générer des lots et router un rendu vers
+Le studio propose cinq formats originaux sélectionnés pour leur qualité : **Ball Escape**,
+**Organic Escape**, **Laser Dodge**, **Boss Battle** et le moteur premium Blender
+**Soft Body Slide 3D**, en 1080×1920 avec audio synchronisé. Il peut générer des lots et router un rendu vers
 plusieurs comptes TikTok et plusieurs profils YouTube isolés. Voir [GAME-GENERATOR.md](GAME-GENERATOR.md)
 et [YOUTUBE-UPLOAD.md](YOUTUBE-UPLOAD.md).
 

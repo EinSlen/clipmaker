@@ -7,6 +7,8 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 
 - **Ball Escape** — balle soumise à la gravité, anneaux rotatifs et accélération progressive.
 - **Organic Escape** — balle à traînée qui brise des contours organiques avec impacts ASMR accordés.
+- **Laser Dodge** — pilote néon, lasers mobiles, collisions géométriques et échecs tardifs variables.
+- **Boss Battle** — duel de combattants procéduraux, attaques télégraphiées, dégâts et vainqueur déterministes.
 - **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
 
 Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
@@ -46,9 +48,9 @@ docker compose exec clipmaker npm run youtube:doctor
 Les rendus persistent dans `web/renders/`. Un seul rendu est encodé à la fois pour ne pas saturer un
 petit VPS.
 
-Les moteurs 2D calculent par défaut en 360×640 à 15 FPS puis encodent en 1080×1920. Les variables
-`GAME_RENDER_WIDTH`, `GAME_RENDER_HEIGHT` et `GAME_RENDER_FPS` permettent d'augmenter la qualité ou
-de réduire la charge d'un VPS.
+Les moteurs 2D calculent par défaut en 720×1280 à 30 FPS puis encodent en 1080×1920. Les variables
+`GAME_RENDER_WIDTH`, `GAME_RENDER_HEIGHT` et `GAME_RENDER_FPS` permettent de créer des smokes plus
+rapides pendant le développement.
 
 Pour connecter plusieurs chaînes YouTube :
 
@@ -66,7 +68,7 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
   -d '{"game":"shape-tunnel","duration":45,"difficulty":200,"theme":"neon","soundPack":"auto","musicFile":"__discover__","musicMode":"continuous"}'
 ```
 
-Valeurs de `game` : `ball-escape`, `shape-tunnel`, `soft-body-slide`.
+Valeurs de `game` : `ball-escape`, `shape-tunnel`, `laser-dodge`, `boss-battle`, `soft-body-slide`.
 
 Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais progressifs
 avec une rampe mobile, une capsule à contraintes physiques et un vrai réceptacle ouvert. La graine
@@ -88,8 +90,8 @@ Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT
 
 ```bash
 cd web
-npm test                  # types + tests déterministes des 2 moteurs rapides
-npm run test:render-smoke # encode et inspecte les 2 MP4 avec ffprobe
+npm test                  # types + tests déterministes des 4 moteurs rapides
+npm run test:render-smoke # encode et inspecte les MP4 avec ffprobe
 ```
 
 Les tests vérifient aussi que le catalogue TypeScript et les moteurs Python possèdent exactement les
