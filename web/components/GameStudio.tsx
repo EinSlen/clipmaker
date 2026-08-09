@@ -29,7 +29,7 @@ import type { MusicTrack } from "@/lib/types";
 type Theme = "neon" | "sunset" | "ice";
 type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
-type RenderedSoundPack = SoundPack | "premium-foley";
+type RenderedSoundPack = SoundPack | "glass" | "premium-foley";
 type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed";
 
 type GameResult = {
@@ -668,7 +668,7 @@ export function GameStudio() {
               </label>
               <label className="block space-y-1.5 text-xs text-ink-400">
                 <span>
-                  Source musicale {game === "soft-body-slide" && "(facultative)"}
+                  Source musicale
                 </span>
                 <div className="flex gap-2">
                   <select
@@ -681,7 +681,7 @@ export function GameStudio() {
                     </option>
                     <option value="">
                       {game === "soft-body-slide"
-                        ? "Foley ASMR original — recommandé"
+                        ? "Foley ASMR + ambiance originale — recommandé"
                         : "Piste électronique originale générée"}
                     </option>
                     {musicTracks.length > 0 && (
@@ -719,7 +719,7 @@ export function GameStudio() {
                 </div>
               </label>
             </div>
-            {musicFile && (
+            {(musicFile || game === "soft-body-slide") && (
               <div className="grid gap-4 lg:grid-cols-2">
                 <label className="block space-y-1.5 text-xs text-ink-400">
                   <span>Comportement de la musique</span>
@@ -852,8 +852,8 @@ export function GameStudio() {
                   )}
                   {game === "boss-battle" && (
                     <span className="block text-[10px] leading-4 text-ink-500">
-                      La graine change les combattants, les attaques, les
-                      dégâts et le vainqueur.
+                      La graine change l’arme, le Warden, les trajectoires,
+                      les impacts et le vainqueur.
                     </span>
                   )}
                 </label>
@@ -1019,7 +1019,10 @@ export function GameStudio() {
                 </p>
                 {result.musicTitle && (
                   <p className="mt-2 text-[11px] text-ink-500">
-                    Musique : {result.musicTitle}
+                    Musique :{" "}
+                    {result.musicSource === "original"
+                      ? "Piste originale générée"
+                      : result.musicTitle}
                   </p>
                 )}
                 {result.musicNote && (

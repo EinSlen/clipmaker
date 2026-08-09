@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import re
+import tempfile
 import unittest
+import wave
 from pathlib import Path
 
 from game_variants import GAME_CLASSES
@@ -19,6 +21,13 @@ assert RENDERER_SPEC and RENDERER_SPEC.loader
 RENDERER = importlib.util.module_from_spec(RENDERER_SPEC)
 RENDERER_SPEC.loader.exec_module(RENDERER)
 BallEscape = RENDERER.BallEscape
+PREMIUM_RENDERER_PATH = Path(__file__).with_name("render-premium-3d.py")
+PREMIUM_RENDERER_SPEC = importlib.util.spec_from_file_location(
+    "render_premium_3d", PREMIUM_RENDERER_PATH
+)
+assert PREMIUM_RENDERER_SPEC and PREMIUM_RENDERER_SPEC.loader
+PREMIUM_RENDERER = importlib.util.module_from_spec(PREMIUM_RENDERER_SPEC)
+PREMIUM_RENDERER_SPEC.loader.exec_module(PREMIUM_RENDERER)
 
 
 def build(game_id: str, seed: int = 424242):
@@ -69,6 +78,23 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_variant_catalog_has_at_least_2500_discrete_combinations(self):
         keys = {variant_for_seed(seed).key for seed in range(10_000)}
         self.assertGreaterEqual(len(keys), 2_500)
+
+
+class SoftBodyAudioTests(unittest.TestCase):
+    def test_generated_bed_is_seeded_stereo_and_platform_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.wav"
+            second = Path(directory) / "second.wav"
+            PREMIUM_RENDERER.synth_soft_body_bed(0.25, first, 910104)
+            PREMIUM_RENDERER.synth_soft_body_bed(0.25, second, 910104)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with wave.open(str(first), "rb") as source:
+                self.assertEqual(source.getnchannels(), 2)
+                self.assertEqual(source.getframerate(), 48_000)
+                self.assertGreater(source.getnframes(), 10_000)
+        audio_filter = PREMIUM_RENDERER.build_continuous_audio_filter(0.58)
+        self.assertIn("sidechaincompress", audio_filter)
+        self.assertIn("loudnorm=I=-20:TP=-1.5:LRA=10", audio_filter)
 
 
 class GameEngineTests(unittest.TestCase):

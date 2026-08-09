@@ -21,6 +21,32 @@ def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+def smoothstep(value: float) -> float:
+    value = clamp(value, 0.0, 1.0)
+    return value * value * (3.0 - 2.0 * value)
+
+
+def smootherstep(value: float) -> float:
+    value = clamp(value, 0.0, 1.0)
+    return value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
+
+
+def lerp(start: float, end: float, ratio: float) -> float:
+    return start + (end - start) * ratio
+
+
+def catmull_rom(a: float, b: float, c: float, d: float, ratio: float) -> float:
+    """Interpolate through b/c with a continuous first derivative."""
+    ratio2 = ratio * ratio
+    ratio3 = ratio2 * ratio
+    return 0.5 * (
+        2.0 * b
+        + (-a + c) * ratio
+        + (2.0 * a - 5.0 * b + 4.0 * c - d) * ratio2
+        + (-a + 3.0 * b - 3.0 * c + d) * ratio3
+    )
+
+
 def color_for(theme: str, index: int, total: int, offset: float = 0.0) -> tuple[int, int, int]:
     _, base_hue, saturation = THEMES[theme]
     spread = 0.82 if theme == "neon" else 0.18
@@ -229,7 +255,9 @@ class ShapeTunnel(BaseGame):
             start[1] + (end[1] - start[1]) * eased + gravity_arc,
         ]
         self.trail.append(tuple(self.position))
-        self.trail = self.trail[-13:]
+        # A short, continuously fading tail reads as speed without leaving the
+        # polygonal scribbles that long trails create on a phone screen.
+        self.trail = self.trail[-10:]
         progress = self.active / self.total
         self.max_speed_ratio = 1.0 + progress * 5.4
         self.gravity_g = 1.0 + progress * 1.8
@@ -245,55 +273,82 @@ class ShapeTunnel(BaseGame):
         gd, cd = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
         progress = self.active / self.total
         remaining = max(0, self.total - self.active)
-        visible = math.ceil(44 * remaining / self.total)
-        spacing = self.width * 0.0175
+        # Fifty-eight close contours keep the image visually dense at 1080p,
+        # while the widening central void makes every successful impact obvious.
+        visible = math.ceil(58 * remaining / self.total)
+        spacing = self.width * 0.0145
+        impact_pulse = clamp(1.0 - (time_sec - self.last_impact) * 5.8, 0.0, 1.0)
+        impact_angle = math.atan2(self.last_contact[1] - self.cy, self.last_contact[0] - self.cx)
         for layer in range(visible - 1, -1, -1):
             radius = self.width * (0.155 + progress * 0.43) + layer * spacing
-            index = self.active + round((layer + 1) / 44 * self.total)
+            index = self.active + round((layer + 1) / 58 * self.total)
             color = color_for(self.theme, index, self.total, time_sec * 0.018)
             points = []
-            sides = 88
+            sides = 128
             for point in range(sides + 1):
                 angle = math.tau * point / sides
                 wave = 1.0
-                wave += 0.095 * math.sin(angle * 7 + self.shape_phase + layer * 0.015)
-                wave += 0.038 * math.sin(angle * 3 - self.shape_phase * 0.7)
-                wave += 0.020 * math.sin(angle * 13 + self.shape_phase * 1.8 + time_sec * 0.35)
+                wave += 0.084 * math.sin(angle * 7 + self.shape_phase + layer * 0.012)
+                wave += 0.032 * math.sin(angle * 3 - self.shape_phase * 0.7)
+                wave += 0.013 * math.sin(angle * 13 + self.shape_phase * 1.8 + time_sec * 0.30)
+                # A local pressure wave propagates through neighbouring contours
+                # after contact. This tiny phase-delayed bulge is what makes the
+                # tunnel feel elastic instead of a stack of static SVG paths.
+                angular_distance = math.atan2(math.sin(angle - impact_angle), math.cos(angle - impact_angle))
+                ripple_width = 0.20 + layer * 0.002
+                ripple = math.exp(-((angular_distance / ripple_width) ** 2))
+                ripple *= impact_pulse * math.sin((1.0 - impact_pulse) * 9.0 - layer * 0.22)
+                wave += ripple * 0.024
                 points.append((self.cx + math.cos(angle) * radius * wave, self.cy + math.sin(angle) * radius * wave))
-            line_width = 2 if layer > 1 else 3
-            cd.line(points, fill=(*color, 235), width=line_width, joint="curve")
-            if layer % 5 == 0 or layer < 2:
-                gd.line(points, fill=(*color, 115), width=9, joint="curve")
-        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(7)))
+            line_width = max(1, round(self.width * (0.0022 if layer > 1 else 0.0038)))
+            # A one-pixel dark under-stroke preserves separation after TikTok's
+            # aggressive compression and gives the nested layers real depth.
+            cd.line(points, fill=(0, 0, 0, 230), width=line_width + max(1, round(self.width * 0.0022)), joint="curve")
+            cd.line(points, fill=(*color, 244), width=line_width, joint="curve")
+            if layer % 7 == 0 or layer < 2:
+                gd.line(points, fill=(*color, 105), width=max(5, round(self.width * 0.018)), joint="curve")
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(max(4, round(self.width * 0.012)))))
         image = Image.alpha_composite(image, crisp)
         effects = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(effects)
         comet = color_for(self.theme, self.active + 5, self.total, 0.2)
         if len(self.trail) > 1:
             for index in range(1, len(self.trail)):
-                age = index / len(self.trail)
-                draw.line((*self.trail[index - 1], *self.trail[index]), fill=(*comet, round(190 * age)), width=max(2, round(2 + age * 6)))
+                age = index / (len(self.trail) - 1)
+                width = max(2, round(self.width * (0.004 + age * 0.012)))
+                draw.line((*self.trail[index - 1], *self.trail[index]), fill=(*comet, round(155 * age * age)), width=width)
+                tx, ty = self.trail[index]
+                tail_radius = width * 0.42
+                draw.ellipse((tx - tail_radius, ty - tail_radius, tx + tail_radius, ty + tail_radius), fill=(*comet, round(115 * age)))
         x, y = self.position
         ball_radius = self.width * 0.026
-        draw.ellipse((x - ball_radius, y - ball_radius, x + ball_radius, y + ball_radius), fill=(248, 252, 255, 255), outline=(*comet, 255), width=3)
-        image = Image.alpha_composite(image, effects.filter(ImageFilter.GaussianBlur(6)))
+        draw.ellipse((x - ball_radius * 2.4, y - ball_radius * 2.4, x + ball_radius * 2.4, y + ball_radius * 2.4), fill=(*comet, 80))
+        draw.ellipse((x - ball_radius, y - ball_radius, x + ball_radius, y + ball_radius), fill=(*comet, 255))
+        draw.ellipse((x - ball_radius * 0.72, y - ball_radius * 0.72, x + ball_radius * 0.72, y + ball_radius * 0.72), fill=(235, 248, 255, 255))
+        draw.ellipse((x - ball_radius * 0.42, y - ball_radius * 0.55, x - ball_radius * 0.06, y - ball_radius * 0.19), fill=(255, 255, 255, 245))
+        image = Image.alpha_composite(image, effects.filter(ImageFilter.GaussianBlur(max(4, round(self.width * 0.014)))))
         image = Image.alpha_composite(image, effects)
         center_draw = ImageDraw.Draw(image)
         hook = self.title if self.title else "WILL THE BOUNCING BALL ESCAPE?"
-        if hook == "WILL THE BOUNCING BALL ESCAPE?":
-            hook_font = font(round(self.width * 0.052), True)
-            centered(center_draw, self.cx, self.height * 0.057, "WILL THE BOUNCING BALL", hook_font, (255, 255, 255, 255), 2)
-            centered(center_draw, self.cx, self.height * 0.094, "ESCAPE?", hook_font, (255, 255, 255, 255), 2)
-        else:
-            hook_font = fitted_font(hook, round(self.width * 0.052), round(self.width * 0.032), round(self.width * 0.88), True)
-            centered(center_draw, self.cx, self.height * 0.075, hook, hook_font, (255, 255, 255, 255), 2)
-        centered(center_draw, self.cx, self.height * 0.137, "EVERY HIT BREAKS A LAYER", font(max(9, round(self.width * 0.022)), True), (*comet, 235), 1)
+        title_lines = ("WILL THE BOUNCING BALL", "ESCAPE?") if hook == "WILL THE BOUNCING BALL ESCAPE?" else (hook,)
+        title_font = fitted_font(max(title_lines, key=len), round(self.width * 0.050), round(self.width * 0.031), round(self.width * 0.89), True)
+        title_y = self.height * (0.058 if len(title_lines) == 2 else 0.074)
+        for line_index, line in enumerate(title_lines):
+            center_draw.text(
+                (self.cx, title_y + line_index * self.height * 0.035),
+                line,
+                font=title_font,
+                fill=(3, 5, 11, 255),
+                anchor="mm",
+                stroke_width=max(2, round(self.width * 0.0045)),
+                stroke_fill=(255, 255, 255, 255),
+            )
         pulse = clamp(1.0 - (time_sec - self.last_impact) * 6.0, 0.0, 1.0)
-        counter_size = 0.039 + pulse * 0.014
+        counter_size = 0.040 + pulse * 0.013
         centered(center_draw, self.cx, self.cy, str(remaining), font(round(self.width * counter_size), True), (255, 255, 255, 235), 2)
         if self.completed_at is not None:
-            centered(center_draw, self.cx, self.height * 0.82, "ESCAPED!", font(round(self.width * 0.065), True), (255, 255, 255, 255), 2)
-        centered(center_draw, self.cx, self.height * 0.955, "ORIGINAL ORGANIC SIMULATION", font(max(8, round(self.width * 0.018)), True), (180, 195, 220, 205), 1)
+            centered(center_draw, self.cx, self.height * 0.82, "ESCAPED!", font(round(self.width * 0.065), True), (255, 255, 255, 255), 3)
+        centered(center_draw, self.cx, self.height * 0.955, "ORIGINAL PHYSICS SIMULATION", font(max(8, round(self.width * 0.015)), True), (212, 220, 236, 190), 1)
         return image.convert("RGB")
 
 
@@ -307,35 +362,49 @@ class LaserDodge(BaseGame):
         super().__init__(*args)
         self.arena = (
             self.width * 0.075,
-            self.height * 0.205,
+            self.height * 0.190,
             self.width * 0.925,
-            self.height * 0.855,
+            self.height * 0.865,
         )
-        self.runner_radius = max(7.0, self.width * 0.021)
-        self.event_count = max(18, min(72, round(self.duration * 4.2)))
-        start, finish = self.duration * 0.055, self.duration * 0.88
+        self.runner_radius = max(7.0, self.width * 0.022)
+        # Fewer, carefully staged beams are much easier to read than a screen
+        # full of crossings. The nonlinear timing still accelerates the run.
+        self.event_count = max(18, min(44, round(self.duration * 2.7)))
+        start, finish = self.duration * 0.055, self.duration * 0.90
         self.event_times = [
-            start + (finish - start) * (index / max(1, self.event_count - 1)) ** 0.96
+            start + (finish - start) * (index / max(1, self.event_count - 1)) ** 0.90
             for index in range(self.event_count)
         ]
         self.key_times = [0.0, *self.event_times, self.duration]
-        margin_x, margin_y = self.width * 0.17, self.height * 0.29
+        margin_x, margin_y = self.width * 0.17, self.height * 0.275
         self.waypoints = [(self.cx, self.height * 0.53)]
-        lane = self.seed % 5
+        phase = self.rng.uniform(0.0, math.tau)
         for index in range(self.event_count):
-            lane = (lane + self.rng.choice((-2, -1, 1, 2))) % 5
-            lane_x = margin_x + lane / 4 * (self.width - margin_x * 2)
-            wave_y = self.cy + math.sin(index * 1.37 + self.seed * 0.003) * self.height * 0.205
-            wave_y += self.rng.uniform(-self.height * 0.025, self.height * 0.025)
-            self.waypoints.append((lane_x, clamp(wave_y, margin_y, self.height * 0.79)))
+            angle = phase + index * (0.76 + (self.seed % 7) * 0.018)
+            target_x = self.cx + math.sin(angle) * self.width * 0.285
+            target_x += math.sin(angle * 2.17 + phase) * self.width * 0.035
+            target_y = self.cy + math.sin(angle * 0.73 + phase * 0.41) * self.height * 0.205
+            target_y += math.cos(angle * 1.61) * self.height * 0.020
+            previous_x, previous_y = self.waypoints[-1]
+            # Bound every manoeuvre so Catmull-Rom interpolation produces a
+            # flowing ribbon even when adjacent seeded targets diverge.
+            step_x = clamp(target_x - previous_x, -self.width * 0.255, self.width * 0.255)
+            step_y = clamp(target_y - previous_y, -self.height * 0.145, self.height * 0.145)
+            self.waypoints.append((
+                clamp(previous_x + step_x, margin_x, self.width - margin_x),
+                clamp(previous_y + step_y, margin_y, self.height * 0.795),
+            ))
         self.waypoints.append(self.waypoints[-1])
         self.will_survive = self.seed % 5 != 0
         self.failure_index = self.event_count - 2
         self.lasers = []
         for index, (event_time, waypoint) in enumerate(zip(self.event_times, self.waypoints[1:-1])):
-            angle = self.rng.uniform(-1.25, 1.25) + (math.pi / 2 if index % 3 == 0 else 0.0)
+            before = self.waypoints[max(0, index)]
+            after = self.waypoints[min(len(self.waypoints) - 1, index + 2)]
+            path_angle = math.atan2(after[1] - before[1], after[0] - before[0])
+            angle = path_angle + math.pi * 0.5 + self.rng.uniform(-0.46, 0.46)
             normal = (-math.sin(angle), math.cos(angle))
-            safe_gap = self.runner_radius + self.width * self.rng.uniform(0.020, 0.052)
+            safe_gap = self.runner_radius + self.width * self.rng.uniform(0.014, 0.036)
             if not self.will_survive and index == self.failure_index:
                 safe_gap = self.runner_radius * 0.20
             side = -1 if (index + self.seed) % 2 else 1
@@ -344,9 +413,10 @@ class LaserDodge(BaseGame):
                 "time": event_time,
                 "angle": angle,
                 "center": center,
-                "speed": self.width * self.rng.uniform(0.48, 0.82),
+                "speed": self.width * self.rng.uniform(0.30, 0.52),
                 "direction": self.rng.choice((-1.0, 1.0)),
                 "hue": index + self.seed % 19,
+                "phase": self.rng.uniform(0.0, math.tau),
             })
         self.position = list(self.waypoints[0])
         self.trail: list[tuple[float, float]] = []
@@ -364,12 +434,16 @@ class LaserDodge(BaseGame):
         segment = min(segment, len(self.waypoints) - 2)
         start_time, end_time = self.key_times[segment], self.key_times[segment + 1]
         ratio = clamp((time_sec - start_time) / max(0.001, end_time - start_time), 0.0, 1.0)
-        eased = ratio * ratio * (3.0 - 2.0 * ratio)
-        start, end = self.waypoints[segment], self.waypoints[segment + 1]
-        arc = math.sin(math.pi * ratio) * self.height * 0.012 * (-1 if segment % 2 else 1)
+        ratio = smootherstep(ratio)
+        previous = self.waypoints[max(0, segment - 1)]
+        start = self.waypoints[segment]
+        end = self.waypoints[segment + 1]
+        following = self.waypoints[min(len(self.waypoints) - 1, segment + 2)]
+        x = catmull_rom(previous[0], start[0], end[0], following[0], ratio)
+        y = catmull_rom(previous[1], start[1], end[1], following[1], ratio)
         return (
-            start[0] + (end[0] - start[0]) * eased,
-            start[1] + (end[1] - start[1]) * eased + arc,
+            clamp(x, self.arena[0] + self.runner_radius * 1.5, self.arena[2] - self.runner_radius * 1.5),
+            clamp(y, self.arena[1] + self.runner_radius * 1.5, self.arena[3] - self.runner_radius * 1.5),
         )
 
     def laser_line(self, laser, time_sec: float):
@@ -412,11 +486,11 @@ class LaserDodge(BaseGame):
                 self.completed_at = self.event_times[-1]
                 self.burst(*self.position, (255, 255, 255), 62)
         self.trail.append(tuple(self.position))
-        self.trail = self.trail[-30:]
+        self.trail = self.trail[-13:]
         self.max_speed_ratio = 1.0 + min(1.0, target / self.event_count) * 6.2
         self.update_particles()
 
-    def frame(self, time_sec: float) -> Image.Image:
+    def _legacy_frame(self, time_sec: float) -> Image.Image:
         image = self.canvas(time_sec)
         glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
         crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -476,25 +550,184 @@ class LaserDodge(BaseGame):
         centered(overlay, self.cx, self.height * 0.962, "EVERY BEAM HAS REAL COLLISION", font(max(8, round(self.width * 0.018)), True), (180, 198, 225, 210), 1)
         return image.convert("RGB")
 
+    def frame(self, time_sec: float) -> Image.Image:
+        """Render a clean, clipped laser course with a short cinematic trail."""
+        image = self.canvas(time_sec)
+        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+        x1, y1, x2, y2 = self.arena
+        arena_radius = round(self.width * 0.035)
+        draw.rounded_rectangle(
+            self.arena,
+            radius=arena_radius,
+            fill=(1, 5, 15, 232),
+            outline=(115, 180, 230, 74),
+            width=max(2, round(self.width * 0.003)),
+        )
+        for row in range(13):
+            ratio = row / 12
+            y = y1 + (y2 - y1) * ratio ** 1.55
+            draw.line((x1 + 2, y, x2 - 2, y), fill=(68, 126, 185, round(12 + ratio * 17)), width=1)
+        for column in range(11):
+            x = x1 + (x2 - x1) * column / 10
+            draw.line((self.cx + (x - self.cx) * 0.18, y1, x, y2), fill=(68, 126, 185, 20), width=1)
+
+        # Render beams through a rounded mask. Energy never spills outside the
+        # arena, so even two overlapping warnings remain instantly readable.
+        beam_glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        beam_crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        bgd, bcd = ImageDraw.Draw(beam_glow), ImageDraw.Draw(beam_crisp)
+        for index, laser in enumerate(self.lasers):
+            delta = time_sec - float(laser["time"])
+            if delta < -0.46 or delta > 0.28:
+                continue
+            center, tangent, _ = self.laser_line(laser, time_sec)
+            length = math.hypot(self.width, self.height)
+            start = (center[0] - tangent[0] * length, center[1] - tangent[1] * length)
+            end = (center[0] + tangent[0] * length, center[1] + tangent[1] * length)
+            warning = delta < -0.105
+            color = (255, 48 + index % 3 * 17, 91) if not warning else (255, 177, 67)
+            alpha = round(70 + 185 * clamp(1.0 - abs(delta) / 0.46, 0.0, 1.0))
+            if warning:
+                alpha = round(35 + 55 * clamp((delta + 0.46) / 0.355, 0.0, 1.0))
+            bgd.line(
+                (*start, *end),
+                fill=(*color, min(150, alpha)),
+                width=max(8, round(self.width * (0.029 if warning else 0.047))),
+            )
+            bcd.line(
+                (*start, *end),
+                fill=(*color, alpha),
+                width=max(2, round(self.width * (0.004 if warning else 0.008))),
+            )
+            if not warning:
+                bcd.line(
+                    (*start, *end),
+                    fill=(255, 244, 238, min(255, alpha + 40)),
+                    width=max(1, round(self.width * 0.0025)),
+                )
+
+        arena_mask = Image.new("L", image.size, 0)
+        ImageDraw.Draw(arena_mask).rounded_rectangle(self.arena, radius=arena_radius, fill=255)
+        empty_alpha = Image.new("L", image.size, 0)
+        beam_glow.putalpha(Image.composite(beam_glow.getchannel("A"), empty_alpha, arena_mask))
+        beam_crisp.putalpha(Image.composite(beam_crisp.getchannel("A"), empty_alpha, arena_mask))
+        glow = Image.alpha_composite(glow, beam_glow)
+        crisp = Image.alpha_composite(crisp, beam_crisp)
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+
+        if len(self.trail) > 1:
+            trail_color = color_for(self.theme, self.active + 9, self.total, 0.37)
+            for index in range(1, len(self.trail)):
+                age = index / (len(self.trail) - 1)
+                draw.line(
+                    (*self.trail[index - 1], *self.trail[index]),
+                    fill=(*trail_color, round(110 * age * age)),
+                    width=max(1, round(self.width * (0.002 + age * 0.006))),
+                )
+
+        x, y = self.position
+        pulse = clamp(1.0 - (time_sec - self.last_dodge) * 7.0, 0.0, 1.0)
+        radius = self.runner_radius * (1.0 + pulse * 0.20)
+        runner_color = (75, 235, 255) if not self.crashed else (255, 58, 92)
+        for future_index, future_delta in enumerate((0.07, 0.14, 0.21), 1):
+            fx, fy = self.position_at(min(self.duration, time_sec + future_delta))
+            ghost_radius = radius * (0.34 - future_index * 0.055)
+            draw.ellipse(
+                (fx - ghost_radius, fy - ghost_radius, fx + ghost_radius, fy + ghost_radius),
+                fill=(*runner_color, 75 - future_index * 14),
+            )
+        gd.ellipse(
+            (x - radius * 2.6, y - radius * 2.6, x + radius * 2.6, y + radius * 2.6),
+            fill=(*runner_color, 155),
+        )
+        if pulse > 0:
+            ring_radius = radius * (1.45 + (1.0 - pulse) * 1.4)
+            draw.ellipse(
+                (x - ring_radius, y - ring_radius, x + ring_radius, y + ring_radius),
+                outline=(*runner_color, round(170 * pulse)),
+                width=max(1, round(self.width * 0.004)),
+            )
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=(*runner_color, 255),
+            outline=(225, 253, 255, 255),
+            width=max(2, round(self.width * 0.005)),
+        )
+        draw.ellipse(
+            (x - radius * 0.58, y - radius * 0.63, x + radius * 0.10, y + radius * 0.05),
+            fill=(245, 255, 255, 245),
+        )
+
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(max(4, round(self.width * 0.018)))))
+        image = Image.alpha_composite(image, crisp)
+        overlay = ImageDraw.Draw(image)
+        hook = self.title or "CAN IT DODGE EVERY LASER?"
+        centered(
+            overlay,
+            self.cx,
+            self.height * 0.060,
+            hook,
+            fitted_font(hook, round(self.width * 0.051), round(self.width * 0.030), round(self.width * 0.90), True),
+            (255, 255, 255, 255),
+            2,
+        )
+        centered(
+            overlay,
+            self.cx,
+            self.height * 0.112,
+            f"{self.active:03d} DODGED   |   {self.max_speed_ratio:.1f}X",
+            font(max(10, round(self.width * 0.021)), True),
+            (91, 226, 255, 235),
+            1,
+        )
+        if pulse > 0.0 and not self.crashed and self.last_distance - self.runner_radius < self.width * 0.045:
+            centered(
+                overlay,
+                self.cx,
+                self.height * 0.151,
+                "NEAR MISS +1",
+                font(round(self.width * 0.027), True),
+                (255, 208, 78, round(255 * pulse)),
+                1,
+            )
+        if self.completed_at is not None:
+            result = "LASER HIT!" if self.crashed else "FLAWLESS RUN!"
+            color = (255, 76, 104, 255) if self.crashed else (105, 255, 211, 255)
+            centered(overlay, self.cx, self.height * 0.915, result, font(round(self.width * 0.055), True), color, 2)
+        centered(
+            overlay,
+            self.cx,
+            self.height * 0.963,
+            "ONE TOUCH ENDS THE RUN",
+            font(max(8, round(self.width * 0.017)), True),
+            (180, 198, 225, 205),
+            1,
+        )
+        return image.convert("RGB")
+
 
 class BossBattle(BaseGame):
     """A seeded combat timeline with telegraphs, damage and decisive outcomes."""
 
     game_name = "BOSS BATTLE"
     unit_name = "BOSS HP"
-    PLAYER_CLASSES = ("VOID BLADE", "ARC RANGER", "NEON MONK")
-    BOSS_CLASSES = ("IRON WARDEN", "EMBER TITAN", "ABYSS GOLEM")
+    PLAYER_CLASSES = ("THUNDER MACE", "PLASMA FLAIL", "VOID HAMMER")
+    BOSS_CLASSES = ("WARDEN", "ION SENTINEL", "ABYSS CORE")
 
     def __init__(self, *args):
         super().__init__(*args)
         self.boss_max = float(self.total)
         self.boss_hp = self.boss_max
-        self.player_max = max(120.0, self.total * 0.72)
+        self.player_max = 100.0
         self.player_hp = self.player_max
         self.player_class = self.PLAYER_CLASSES[self.seed % len(self.PLAYER_CLASSES)]
         self.boss_class = self.BOSS_CLASSES[(self.seed // 3) % len(self.BOSS_CLASSES)]
         self.player_wins = self.seed % 4 != 0
-        base_count = max(13, min(35, round(self.duration * 2.0)))
+        # Deliberate, weighty clashes leave enough anticipation for viewers to
+        # understand who is about to connect. The final blow keeps its suspense.
+        base_count = max(11, min(25, round(self.duration * 1.45)))
         self.attack_count = base_count if (base_count % 2 == (1 if self.player_wins else 0)) else base_count + 1
         start, finish = self.duration * 0.07, self.duration * 0.90
         self.attack_times = [
@@ -508,7 +741,7 @@ class BossBattle(BaseGame):
         player_scale = player_target / max(0.001, sum(raw_player))
         boss_scale = boss_target / max(0.001, sum(raw_boss))
         player_cursor = boss_cursor = 0
-        kinds = ("SLASH", "PLASMA", "SLAM", "CRITICAL")
+        kinds = ("ARC", "PLASMA", "SLAM", "CRITICAL")
         self.attacks = []
         for index, event_time in enumerate(self.attack_times):
             player_attacks = index % 2 == 0
@@ -518,11 +751,12 @@ class BossBattle(BaseGame):
             else:
                 damage = raw_boss[boss_cursor] * boss_scale
                 boss_cursor += 1
+            kind = "CRITICAL" if index == self.attack_count - 1 else kinds[(index + self.seed) % len(kinds)]
             self.attacks.append({
                 "time": event_time,
                 "player": player_attacks,
                 "damage": damage,
-                "kind": kinds[(index + self.seed) % len(kinds)],
+                "kind": kind,
             })
         self.last_impact = -10.0
         self.last_damage = 0
@@ -643,7 +877,7 @@ class BossBattle(BaseGame):
         glow_draw.line((hand_x, hand_y, *weapon_end), fill=(*color, 150), width=max(12, round(scale * 0.19)))
         draw.line((hand_x, hand_y, *weapon_end), fill=(245, 252, 255, 255), width=max(3, round(scale * 0.052)))
 
-    def frame(self, time_sec: float) -> Image.Image:
+    def _legacy_frame(self, time_sec: float) -> Image.Image:
         image = self.canvas(time_sec)
         glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
         crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -710,6 +944,458 @@ class BossBattle(BaseGame):
             centered(overlay, self.cx, self.height * 0.825, result, font(round(self.width * 0.061), True), color, 2)
         centered(overlay, self.cx, self.height * 0.935, f"PLAYER {round(self.player_hp)} HP  •  BOSS {round(self.boss_hp)} HP", font(max(9, round(self.width * 0.020)), True), (224, 232, 250, 235), 1)
         centered(overlay, self.cx, self.height * 0.967, "SEEDED COMBAT • DIFFERENT OUTCOME EVERY RUN", font(max(8, round(self.width * 0.016)), True), (170, 188, 220, 205), 1)
+        return image.convert("RGB")
+
+    def arena_bounds(self) -> tuple[float, float, float, float]:
+        side = self.width * 0.92
+        left = self.cx - side * 0.5
+        top = self.height * 0.205
+        return left, top, left + side, top + side
+
+    def fighter_positions(self, time_sec: float, attack, delta: float) -> tuple[list[float], list[float]]:
+        """Physics-inspired deterministic orbits, pulled together for impact."""
+        left, top, right, bottom = self.arena_bounds()
+        side = right - left
+        phase = (self.seed % 997) * 0.0137
+        player = [
+            left + side * (0.28 + 0.105 * math.sin(time_sec * 0.83 + phase)),
+            top + side * (0.48 + 0.245 * math.sin(time_sec * 1.11 + phase * 0.61)),
+        ]
+        boss = [
+            left + side * (0.72 + 0.105 * math.sin(time_sec * 0.71 + phase + 2.4)),
+            top + side * (0.50 + 0.235 * math.sin(time_sec * 0.97 + phase * 0.43 + 2.0)),
+        ]
+        if attack is None or delta < -0.34 or delta > 0.42:
+            return player, boss
+
+        if delta <= 0.0:
+            collision_energy = smootherstep((delta + 0.34) / 0.34)
+        else:
+            collision_energy = 1.0 - smoothstep(delta / 0.42)
+        attacker = player if bool(attack["player"]) else boss
+        defender = boss if bool(attack["player"]) else player
+        start_attacker = tuple(attacker)
+        attacker[0] = lerp(attacker[0], defender[0], collision_energy * 0.62)
+        attacker[1] = lerp(attacker[1], defender[1], collision_energy * 0.62)
+        if delta >= 0.0:
+            knock = (1.0 - smoothstep(delta / 0.30)) * side * 0.075
+            dx = defender[0] - start_attacker[0]
+            dy = defender[1] - start_attacker[1]
+            length = max(1.0, math.hypot(dx, dy))
+            defender[0] += dx / length * knock
+            defender[1] += dy / length * knock
+
+        margin = self.width * 0.095
+        for position in (player, boss):
+            position[0] = clamp(position[0], left + margin, right - margin)
+            position[1] = clamp(position[1], top + margin, bottom - margin)
+        return player, boss
+
+    def draw_energy_orb(
+        self,
+        draw,
+        glow_draw,
+        x: float,
+        y: float,
+        radius: float,
+        color: tuple[int, int, int],
+        hp: float,
+        rotation: float,
+        armored: bool,
+    ):
+        outline = max(2, round(self.width * 0.0045))
+        glow_draw.ellipse(
+            (x - radius * 1.65, y - radius * 1.65, x + radius * 1.65, y + radius * 1.65),
+            fill=(*color, 92),
+        )
+        draw.ellipse(
+            (x - radius * 1.07, y - radius * 1.07, x + radius * 1.07, y + radius * 1.07),
+            fill=(2, 8, 12, 255),
+            outline=(*color, 245),
+            width=outline,
+        )
+
+        # Offset concentric shells approximate a metallic radial gradient while
+        # remaining deterministic and sharp at both preview and final sizes.
+        for layer in range(18):
+            ratio = layer / 17
+            layer_radius = radius * (0.96 - ratio * 0.70)
+            light = 0.23 + ratio * 0.78
+            fill = tuple(min(255, round(channel * light + 12 * ratio)) for channel in color)
+            offset = radius * ratio * 0.16
+            draw.ellipse(
+                (
+                    x - layer_radius - offset,
+                    y - layer_radius - offset,
+                    x + layer_radius - offset,
+                    y + layer_radius - offset,
+                ),
+                fill=(*fill, 255),
+            )
+
+        panel_box = (x - radius * 0.87, y - radius * 0.87, x + radius * 0.87, y + radius * 0.87)
+        for segment in range(6 if armored else 4):
+            start = math.degrees(rotation) + segment * (60 if armored else 90) + 8
+            draw.arc(
+                panel_box,
+                start=start,
+                end=start + (38 if armored else 55),
+                fill=(218, 255, 250, 210),
+                width=max(1, round(radius * 0.095)),
+            )
+        if armored:
+            for fin in range(4):
+                angle = rotation + fin * math.pi * 0.5
+                tangent = (-math.sin(angle), math.cos(angle))
+                direction = (math.cos(angle), math.sin(angle))
+                root = (x + direction[0] * radius * 0.82, y + direction[1] * radius * 0.82)
+                tip = (x + direction[0] * radius * 1.30, y + direction[1] * radius * 1.30)
+                spread = radius * 0.25
+                draw.polygon(
+                    (
+                        (root[0] + tangent[0] * spread, root[1] + tangent[1] * spread),
+                        tip,
+                        (root[0] - tangent[0] * spread, root[1] - tangent[1] * spread),
+                    ),
+                    fill=(*tuple(max(10, round(channel * 0.34)) for channel in color), 255),
+                    outline=(*color, 230),
+                )
+
+        hp_text = str(max(0, round(hp)))
+        centered(
+            draw,
+            x,
+            y + radius * 0.04,
+            hp_text,
+            fitted_font(hp_text, max(10, round(radius * 0.62)), 8, round(radius * 1.25), True),
+            (244, 255, 252, 255),
+            max(1, round(radius * 0.055)),
+        )
+        draw.ellipse(
+            (x - radius * 0.50, y - radius * 0.57, x - radius * 0.16, y - radius * 0.23),
+            fill=(255, 255, 255, 150),
+        )
+
+    def draw_mace(
+        self,
+        draw,
+        glow_draw,
+        origin: tuple[float, float],
+        core_radius: float,
+        angle: float,
+        color: tuple[int, int, int],
+    ) -> tuple[float, float]:
+        distance = core_radius * 2.72
+        mace_x = origin[0] + math.cos(angle) * distance
+        mace_y = origin[1] + math.sin(angle) * distance
+        mace_radius = core_radius * 0.76
+        glow_draw.line((*origin, mace_x, mace_y), fill=(*color, 135), width=max(9, round(core_radius * 0.58)))
+        draw.line((*origin, mace_x, mace_y), fill=(1, 7, 9, 255), width=max(4, round(core_radius * 0.28)))
+        draw.line((*origin, mace_x, mace_y), fill=(*color, 245), width=max(2, round(core_radius * 0.095)))
+        chain_count = 5
+        for chain_index in range(1, chain_count + 1):
+            ratio = chain_index / (chain_count + 1)
+            chain_x = lerp(origin[0], mace_x, ratio)
+            chain_y = lerp(origin[1], mace_y, ratio)
+            link_radius = max(1.8, core_radius * 0.125)
+            draw.ellipse(
+                (chain_x - link_radius, chain_y - link_radius, chain_x + link_radius, chain_y + link_radius),
+                fill=(239, 255, 251, 255),
+                outline=(*color, 255),
+                width=max(1, round(core_radius * 0.055)),
+            )
+        for spike in range(10):
+            spike_angle = angle * 0.38 + spike * math.tau / 10
+            inner = (mace_x + math.cos(spike_angle) * mace_radius * 0.76, mace_y + math.sin(spike_angle) * mace_radius * 0.76)
+            tangent = (-math.sin(spike_angle), math.cos(spike_angle))
+            tip = (mace_x + math.cos(spike_angle) * mace_radius * 1.38, mace_y + math.sin(spike_angle) * mace_radius * 1.38)
+            draw.polygon(
+                (
+                    (inner[0] + tangent[0] * mace_radius * 0.19, inner[1] + tangent[1] * mace_radius * 0.19),
+                    tip,
+                    (inner[0] - tangent[0] * mace_radius * 0.19, inner[1] - tangent[1] * mace_radius * 0.19),
+                ),
+                fill=(198, 225, 221, 255),
+                outline=(*color, 220),
+            )
+        glow_draw.ellipse(
+            (mace_x - mace_radius * 1.55, mace_y - mace_radius * 1.55, mace_x + mace_radius * 1.55, mace_y + mace_radius * 1.55),
+            fill=(*color, 88),
+        )
+        draw.ellipse(
+            (mace_x - mace_radius, mace_y - mace_radius, mace_x + mace_radius, mace_y + mace_radius),
+            fill=(15, 35, 37, 255),
+            outline=(*color, 255),
+            width=max(2, round(core_radius * 0.12)),
+        )
+        draw.ellipse(
+            (mace_x - mace_radius * 0.55, mace_y - mace_radius * 0.58, mace_x + mace_radius * 0.15, mace_y + mace_radius * 0.12),
+            fill=(206, 236, 232, 210),
+        )
+        return mace_x, mace_y
+
+    def frame(self, time_sec: float) -> Image.Image:
+        """Render an object-based physics duel inspired by viral simulations."""
+        image = self.canvas(time_sec)
+        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        crisp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gd, draw = ImageDraw.Draw(glow), ImageDraw.Draw(crisp)
+        left, top, right, bottom = self.arena_bounds()
+        side = right - left
+        player_color = (66, 255, 103)
+        boss_color = (47, 225, 219)
+
+        draw.rectangle((left, top, right, bottom), fill=(0, 4, 6, 246), outline=(215, 255, 247, 185), width=max(2, round(self.width * 0.004)))
+        # Angular shadow wedges and sparse dust give the square dimensionality
+        # without competing with the two combatants.
+        wedge_shift = math.sin(time_sec * 0.34 + self.seed) * side * 0.05
+        draw.polygon(
+            ((left, top + side * 0.18), (left + side * 0.50 + wedge_shift, bottom), (left, bottom)),
+            fill=(3, 34, 34, 125),
+        )
+        draw.polygon(
+            ((right, top), (right, top + side * 0.47), (left + side * 0.45 + wedge_shift, top)),
+            fill=(5, 22, 27, 118),
+        )
+        for star_index in range(30):
+            star_x = left + side * ((math.sin(star_index * 91.73 + self.seed * 0.011) + 1.0) * 0.5)
+            star_y = top + side * ((math.sin(star_index * 47.19 + self.seed * 0.019) + 1.0) * 0.5)
+            star_radius = max(1, round(self.width * (0.0014 + (star_index % 3) * 0.0007)))
+            draw.ellipse(
+                (star_x - star_radius, star_y - star_radius, star_x + star_radius, star_y + star_radius),
+                fill=(221, 255, 248, 75 + (star_index % 4) * 22),
+            )
+
+        # Two jagged energy rails make impacts against the walls feel physical.
+        for rail_side, rail_color in ((-1, player_color), (1, boss_color)):
+            rail_points = []
+            for rail_index in range(13):
+                ratio = rail_index / 12
+                base_x = left if rail_side < 0 else right
+                inward = rail_side * -1 * side * (0.012 + 0.040 * (0.5 + 0.5 * math.sin(rail_index * 2.31 + self.seed)))
+                rail_points.append((base_x + inward, top + ratio * side))
+            gd.line(rail_points, fill=(*rail_color, 100), width=max(8, round(self.width * 0.022)), joint="curve")
+            draw.line(rail_points, fill=(*rail_color, 205), width=max(1, round(self.width * 0.004)), joint="curve")
+
+        attack, delta = self.attack_phase(time_sec)
+        player_position, boss_position = self.fighter_positions(time_sec, attack, delta)
+        impact_pulse = clamp(1.0 - (time_sec - self.last_impact) * 5.2, 0.0, 1.0)
+        shake = impact_pulse * self.width * (0.012 if self.last_kind == "CRITICAL" else 0.007)
+        shake_x = math.sin(time_sec * 97.0 + self.seed) * shake
+        shake_y = math.cos(time_sec * 83.0 + self.seed) * shake
+        player_position[0] += shake_x
+        player_position[1] += shake_y
+        boss_position[0] += shake_x
+        boss_position[1] += shake_y
+
+        player_radius = self.width * 0.058
+        boss_radius = self.width * 0.086
+        spin = time_sec * (4.2 + min(2.4, self.max_speed_ratio * 0.28)) + self.seed * 0.013
+        mace_angle = spin
+        if attack is not None and bool(attack["player"]) and -0.34 <= delta <= 0.25:
+            target_angle = math.atan2(boss_position[1] - player_position[1], boss_position[0] - player_position[0])
+            aim = smootherstep((delta + 0.34) / 0.34) if delta < 0 else 1.0 - smoothstep(delta / 0.25)
+            angular_error = math.atan2(math.sin(target_angle - mace_angle), math.cos(target_angle - mace_angle))
+            mace_angle += angular_error * aim
+
+        sweep_radius = player_radius * 2.72
+        sweep_box = (
+            player_position[0] - sweep_radius,
+            player_position[1] - sweep_radius,
+            player_position[0] + sweep_radius,
+            player_position[1] + sweep_radius,
+        )
+        sweep_end = math.degrees(mace_angle)
+        gd.arc(
+            sweep_box,
+            start=sweep_end - 54,
+            end=sweep_end,
+            fill=(*player_color, 82),
+            width=max(7, round(self.width * 0.020)),
+        )
+        draw.arc(
+            sweep_box,
+            start=sweep_end - 40,
+            end=sweep_end,
+            fill=(*player_color, 125),
+            width=max(1, round(self.width * 0.0035)),
+        )
+        self.draw_mace(draw, gd, tuple(player_position), player_radius, mace_angle, player_color)
+
+        # Telegraphs appear before contact, then collapse into a shockwave. The
+        # timing is tied to the same attack event that changes HP and audio.
+        if attack is not None and -0.34 <= delta < 0.0:
+            telegraph = smootherstep((delta + 0.34) / 0.34)
+            defender = boss_position if bool(attack["player"]) else player_position
+            warning_radius = self.width * (0.078 - telegraph * 0.025)
+            draw.ellipse(
+                (
+                    defender[0] - warning_radius,
+                    defender[1] - warning_radius,
+                    defender[0] + warning_radius,
+                    defender[1] + warning_radius,
+                ),
+                outline=(255, 218, 83, round(80 + 160 * telegraph)),
+                width=max(1, round(self.width * 0.004)),
+            )
+            for marker in range(4):
+                marker_angle = time_sec * 4.0 + marker * math.pi * 0.5
+                mx = defender[0] + math.cos(marker_angle) * warning_radius
+                my = defender[1] + math.sin(marker_angle) * warning_radius
+                draw.ellipse((mx - 2, my - 2, mx + 2, my + 2), fill=(255, 232, 128, 230))
+
+        # Mechanical sphere and energy core replace the old humanoid sprites.
+        self.draw_energy_orb(
+            draw,
+            gd,
+            player_position[0],
+            player_position[1],
+            player_radius,
+            player_color,
+            self.player_hp,
+            spin * 0.43,
+            False,
+        )
+        self.draw_energy_orb(
+            draw,
+            gd,
+            boss_position[0],
+            boss_position[1],
+            boss_radius,
+            boss_color,
+            self.boss_hp,
+            -spin * 0.31,
+            True,
+        )
+
+        if impact_pulse > 0.0:
+            defender = boss_position if self.last_attacker_player else player_position
+            shock_color = player_color if self.last_attacker_player else boss_color
+            for ring_index in range(3):
+                ring_progress = clamp(1.0 - impact_pulse + ring_index * 0.15, 0.0, 1.0)
+                ring_radius = self.width * (0.025 + ring_progress * 0.16)
+                draw.ellipse(
+                    (
+                        defender[0] - ring_radius,
+                        defender[1] - ring_radius,
+                        defender[0] + ring_radius,
+                        defender[1] + ring_radius,
+                    ),
+                    outline=(*shock_color, round(205 * impact_pulse * (1.0 - ring_index * 0.22))),
+                    width=max(1, round(self.width * (0.008 - ring_index * 0.0015))),
+                )
+            for debris_index in range(18 if self.last_kind == "CRITICAL" else 11):
+                debris_angle = debris_index * 2.399 + self.last_tick * 0.71
+                debris_distance = self.width * (0.025 + (1.0 - impact_pulse) * (0.11 + (debris_index % 4) * 0.018))
+                debris_x = defender[0] + math.cos(debris_angle) * debris_distance
+                debris_y = defender[1] + math.sin(debris_angle) * debris_distance
+                debris_radius = max(1, round(self.width * 0.004 * impact_pulse))
+                draw.ellipse(
+                    (debris_x - debris_radius, debris_y - debris_radius, debris_x + debris_radius, debris_y + debris_radius),
+                    fill=(244, 255, 250, round(230 * impact_pulse)),
+                )
+
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(max(5, round(self.width * 0.020)))))
+        image = Image.alpha_composite(image, crisp)
+        if impact_pulse > 0.0:
+            flash_strength = 62 if self.last_kind == "CRITICAL" else 28
+            flash = Image.new("RGBA", image.size, (225, 255, 249, round(flash_strength * impact_pulse * impact_pulse)))
+            image = Image.alpha_composite(image, flash)
+
+        overlay = ImageDraw.Draw(image)
+        hook = self.title or "WHO WINS THIS PHYSICS BATTLE?"
+        centered(
+            overlay,
+            self.cx,
+            self.height * 0.052,
+            hook,
+            fitted_font(hook, round(self.width * 0.047), round(self.width * 0.027), round(self.width * 0.91), True),
+            (246, 255, 252, 255),
+            2,
+        )
+        bar_y = self.height * 0.112
+        for left_bar, right_bar, ratio, color, label, hp in (
+            (self.width * 0.065, self.width * 0.475, self.player_hp / self.player_max, player_color, self.player_class, self.player_hp),
+            (self.width * 0.525, self.width * 0.935, self.boss_hp / self.boss_max, boss_color, self.boss_class, self.boss_hp),
+        ):
+            centered(
+                overlay,
+                (left_bar + right_bar) * 0.5,
+                bar_y - self.height * 0.019,
+                label,
+                fitted_font(label, max(9, round(self.width * 0.018)), 8, round(right_bar - left_bar), True),
+                (*color, 255),
+                1,
+            )
+            overlay.rounded_rectangle(
+                (left_bar, bar_y, right_bar, bar_y + self.height * 0.025),
+                radius=max(3, round(self.width * 0.011)),
+                fill=(1, 7, 9, 245),
+                outline=(*color, 180),
+                width=max(1, round(self.width * 0.003)),
+            )
+            if ratio > 0.0:
+                fill_radius = max(2, round(self.width * 0.008))
+                fill_right = max(
+                    left_bar + 3 + fill_radius * 2,
+                    left_bar + 3 + (right_bar - left_bar - 6) * ratio,
+                )
+                overlay.rounded_rectangle(
+                    (
+                        round(left_bar + 3),
+                        round(bar_y + 3),
+                        round(fill_right),
+                        round(bar_y + self.height * 0.025 - 3),
+                    ),
+                    radius=fill_radius,
+                    fill=(*color, 250),
+                )
+            overlay.text(
+                (right_bar - 5, bar_y + self.height * 0.0125),
+                str(max(0, round(hp))),
+                font=font(max(8, round(self.width * 0.015)), True),
+                fill=(243, 255, 252, 245),
+                anchor="rm",
+            )
+
+        if impact_pulse > 0.0:
+            defender = boss_position if self.last_attacker_player else player_position
+            centered(
+                overlay,
+                defender[0],
+                defender[1] - self.width * (0.10 + (1.0 - impact_pulse) * 0.08),
+                f"-{self.last_damage} {self.last_kind}",
+                font(round(self.width * 0.027), True),
+                (255, 240, 174, round(255 * impact_pulse)),
+                1,
+            )
+        if self.completed_at is not None:
+            result = f"{self.player_class} WINS!" if self.boss_hp <= 0 else f"{self.boss_class} WINS!"
+            result_color = player_color if self.boss_hp <= 0 else boss_color
+            centered(
+                overlay,
+                self.cx,
+                self.height * 0.790,
+                result,
+                fitted_font(result, round(self.width * 0.054), round(self.width * 0.032), round(self.width * 0.88), True),
+                (*result_color, 255),
+                3,
+            )
+        centered(
+            overlay,
+            self.cx,
+            self.height * 0.944,
+            "REAL IMPACTS  |  DIFFERENT OUTCOME EVERY RUN",
+            fitted_font(
+                "REAL IMPACTS  |  DIFFERENT OUTCOME EVERY RUN",
+                max(8, round(self.width * 0.015)),
+                7,
+                round(self.width * 0.92),
+                True,
+            ),
+            (176, 208, 208, 205),
+            1,
+        )
         return image.convert("RGB")
 
 
