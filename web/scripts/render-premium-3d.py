@@ -18,44 +18,8 @@ from soft_body_variants import variant_for_seed, variant_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-FOLEY_EVENT_RATIOS = (0.13, 0.30, 0.52, 0.75, 0.94)
-FOLEY_EVENT_TYPES = (
-    "ramp-contact-1",
-    "ramp-contact-2",
-    "ramp-contact-3",
-    "ramp-contact-4",
-    "receiver-outcome",
-)
-
-
 def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
-
-
-def stage_event_times(duration: float, stage_count: int) -> list[tuple[float, ...]]:
-    """Return four ramp contacts and the receiver outcome for each trial."""
-    segment = duration / stage_count
-    return [
-        tuple(min(duration - 0.01, (index + ratio) * segment) for ratio in FOLEY_EVENT_RATIOS)
-        for index in range(stage_count)
-    ]
-
-
-def fallback_foley_events(duration: float, stages: tuple[int, ...]) -> list[dict[str, object]]:
-    """Build deterministic cues only when Blender cannot export collision data."""
-    events = []
-    for stage_index, (softness, times) in enumerate(zip(stages, stage_event_times(duration, len(stages)))):
-        for event_index, timestamp in enumerate(times):
-            events.append(
-                {
-                    "time": timestamp,
-                    "kind": "receiver-contact" if event_index == len(times) - 1 else "ramp-contact",
-                    "strength": 0.72 if event_index == len(times) - 1 else 0.58,
-                    "pan": -0.18 + stage_index * 0.07,
-                    "softness": softness,
-                }
-            )
-    return events
 
 
 def synth_premium_foley(
@@ -129,12 +93,18 @@ def synth_premium_foley(
         kind = str(event.get("kind", "ramp-contact"))
 
         if kind == "receiver-contact":
-            # Marble rim/bowl: a low body transient, soft metallic ring and a
+            # Marble rim/wall: a low body transient, soft metallic ring and a
             # short gel squash.  All layers share the exact collision frame.
             add_tone(timestamp, 114.0 - softness * 30.0, 0.30 + softness * 0.10, 0.34 * strength, pan, 0.58)
             add_tone(timestamp, 520.0 - softness * 260.0, 0.18 + softness * 0.12, 0.24 * strength, pan, 0.43)
             add_texture(timestamp, 0.15 + softness * 0.24, 0.11 * strength, pan, softness, fade=False)
             add_tone(timestamp + 0.075, 310.0 - softness * 130.0, 0.12, 0.10 * strength, -pan * 0.35, 0.24)
+        elif kind == "receiver-entry":
+            # A clean geometric crossing has no rim strike. Give it a restrained
+            # air/sink cue instead of inventing a collision that never happened.
+            add_texture(timestamp - 0.045, 0.20 + softness * 0.12, 0.055 * strength, pan, 0.82, fade=False)
+            add_tone(timestamp, 178.0 - softness * 46.0, 0.20, 0.10 * strength, pan, 0.50)
+            add_tone(timestamp + 0.055, 292.0 - softness * 90.0, 0.12, 0.055 * strength, -pan * 0.25, 0.32)
         else:
             # Ramp impacts remain crisp at 0% and progressively become broad,
             # damped rubs at 100%, just like the reference waveform.
@@ -277,14 +247,6 @@ def build_continuous_audio_filter(music_volume: float) -> str:
     )
 
 
-def build_foley_only_audio_filter() -> str:
-    """Preserve the reference's large contrast between impacts and quiet air."""
-    return (
-        "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        "highpass=f=28,volume=1.55,alimiter=limit=0.891:attack=5:release=70:level=false[a]"
-    )
-
-
 def ffmpeg_filter_path(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
@@ -303,11 +265,10 @@ def premium_font_file() -> str:
 
 
 def build_video_filter(duration: float, stages: tuple[int, ...]) -> str:
-    """Upscale cleanly and reproduce the reference's stage-only typography."""
+    """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
     filters = [
         "fps=30:round=up",
-        "scale=1080:1920:flags=lanczos",
     ]
     segment = duration / len(stages)
     for index, softness in enumerate(stages):
@@ -366,8 +327,10 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             if isinstance(exported_events, list):
                 events = [event for event in exported_events if isinstance(event, dict)]
         if not events:
-            events = fallback_foley_events(args.duration, stages)
-            event_source = "timeline-fallback"
+            # Silence is truthful here: Foley must correspond to a measured
+            # collision or a clean geometric receiver entry exported by
+            # Blender.  The ambient bed still keeps the mix alive.
+            event_source = "no-physical-events"
         video_filter = build_video_filter(args.duration, stages)
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
@@ -421,6 +384,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "render_height": height,
         "render_fps": fps,
         "output_fps": 30,
+        "completed_at": args.duration,
+        "outcome": "comparison-complete",
         **variant_summary(variant),
     }
 

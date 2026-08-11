@@ -4,14 +4,31 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import math
 import re
 import tempfile
 import unittest
 import wave
 from pathlib import Path
 
-from game_variants import GAME_CLASSES
-from soft_body_variants import SHAPES, solver_timing, variant_for_seed
+from game_variants import (
+    GAME_CLASSES,
+    SOCIAL_FOOTER_CENTER_Y,
+    SOCIAL_HOOK_CENTER_Y,
+    SOCIAL_RESULT_CENTER_Y,
+)
+from soft_body_variants import (
+    AIR_RETENTION_PER_SECOND,
+    PHYSICS_HZ,
+    SHAPES,
+    deformation_response,
+    natural_ramp_exit_time,
+    ramp_motion_state,
+    solver_timing,
+    stage_motion_for,
+    supported_body_damping,
+    variant_for_seed,
+)
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -31,7 +48,8 @@ PREMIUM_RENDERER_SPEC.loader.exec_module(PREMIUM_RENDERER)
 
 
 def build(game_id: str, seed: int = 424242):
-    arguments = (270, 480, 12, 5.0, 48, seed, "neon", "CAN IT FINISH?")
+    difficulty = 24 if game_id == "laser-dodge" else 48
+    arguments = (270, 480, 12, 5.0, difficulty, seed, "neon", "CAN IT FINISH?")
     if game_id == "ball-escape":
         return BallEscape(*arguments)
     return GAME_CLASSES[game_id](*arguments)
@@ -47,12 +65,51 @@ def run_ball_escape(*, seed: int, fps: int, duration: float = 10.0, rings: int =
     return game
 
 
+def run_shape_tunnel(*, seed: int, fps: int, duration: float = 15.0, layers: int = 200):
+    game = GAME_CLASSES["shape-tunnel"](
+        270, 480, fps, duration, layers, seed, "neon", "WILL IT ESCAPE?"
+    )
+    for frame_index in range(round(duration * fps) + 1):
+        game.update(min(duration, frame_index / fps))
+    game.update(duration)
+    return game
+
+
 class GameCatalogTests(unittest.TestCase):
     def test_frontend_catalog_matches_python_engines(self):
         source = (ROOT / "lib" / "game-catalog.ts").read_text(encoding="utf-8")
         catalog_ids = tuple(re.findall(r"\bid:\s*['\"]([a-z-]+)['\"]", source))
         self.assertEqual(catalog_ids, (*ENGINE_IDS, *PREMIUM_IDS))
         self.assertEqual(len(catalog_ids), len(set(catalog_ids)))
+
+
+class SocialLayoutRegressionTests(unittest.TestCase):
+    def test_all_2d_hooks_and_payoffs_use_the_shared_safe_zone_contract(self):
+        # Use the largest 2D hook font as a conservative bounding box.  Its top
+        # remains comfortably below the first 8% of a native vertical frame.
+        largest_hook_height = 1080 * 0.055
+        hook_top = SOCIAL_HOOK_CENTER_Y - largest_hook_height / (2.0 * 1920)
+        self.assertGreaterEqual(hook_top, 0.08)
+        self.assertLessEqual(SOCIAL_RESULT_CENTER_Y, 0.82)
+        self.assertLessEqual(SOCIAL_FOOTER_CENTER_Y, 0.88)
+
+        variant_source = (ROOT / "scripts" / "game_variants.py").read_text(encoding="utf-8")
+        renderer_source = RENDERER_PATH.read_text(encoding="utf-8")
+        # Base/Organic/Laser/Boss share the same hook coordinate, while Ball
+        # imports and uses it from the renderer module.
+        self.assertGreaterEqual(
+            variant_source.count("self.height * SOCIAL_HOOK_CENTER_Y"),
+            4,
+        )
+        self.assertIn("self.height * SOCIAL_HOOK_CENTER_Y", renderer_source)
+        self.assertGreaterEqual(
+            variant_source.count("self.height * SOCIAL_RESULT_CENTER_Y"),
+            3,
+        )
+        self.assertGreaterEqual(
+            variant_source.count("self.height * SOCIAL_FOOTER_CENTER_Y"),
+            3,
+        )
 
 
 class SoftBodyVariantTests(unittest.TestCase):
@@ -83,25 +140,174 @@ class SoftBodyVariantTests(unittest.TestCase):
         for shape in SHAPES:
             total_length = 2.0 * (shape.cylinder_half + shape.radius)
             diameter = 2.0 * shape.radius
-            self.assertGreaterEqual(total_length / diameter, 2.75, shape.key)
+            self.assertGreaterEqual(total_length / diameter, 3.75, shape.key)
+            self.assertLessEqual(total_length / diameter, 4.35, shape.key)
             self.assertLessEqual(total_length, 1.95, shape.key)
 
     def test_native_filter_does_not_amplify_render_artifacts(self):
         value = PREMIUM_RENDERER.build_video_filter(15.0, (0, 25, 50, 75, 100))
         self.assertNotIn("unsharp", value)
+        self.assertNotIn("scale=", value)
+
+    def test_softness_response_reserves_crumpling_for_high_stages(self):
+        responses = [
+            deformation_response(level / 100.0)
+            for level in (0, 25, 50, 75, 100)
+        ]
+        for axis in range(3):
+            values = [response[axis] for response in responses]
+            self.assertEqual(values, sorted(values))
+        self.assertEqual(responses[0], (0.0, 0.0, 0.0))
+        self.assertEqual(responses[1][2], 0.0)
+        self.assertGreater(responses[2][2], 0.0)
+        self.assertGreater(responses[4][2] - responses[3][2], 0.30)
 
     def test_soft_body_solver_clock_is_render_fps_independent(self):
-        expected_horizontal = (0.974 - 0.064) ** 60.0
-        expected_vertical = (0.993 - 0.005) ** 60.0
+        expected_internal = 0.70 - 0.18
+        expected_supported_horizontal = 0.910 ** 60.0
+        expected_supported_vertical = (0.993 - 0.005) ** 60.0
         for fps in (3, 24, 30, 60):
-            substeps, dt, horizontal, vertical = solver_timing(fps, 1.0)
+            substeps, dt, internal, air_drag = solver_timing(fps, 1.0)
+            supported_horizontal, supported_vertical = supported_body_damping(fps, 1.0)
             steps_per_second = fps * substeps
             self.assertAlmostEqual(dt * steps_per_second, 1.0, places=12)
-            self.assertAlmostEqual(horizontal ** steps_per_second, expected_horizontal, places=12)
-            self.assertAlmostEqual(vertical ** steps_per_second, expected_vertical, places=12)
+            self.assertAlmostEqual(internal ** steps_per_second, expected_internal, places=12)
+            self.assertAlmostEqual(
+                air_drag ** steps_per_second,
+                AIR_RETENTION_PER_SECOND,
+                places=12,
+            )
+            self.assertAlmostEqual(
+                supported_horizontal ** steps_per_second,
+                expected_supported_horizontal,
+                places=12,
+            )
+            self.assertAlmostEqual(
+                supported_vertical ** steps_per_second,
+                expected_supported_vertical,
+                places=12,
+            )
+            if fps in (3, 30):
+                self.assertEqual(steps_per_second, PHYSICS_HZ)
+
+    def test_ramp_exit_is_position_and_velocity_continuous(self):
+        variant = variant_for_seed(910104)
+        for stage_index in range(5):
+            phase = stage_motion_for(variant, stage_index).ramp_phase_offset
+            exit_time = natural_ramp_exit_time(variant, 6.0, phase)
+            epsilon = 1e-7
+            before = ramp_motion_state(exit_time - epsilon, variant, 6.0, phase)
+            at_exit = ramp_motion_state(exit_time, variant, 6.0, phase)
+            after = ramp_motion_state(exit_time + epsilon, variant, 6.0, phase)
+            self.assertAlmostEqual(before[0], at_exit[0], places=4)
+            self.assertAlmostEqual(at_exit[0], after[0], places=4)
+            self.assertAlmostEqual(before[1], at_exit[1], places=4)
+            self.assertAlmostEqual(at_exit[1], after[1], places=4)
+            self.assertGreater(abs(at_exit[1]), 1.0)
+
+    def test_stage_motion_is_seeded_and_only_a_micro_variation(self):
+        variant = variant_for_seed(910104)
+        motions = [stage_motion_for(variant, index) for index in range(5)]
+        self.assertEqual(motions, [stage_motion_for(variant, index) for index in range(5)])
+        self.assertEqual(len(set(motions)), 5)
+        for motion in motions:
+            self.assertLessEqual(abs(motion.spawn_x_offset), 0.045)
+            self.assertLessEqual(abs(motion.rotation_offset), 0.030)
+            self.assertLessEqual(abs(motion.linear_velocity_x), 0.028)
+            self.assertLessEqual(abs(motion.ramp_phase_offset), 0.012)
+
+    def test_render_level_release_motion_is_neutral_and_nonzero(self):
+        for seed in range(910100, 910125):
+            variant = variant_for_seed(seed)
+            self.assertGreaterEqual(abs(variant.start_rotation), 0.10)
+            self.assertLessEqual(abs(variant.start_rotation), 0.24)
+            self.assertGreaterEqual(abs(variant.initial_spin), 0.20)
+            self.assertLessEqual(abs(variant.initial_spin), 0.34)
+            self.assertEqual(
+                math.copysign(1.0, variant.start_rotation),
+                math.copysign(1.0, variant.initial_spin),
+            )
+
+    def test_soft_body_has_no_receiver_steering_or_hidden_bowl(self):
+        source = (Path(__file__).with_name("blender-soft-body-slide.py")).read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("receiver.x - points", source)
+        self.assertNotIn("receiver.x - point", source)
+        self.assertNotIn("Concave receiver interior", source)
+        self.assertNotIn("fall_boost", source)
+        self.assertNotIn("max_horizontal_step", source)
+        self.assertIn('"kind": "receiver-entry"', source)
+
+    def test_soft_body_foley_timestamps_use_fixed_physics_samples(self):
+        # Extract only the pure event reducer: importing the complete renderer
+        # outside Blender would require bpy/mathutils. Synthetic 240 Hz samples
+        # prove that render-frame sampling cannot move the exported timestamps.
+        import ast
+
+        source = Path(__file__).with_name("blender-soft-body-slide.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "contact_events"
+        )
+        module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
+        namespace = {"math": math, "SoftBodyVariant": object}
+        exec(compile(module, "<soft-body-contact-events>", "exec"), namespace)
+        reduce_events = namespace["contact_events"]
+
+        class PhysicsTrace(list):
+            pass
+
+        physics_dt = 1.0 / 240.0
+        physics_samples = []
+        for step in range(1, 6 * 240 + 1):
+            physics_samples.append(
+                (
+                    step * physics_dt,
+                    0.82 if step == 168 else 0.0,
+                    0.76 if step == 480 else 0.0,
+                    -0.25,
+                )
+            )
+
+        signatures = []
+        for fps in (3, 30):
+            simulated = PhysicsTrace([None] * (6 * fps + 1))
+            simulated.physics_dt = physics_dt
+            simulated.physics_samples = physics_samples
+            simulated.receiver_entries = ((4.0, 2.2, -0.20),)
+            events = reduce_events(simulated, 100, 1, fps, None)
+            signatures.append(
+                tuple((event["kind"], event["time"]) for event in events)
+            )
+
+        self.assertEqual(signatures[0], signatures[1])
+        self.assertEqual(
+            signatures[0],
+            (
+                ("ramp-contact", 0.7),
+                ("receiver-contact", 2.0),
+                ("receiver-entry", 4.0),
+            ),
+        )
 
 
 class SoftBodyAudioTests(unittest.TestCase):
+    def test_premium_renderer_exposes_a_decisive_soft_body_outcome(self):
+        source = PREMIUM_RENDERER_PATH.read_text(encoding="utf-8")
+        self.assertIn('"completed_at": args.duration', source)
+        self.assertIn('"outcome": "comparison-complete"', source)
+
+    def test_missing_collision_telemetry_never_invents_foley(self):
+        self.assertFalse(hasattr(PREMIUM_RENDERER, "fallback_foley_events"))
+        source = PREMIUM_RENDERER_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("timeline-fallback", source)
+        self.assertIn('event_source = "no-physical-events"', source)
+
     def test_generated_bed_is_seeded_stereo_and_platform_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "first.wav"
@@ -133,10 +339,15 @@ class GameEngineTests(unittest.TestCase):
                     self.assertEqual(frame.size, (270, 480))
                     self.assertEqual(frame.mode, "RGB")
                 expected_total = game.total if hasattr(game, "total") else game.ring_count
-                self.assertGreater(game.active, 0)
+                if game_id in ("ball-escape", "shape-tunnel", "laser-dodge", "boss-battle"):
+                    # Physical runs are allowed to fall short naturally.
+                    self.assertGreaterEqual(game.active, 0)
+                else:
+                    self.assertGreater(game.active, 0)
                 self.assertLessEqual(game.active, expected_total)
-                if game_id != "ball-escape":
+                if game_id not in ("ball-escape", "shape-tunnel", "laser-dodge", "boss-battle"):
                     self.assertEqual(game.active, expected_total)
+                if game_id not in ("ball-escape", "shape-tunnel"):
                     self.assertIsNotNone(game.completed_at)
                 self.assertGreater(len(game.events), 0)
                 self.assertGreater(len(game.music_hits), 0)
@@ -165,47 +376,362 @@ class GameEngineTests(unittest.TestCase):
                 self.assertNotEqual(digests[0], digests[1])
 
 
+class ShapeTunnelRegressionTests(unittest.TestCase):
+    def test_fixed_timestep_is_independent_from_render_fps(self):
+        states = []
+        for fps in (12, 15, 24, 30, 60):
+            game = run_shape_tunnel(seed=8, fps=fps, duration=5.0, layers=48)
+            states.append({
+                "active": game.active,
+                "completed_at": game.completed_at,
+                "position": tuple(game.position),
+                "velocity": tuple(game.velocity),
+                "events": tuple(game.events),
+                "contacts": tuple(game.contact_history),
+                "frame": hashlib.sha256(game.frame(5.0).tobytes()).hexdigest(),
+            })
+        self.assertTrue(all(state == states[0] for state in states[1:]))
+
+    def test_free_flight_contains_only_velocity_and_gravity(self):
+        game = GAME_CLASSES["shape-tunnel"](
+            270, 480, 30, 5.0, 48, 424242, "neon", "WILL IT ESCAPE?"
+        )
+        initial_position = tuple(game.position)
+        initial_velocity = tuple(game.velocity)
+        # Isolate free flight. Shape phase, openings, or future contact points
+        # cannot influence this trajectory because no boundary can be reached.
+        game.boundary_radius = lambda progress, angle, time_sec=0.0: 10_000.0
+        elapsed = 0.5
+        game.update(elapsed)
+        self.assertAlmostEqual(game.position[0], initial_position[0] + initial_velocity[0] * elapsed, places=8)
+        self.assertAlmostEqual(game.velocity[0], initial_velocity[0], places=8)
+        self.assertAlmostEqual(game.velocity[1], initial_velocity[1] + game.gravity * elapsed, places=8)
+        self.assertEqual(game.active, 0)
+        self.assertEqual(game.contact_history, [])
+
+    def test_every_layer_change_is_backed_by_a_geometric_contact(self):
+        for seed in (0, 8, 424242):
+            with self.subTest(seed=seed):
+                game = run_shape_tunnel(seed=seed, fps=30, duration=5.0, layers=48)
+                self.assertGreater(len(game.contact_history), 0)
+                self.assertEqual(sum(contact[6] for contact in game.contact_history), game.active)
+                self.assertFalse(hasattr(game, "hit_times"))
+                self.assertFalse(hasattr(game, "hit_angles"))
+                self.assertFalse(hasattr(game, "contact_point"))
+                for time_sec, x, y, nx, ny, speed, damage, progress in game.contact_history:
+                    angle = math.atan2(y - game.cy, x - game.cx)
+                    radius = math.hypot(x - game.cx, y - game.cy)
+                    boundary = game.boundary_radius(progress, angle, time_sec)
+                    self.assertLess(abs(radius - boundary), game.width * 0.012)
+                    self.assertAlmostEqual(math.hypot(nx, ny), 1.0, places=10)
+                    self.assertGreater(speed, 0.0)
+                    self.assertGreaterEqual(damage, 1)
+
+    def test_catalog_physics_produces_natural_success_and_failure(self):
+        winner = run_shape_tunnel(seed=8, fps=30)
+        failure = run_shape_tunnel(seed=0, fps=30)
+
+        self.assertEqual(winner.active, winner.total)
+        self.assertIsNotNone(winner.completed_at)
+        self.assertGreaterEqual(winner.completed_at, winner.duration * 0.65)
+
+        self.assertGreater(failure.active, failure.total * 0.75)
+        self.assertLess(failure.active, failure.total)
+        self.assertIsNone(failure.completed_at)
+
+    def test_timeout_is_irreversible_and_exposes_an_explicit_payoff(self):
+        game = GAME_CLASSES["shape-tunnel"](
+            270, 480, 30, 15.0, 200, 0, "neon", "WILL IT ESCAPE?"
+        )
+        game.update(game.gameplay_deadline + 0.1)
+
+        self.assertEqual(game.failed_at, game.gameplay_deadline)
+        self.assertIsNone(game.completed_at)
+        self.assertEqual(
+            game.outcome_lines(),
+            ("TIME'S UP!", f"{game.total - game.active} LAYERS LEFT"),
+        )
+        frozen_state = {
+            "active": game.active,
+            "position": tuple(game.position),
+            "velocity": tuple(game.velocity),
+            "contacts": tuple(game.contact_history),
+            "events": tuple(game.events),
+        }
+
+        game.update(game.duration)
+
+        self.assertEqual(game.failed_at, game.gameplay_deadline)
+        self.assertIsNone(game.completed_at)
+        self.assertEqual(game.active, frozen_state["active"])
+        self.assertEqual(tuple(game.position), frozen_state["position"])
+        self.assertEqual(tuple(game.velocity), frozen_state["velocity"])
+        self.assertEqual(tuple(game.contact_history), frozen_state["contacts"])
+        self.assertEqual(tuple(game.events), frozen_state["events"])
+
+
 class LaserDodgeRegressionTests(unittest.TestCase):
-    def run_game(self, seed: int):
-        game = GAME_CLASSES["laser-dodge"](270, 480, 30, 10.0, 150, seed, "neon", "CAN IT DODGE EVERY LASER?")
-        for frame_index in range(301):
-            game.update(frame_index / 30)
+    def make_game(self, seed: int, fps: int = 30):
+        return GAME_CLASSES["laser-dodge"](
+            270, 480, fps, 10.0, 24, seed, "neon", "CAN IT DODGE EVERY LASER?"
+        )
+
+    def run_game(self, seed: int, fps: int = 30):
+        game = self.make_game(seed, fps)
+        for frame_index in range(round(game.duration * fps) + 1):
+            game.update(min(game.duration, frame_index / fps))
+        game.update(game.duration)
         return game
 
-    def test_successful_run_clears_every_real_collision(self):
-        game = self.run_game(424243)
-        self.assertTrue(game.will_survive)
-        self.assertFalse(game.crashed)
-        self.assertEqual(game.active, game.total)
-        for laser, event_time in zip(game.lasers, game.event_times):
-            point = game.position_at(event_time)
-            self.assertGreater(game.collision_distance(laser, point, event_time), game.runner_radius)
+    def test_laser_world_is_identical_for_different_controllers(self):
+        engine = GAME_CLASSES["laser-dodge"]
 
-    def test_failure_is_a_late_decisive_collision(self):
-        game = self.run_game(424245)
-        self.assertFalse(game.will_survive)
-        self.assertTrue(game.crashed)
-        self.assertIsNotNone(game.completed_at)
-        self.assertGreater(game.active, game.total * 0.85)
-        self.assertEqual(game.events[-1][3], "impact")
+        class PassiveRunner(engine):
+            def _choose_acceleration(self, time_sec, position, velocity, previous_acceleration):
+                return 0.0, 0.0
+
+        active = self.make_game(33)
+        passive = PassiveRunner(
+            270, 480, 30, 10.0, 24, 33, "neon", "CAN IT DODGE EVERY LASER?"
+        )
+        self.assertEqual(active.event_times, passive.event_times)
+        self.assertEqual(active.lasers, passive.lasers)
+        self.assertNotEqual(active.trajectory, passive.trajectory)
+        self.assertFalse(hasattr(active, "waypoints"))
+        self.assertFalse(hasattr(active, "failure_index"))
+        self.assertEqual(active.total, active.event_count)
+        self.assertEqual(active.total, 24)
+
+    def test_fixed_physics_is_independent_from_render_fps(self):
+        states = []
+        for fps in (8, 12, 30, 60):
+            game = self.make_game(33, fps)
+            states.append({
+                "lasers": game.lasers,
+                "trajectory": game.trajectory,
+                "velocities": game.velocity_history,
+                "accelerations": game.acceleration_history,
+                "collision_time": game.simulated_collision_time,
+                "collision_index": game.simulated_collision_index,
+            })
+        self.assertTrue(all(state == states[0] for state in states[1:]))
+
+    def test_runner_respects_position_velocity_and_acceleration_limits(self):
+        game = self.make_game(0)
+        x_low = game.arena[0] + game.runner_radius
+        x_high = game.arena[2] - game.runner_radius
+        y_low = game.arena[1] + game.runner_radius
+        y_high = game.arena[3] - game.runner_radius
+        for position, velocity, acceleration in zip(
+            game.trajectory, game.velocity_history, game.acceleration_history
+        ):
+            self.assertGreaterEqual(position[0], x_low - 1e-9)
+            self.assertLessEqual(position[0], x_high + 1e-9)
+            self.assertGreaterEqual(position[1], y_low - 1e-9)
+            self.assertLessEqual(position[1], y_high + 1e-9)
+            self.assertLessEqual(math.hypot(*velocity), game.max_speed + 1e-9)
+            self.assertLessEqual(math.hypot(*acceleration), game.max_acceleration + 1e-9)
+        self.assertLessEqual(game.reaction_horizon, 0.30)
+        measured_ratio = max(
+            1.0,
+            max(math.hypot(*velocity) for velocity in game.velocity_history)
+            / (game.max_speed * 0.25),
+        )
+        game.update(game.duration)
+        self.assertAlmostEqual(game.max_speed_ratio, measured_ratio, places=9)
+
+    def test_real_geometry_produces_natural_success_and_failure(self):
+        winner = self.run_game(0)
+        failure = self.run_game(58)
+
+        self.assertTrue(winner.will_survive)
+        self.assertFalse(winner.crashed)
+        self.assertEqual(winner.active, winner.total)
+        self.assertTrue(all(clearance > 0.0 for clearance in winner.laser_clearances))
+
+        self.assertFalse(failure.will_survive)
+        self.assertTrue(failure.crashed)
+        self.assertIsNotNone(failure.completed_at)
+        self.assertGreater(failure.active, failure.total * 0.85)
+        self.assertEqual(failure.events[-1][3], "impact")
+        collision_index = failure.simulated_collision_index
+        collision_time = failure.simulated_collision_time
+        self.assertIsNotNone(collision_index)
+        self.assertIsNotNone(collision_time)
+        assert collision_index is not None and collision_time is not None
+        laser = failure.lasers[collision_index]
+        crash = failure.simulated_crash_position
+        assert crash is not None
+        self.assertTrue(failure.laser_is_active(laser, collision_time))
+        self.assertLessEqual(
+            failure.collision_distance(laser, crash, collision_time),
+            failure.runner_radius + float(laser["half_width"]) + 1e-9,
+        )
+        self.assertLessEqual(failure.laser_clearances[collision_index], 0.0)
 
 
 class BossBattleRegressionTests(unittest.TestCase):
-    def run_game(self, seed: int):
-        game = GAME_CLASSES["boss-battle"](270, 480, 30, 10.0, 300, seed, "sunset", "WHO WINS THIS BATTLE?")
-        for frame_index in range(301):
-            game.update(frame_index / 30)
+    def make_game(self, seed: int, fps: int = 30):
+        return GAME_CLASSES["boss-battle"](
+            270, 480, fps, 10.0, 300, seed, "sunset", "WHO WINS THIS BATTLE?"
+        )
+
+    def run_game(self, seed: int, fps: int = 30):
+        game = self.make_game(seed, fps)
+        for frame_index in range(round(game.duration * fps) + 1):
+            game.update(min(game.duration, frame_index / fps))
+        game.update(game.duration)
         return game
 
-    def test_seeded_outcomes_are_decisive(self):
-        player_win = self.run_game(424243)
-        boss_win = self.run_game(424244)
-        self.assertEqual(player_win.boss_hp, 0)
-        self.assertGreater(player_win.player_hp, 0)
-        self.assertEqual(boss_win.player_hp, 0)
-        self.assertGreater(boss_win.boss_hp, 0)
-        self.assertIsNotNone(player_win.completed_at)
-        self.assertIsNotNone(boss_win.completed_at)
+    @staticmethod
+    def snapshot(game):
+        bodies = (game.player_body, game.boss_body, game.player_mace, game.boss_mace)
+        return {
+            "positions": tuple(tuple(body["position"]) for body in bodies),
+            "velocities": tuple(tuple(body["velocity"]) for body in bodies),
+            "hp": (game.player_hp, game.boss_hp),
+            "hits": tuple(
+                (
+                    hit["time"],
+                    hit["player"],
+                    hit["damage"],
+                    hit["energy"],
+                    hit["position"],
+                )
+                for hit in game.hit_history
+            ),
+            "events": tuple(game.events),
+            "winner": game.winner,
+            "completed_at": game.completed_at,
+        }
+
+    def test_fixed_timestep_is_independent_from_render_fps(self):
+        states = [self.snapshot(self.run_game(10, fps)) for fps in (8, 12, 24, 30, 60)]
+        self.assertTrue(all(state == states[0] for state in states[1:]))
+
+    def test_damage_and_winner_come_only_from_physical_impacts(self):
+        for seed in (0, 10, 25):
+            with self.subTest(seed=seed):
+                game = self.run_game(seed)
+                self.assertGreater(len(game.hit_history), 0)
+                player_damage = sum(
+                    float(hit["damage"]) for hit in game.hit_history if not bool(hit["player"])
+                )
+                boss_damage = sum(
+                    float(hit["damage"]) for hit in game.hit_history if bool(hit["player"])
+                )
+                self.assertAlmostEqual(player_damage, game.player_max - game.player_hp, places=9)
+                self.assertAlmostEqual(boss_damage, game.boss_max - game.boss_hp, places=9)
+                self.assertEqual(game.active, round(game.boss_max - game.boss_hp))
+                for hit in game.hit_history:
+                    self.assertGreater(float(hit["energy"]), 0.0)
+                    self.assertGreater(float(hit["damage"]), 0.0)
+                expected = (
+                    "draw"
+                    if abs(game.player_hp / game.player_max - game.boss_hp / game.boss_max) <= 1e-9
+                    else (
+                        "player"
+                        if game.player_hp / game.player_max > game.boss_hp / game.boss_max
+                        else "boss"
+                    )
+                )
+                self.assertEqual(game.winner, expected)
+                self.assertFalse(hasattr(game, "player_wins"))
+                self.assertFalse(hasattr(game, "attacks"))
+                self.assertFalse(hasattr(game, "attack_times"))
+
+    def test_seeded_physics_produces_both_natural_outcomes(self):
+        boss_win = self.run_game(0)
+        player_win = self.run_game(10)
+        self.assertEqual(boss_win.winner, "boss")
+        self.assertEqual(player_win.winner, "player")
+        self.assertGreater(boss_win.player_hp, 0.0)
+        self.assertGreater(player_win.boss_hp, 0.0)
+        self.assertEqual(boss_win.completed_at, boss_win.battle_end)
+        self.assertEqual(player_win.completed_at, player_win.battle_end)
+
+    def test_verdict_is_one_dedicated_non_collision_event_at_battle_end(self):
+        game = self.run_game(10)
+        verdicts = [event for event in game.events if event[3] == "victory"]
+        self.assertEqual(len(verdicts), 1)
+        self.assertEqual(verdicts[0][0], game.battle_end)
+        self.assertEqual(game.music_outcome_at, game.battle_end)
+        self.assertEqual(len(game.events), len(game.music_hits) + 1)
+        self.assertTrue(all(hit["kind"] != "victory" for hit in game.hit_history))
+
+    def test_boss_audio_graph_has_an_outcome_tail_and_quiet_ambient_floor(self):
+        game = self.run_game(10)
+        audio_graph = RENDERER.build_hit_reveal_filter(
+            game.music_hits,
+            game.duration,
+            0.62,
+            game.seed,
+            outcome_time=game.music_outcome_at,
+            ambient_floor=0.10,
+        )
+        self.assertIn("[outcome_tail]", audio_graph)
+        self.assertIn("duration=1.000", audio_graph)
+        self.assertIn("volume=0.100[ambient]", audio_graph)
+        self.assertNotIn("victory", tuple(hit["kind"] for hit in game.hit_history))
+
+    def test_boss_hp_changes_real_durability_not_just_displayed_numbers(self):
+        games = []
+        for boss_hp in (100, 300, 500):
+            game = GAME_CLASSES["boss-battle"](
+                270, 480, 30, 10.0, boss_hp, 10, "sunset", "WHO WINS THIS BATTLE?"
+            )
+            game.update(game.duration)
+            games.append(game)
+
+        easy, normal, hard = games
+        self.assertEqual((easy.boss_max, normal.boss_max, hard.boss_max), (100.0, 300.0, 500.0))
+        self.assertLessEqual(easy.boss_hp, normal.boss_hp)
+        self.assertLess(normal.boss_hp, hard.boss_hp)
+        self.assertNotAlmostEqual(
+            easy.boss_hp / easy.boss_max,
+            hard.boss_hp / hard.boss_max,
+            places=6,
+        )
+        # The world and measured collision energies are independent of the HP
+        # choice until an easier boss is actually defeated.
+        normal_energies = [
+            float(hit["energy"]) for hit in normal.hit_history if bool(hit["player"])
+        ]
+        hard_energies = [
+            float(hit["energy"]) for hit in hard.hit_history if bool(hit["player"])
+        ]
+        self.assertEqual(normal_energies, hard_energies)
+        self.assertEqual(normal.winner, "player")
+        self.assertEqual(hard.winner, "boss")
+
+    def test_chain_constraints_and_arena_collisions_stay_geometric(self):
+        game = self.run_game(10)
+        left, top, right, bottom = game.arena_bounds()
+        for owner, mace in (
+            (game.player_body, game.player_mace),
+            (game.boss_body, game.boss_mace),
+        ):
+            distance = math.hypot(
+                mace["position"][0] - owner["position"][0],
+                mace["position"][1] - owner["position"][1],
+            )
+            self.assertAlmostEqual(distance, mace["chain_length"], places=9)
+        for body in (game.player_body, game.boss_body, game.player_mace, game.boss_mace):
+            radius = body["radius"]
+            self.assertGreaterEqual(body["position"][0], left + radius - 1e-6)
+            self.assertLessEqual(body["position"][0], right - radius + 1e-6)
+            self.assertGreaterEqual(body["position"][1], top + radius - 1e-6)
+            self.assertLessEqual(body["position"][1], bottom - radius + 1e-6)
+
+    def test_render_positions_are_the_simulated_positions_without_lerp(self):
+        game = self.make_game(10)
+        game.update(2.0)
+        expected = (list(game.player_body["position"]), list(game.boss_body["position"]))
+        self.assertEqual(game.fighter_positions(-999.0, None, 999.0), expected)
+        self.assertEqual(
+            game.fighter_positions(999.0, {"player": True, "time": 0.0}, -999.0),
+            expected,
+        )
 
 
 class BallEscapeRegressionTests(unittest.TestCase):
@@ -224,48 +750,135 @@ class BallEscapeRegressionTests(unittest.TestCase):
             })
         self.assertTrue(all(state == states[0] for state in states[1:]))
 
-    def test_winning_seeds_only_escape_in_the_late_window(self):
-        duration = 10.0
-        for seed in (101, 102, 103):
-            with self.subTest(seed=seed):
-                game = run_ball_escape(seed=seed, fps=30, duration=duration)
-                self.assertTrue(game.will_escape)
-                self.assertIsNotNone(game.completed_at)
-                assert game.completed_at is not None
-                self.assertGreaterEqual(game.completed_at, duration * 0.85)
-                self.assertGreaterEqual(game.completed_at, game.final_unlock)
-                self.assertLessEqual(game.completed_at, duration)
+    def test_gap_geometry_never_reads_ball_state(self):
+        game = BallEscape(270, 480, 30, 10.0, 8, 27, "neon", "WILL IT ESCAPE?")
+        times = (0.0, 0.63, 4.25, 9.8)
+        expected_angles = tuple(
+            tuple(game.ring_gap(index, time_sec) for index in range(game.ring_count))
+            for time_sec in times
+        )
+        expected_widths = tuple(game.ring_gap_width(index) for index in range(game.ring_count))
 
-    def test_failure_seed_stays_blocked_at_the_final_ring(self):
-        rings = 8
-        game = run_ball_escape(seed=100, fps=30, rings=rings)
-        self.assertFalse(game.will_escape)
-        self.assertEqual(game.active, rings - 1)
-        self.assertIsNone(game.completed_at)
-        self.assertIsNotNone(game.failed_at)
-        self.assertEqual(sum(event[3] == "clear" for event in game.events), rings - 1)
+        game.position = [game.width * 4.0, -game.height * 3.0]
+        game.velocity = [-game.width * 8.0, game.height * 6.0]
+        game.active = game.ring_count - 1
+        game.failed_at = 1.0
 
-    def test_catalog_default_always_reaches_a_decisive_final_gate(self):
-        for seed in range(1000, 1020):
+        self.assertEqual(
+            tuple(
+                tuple(game.ring_gap(index, time_sec) for index in range(game.ring_count))
+                for time_sec in times
+            ),
+            expected_angles,
+        )
+        self.assertEqual(
+            tuple(game.ring_gap_width(index) for index in range(game.ring_count)),
+            expected_widths,
+        )
+
+    def test_authored_layout_has_no_spiral_corridor_or_instant_clear_geometry(self):
+        for rings in (10, 14, 20):
+            for seed in range(12):
+                with self.subTest(rings=rings, seed=seed):
+                    game = BallEscape(360, 640, 30, 15.0, rings, seed, "neon", "WILL IT ESCAPE?")
+                    self.assertLessEqual(game.bands_per_ring, 3)
+                    self.assertLessEqual(game.band_span, game.radial_step * 0.34 + 1e-9)
+
+                    # Once a whole sphere has left one visible ribbon, its
+                    # centre travels more than a full diameter before it can
+                    # touch the next visible ribbon.
+                    centre_free_flight = (
+                        game.radial_step - game.band_span - 2.0 * game.ball_radius
+                    )
+                    self.assertGreater(centre_free_flight, 2.0 * game.ball_radius)
+
+                    # Adjacent physical openings never overlap at any point in
+                    # the clip. There is therefore no static or rotating radial
+                    # corridor for the sphere to follow.
+                    for sample in range(121):
+                        time_sec = game.duration * sample / 120.0
+                        for index in range(1, game.ring_count):
+                            separation = abs(RENDERER.angle_delta(
+                                game.ring_gap(index, time_sec),
+                                game.ring_gap(index - 1, time_sec),
+                            ))
+                            opening_sum = (
+                                game.gap_widths[index] + game.gap_widths[index - 1]
+                            ) * 0.5
+                            self.assertGreaterEqual(separation, opening_sum + 10.0)
+
+    def test_velocity_is_independent_from_gap_layout_before_collision(self):
+        first = BallEscape(270, 480, 30, 10.0, 8, 27, "neon", "WILL IT ESCAPE?")
+        second = BallEscape(270, 480, 30, 10.0, 8, 27, "neon", "WILL IT ESCAPE?")
+        for game in (first, second):
+            # Isolate free flight: any divergence can only be hidden steering.
+            game.radii = [10_000.0 + index * 100.0 for index in range(game.ring_count)]
+        first.base_gaps = [0.0] * first.ring_count
+        second.base_gaps = [180.0] * second.ring_count
+
+        first.update(0.75)
+        second.update(0.75)
+
+        self.assertEqual(first.position, second.position)
+        self.assertEqual(first.velocity, second.velocity)
+
+    def test_real_collisions_produce_both_success_and_failure(self):
+        rings = 14
+        duration = 15.0
+        winner = BallEscape(360, 640, 30, duration, rings, 9, "neon", "WILL IT ESCAPE?")
+        failure = BallEscape(360, 640, 30, duration, rings, 0, "neon", "WILL IT ESCAPE?")
+        winner.update(duration)
+        failure.update(duration)
+
+        self.assertEqual(winner.active, rings)
+        self.assertIsNotNone(winner.completed_at)
+        self.assertIsNone(winner.failed_at)
+        self.assertEqual(sum(event[3] == "clear" for event in winner.events), rings)
+        clear_times = [event[0] for event in winner.events if event[3] == "clear"]
+        clear_intervals = [
+            clear_times[index] - clear_times[index - 1]
+            for index in range(1, len(clear_times))
+        ]
+        self.assertTrue(all(interval > 0.20 for interval in clear_intervals))
+        previous_clear = -1.0
+        for clear_time in clear_times:
+            self.assertTrue(any(
+                event_type == "bounce" and previous_clear < event_time < clear_time
+                for event_time, _frequency, _volume, event_type in winner.events
+            ))
+            previous_clear = clear_time
+
+        self.assertLess(failure.active, rings)
+        self.assertGreater(failure.active, 0)
+        self.assertIsNone(failure.completed_at)
+        self.assertIsNotNone(failure.failed_at)
+        self.assertEqual(sum(event[3] == "clear" for event in failure.events), failure.active)
+
+    def test_catalog_sample_contains_natural_outcomes(self):
+        completed = []
+        incomplete = []
+        for seed in range(0, 70):
             with self.subTest(seed=seed):
                 game = BallEscape(360, 640, 15, 15.0, 14, seed, "neon", "WILL IT ESCAPE?")
                 for frame_index in range(15 * 15 + 1):
                     game.update(min(15.0, frame_index / 15))
                 self.assertEqual(game.frame(15.0).size, (360, 640))
-                if seed % 4 == 0:
-                    self.assertEqual(game.active, 13)
-                    self.assertIsNone(game.completed_at)
+                self.assertEqual(sum(event[3] == "clear" for event in game.events), game.active)
+                if game.completed_at is None:
+                    incomplete.append(seed)
+                    self.assertLess(game.active, game.ring_count)
                     self.assertIsNotNone(game.failed_at)
                 else:
-                    self.assertEqual(game.active, 14)
-                    self.assertIsNotNone(game.completed_at)
-                    assert game.completed_at is not None
-                    self.assertGreaterEqual(game.completed_at, game.final_unlock)
+                    completed.append(seed)
+                    self.assertEqual(game.active, game.ring_count)
+                    self.assertIsNone(game.failed_at)
+        self.assertTrue(completed)
+        self.assertTrue(incomplete)
 
     def test_each_clear_advances_exactly_one_ring(self):
-        duration = 10.0
-        rings = 8
-        game = BallEscape(270, 480, 30, duration, rings, 101, "neon", "WILL IT ESCAPE?")
+        duration = 15.0
+        rings = 14
+        game = BallEscape(360, 640, 30, duration, rings, 9, "neon", "WILL IT ESCAPE?")
         fixed_dt = 1.0 / 120.0
         for step in range(round(duration / fixed_dt)):
             active_before = game.active
@@ -277,6 +890,20 @@ class BallEscapeRegressionTests(unittest.TestCase):
             self.assertEqual(active_delta, clear_delta)
         self.assertEqual(game.active, rings)
         self.assertEqual(sum(event[3] == "clear" for event in game.events), rings)
+
+    def test_timeout_never_unlocks_or_overrides_the_last_ring(self):
+        game = BallEscape(360, 640, 30, 15.0, 14, 0, "neon", "WILL IT ESCAPE?")
+        game.update(14.4)
+        active_at_timeout = game.active
+        self.assertIsNotNone(game.failed_at)
+        self.assertIsNone(game.completed_at)
+
+        game.update(15.0)
+
+        self.assertEqual(game.active, active_at_timeout)
+        self.assertIsNone(game.completed_at)
+        for legacy_control in ("will_escape", "final_unlock", "ring_deadline", "last_clear"):
+            self.assertFalse(hasattr(game, legacy_control))
 
 
 if __name__ == "__main__":

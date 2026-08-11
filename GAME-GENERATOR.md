@@ -11,15 +11,23 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 - **Boss Battle** — arène physique, arme articulée, Warden blindé, impacts et vainqueur déterministes.
 - **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
 
-Chaque jeu possède son propre réglage de difficulté dans l'interface : anneaux, couches, points de
-vie ou notes. Les thèmes, graines, sons, musiques et durées restent communs afin de créer beaucoup
-de variantes sans dupliquer le code de publication.
+Les trajectoires, collisions et issues viennent des solveurs physiques. Aucun trou ne suit une balle,
+aucune vitesse n'est corrigée vers une ouverture et aucun vainqueur n'est imposé après coup. Une graine
+peut donc produire une réussite, un impact ou un échec naturel, désormais indiqué explicitement dans le rendu.
+
+Les quatre moteurs 2D possèdent leur propre réglage dans l'interface : anneaux, couches, lasers ou
+points de vie. Soft Body sélectionne automatiquement cinq niveaux et une variante 3D complète. Les
+thèmes, graines, sons, musiques et durées restent communs lorsque le moteur les prend en charge afin
+de créer beaucoup de variantes sans dupliquer le code de publication.
 
 ## Utilisation
 
-1. Ouvrir l'onglet **Auto Game** et choisir un format.
-2. Régler la durée, la difficulté, la palette et l'accroche en anglais.
-3. Garder **Auto Viral Mix** et **Hit Reveal** pour synchroniser les impacts avec la musique.
+1. Ouvrir l'onglet **Jeux** et choisir un format.
+2. Régler la durée, la difficulté, la palette et l'accroche en anglais. Soft Body verrouille la durée
+   à 30 secondes et compare automatiquement cinq niveaux de souplesse.
+3. Garder la découverte musicale automatique. **Révélation à l'impact** est sélectionnée par défaut
+   pour Ball Escape, Laser Dodge et Boss Battle ; Organic Escape conserve une bande-son continue et
+   Soft Body un mix Foley/ambiance synchronisé aux contacts physiques.
 4. Générer une vidéo ou un lot de trois variantes, regarder chaque résultat, puis choisir un ou plusieurs comptes TikTok et un profil YouTube.
 5. Publier d'abord YouTube en privé et vérifier le résultat avant d'augmenter la cadence.
 
@@ -86,8 +94,8 @@ Le délai serveur par défaut autorise jusqu’à sept jours pour un rendu Soft 
 configurable avec `PREMIUM_RENDER_TIMEOUT_MS` pour les machines plus rapides ou une file externe.
 
 Sur un VPS CPU, ajuster au besoin `PREMIUM_RENDER_WIDTH`, `PREMIUM_RENDER_HEIGHT`,
-`PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES`. Les valeurs par défaut privilégient un rendu final
-1080×1920 fluide tout en calculant les images Blender à une résolution intermédiaire plus économique.
+`PREMIUM_RENDER_FPS` et `PREMIUM_RENDER_SAMPLES` pour les aperçus de développement. Sans surcharge,
+le rendu final reste calculé nativement en 1080×1920 ; il n'est pas agrandi depuis une petite source.
 
 ## Tests
 

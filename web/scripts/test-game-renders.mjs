@@ -31,17 +31,30 @@ const gameIds = allGameIds.filter((gameId) => gameId !== 'soft-body-slide');
 assert.deepEqual(gameIds, ['ball-escape', 'shape-tunnel', 'laser-dodge', 'boss-battle']);
 const outputDirectory = mkdtempSync(join(tmpdir(), 'clipmaker-render-smoke-'));
 const results = [];
+const validOutcomes = {
+  'ball-escape': new Set(['escaped', 'failed']),
+  'shape-tunnel': new Set(['escaped', 'incomplete']),
+  'laser-dodge': new Set(['survived', 'collision']),
+  'boss-battle': new Set(['player', 'boss', 'draw']),
+};
+const defaultDifficulties = {
+  'ball-escape': 14,
+  'shape-tunnel': 200,
+  'laser-dodge': 24,
+  'boss-battle': 300,
+};
 
 try {
   for (const [index, gameId] of gameIds.entries()) {
     const output = join(outputDirectory, `${gameId}.mp4`);
+    const difficulty = defaultDifficulties[gameId];
     process.stdout.write(`[${index + 1}/${gameIds.length}] Rendering ${gameId}...\n`);
     const stdout = run(python, [
       join(scriptsDirectory, 'render-ball-escape.py'),
       '--output', output,
       '--game', gameId,
       '--duration', '5',
-      '--difficulty', '48',
+      '--difficulty', String(difficulty),
       '--seed', String(700000 + index),
       '--theme', ['neon', 'sunset', 'ice'][index % 3],
       '--sound-pack', 'auto',
@@ -59,6 +72,34 @@ try {
     const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
     assert.equal(metadata.ok, true);
     assert.equal(metadata.game, gameId);
+    assert.equal(metadata.difficulty, difficulty);
+    assert.equal(metadata.units_total, difficulty);
+    assert.ok(Object.hasOwn(metadata, 'completed_at'));
+    assert.ok(Object.hasOwn(metadata, 'outcome'));
+    assert.ok(validOutcomes[gameId].has(metadata.outcome));
+    assert.ok(
+      metadata.completed_at === null
+        || (Number.isFinite(metadata.completed_at)
+          && metadata.completed_at >= 0
+          && metadata.completed_at <= metadata.duration),
+    );
+    if (metadata.outcome === 'escaped') {
+      assert.notEqual(metadata.completed_at, null);
+      assert.equal(metadata.units_completed, metadata.units_total);
+    }
+    if (metadata.outcome === 'failed' || metadata.outcome === 'incomplete') {
+      assert.equal(metadata.completed_at, null);
+      assert.ok(metadata.units_completed < metadata.units_total);
+    }
+    if (metadata.outcome === 'survived') {
+      assert.notEqual(metadata.completed_at, null);
+      assert.equal(metadata.units_completed, metadata.units_total);
+    }
+    if (metadata.outcome === 'collision') {
+      assert.notEqual(metadata.completed_at, null);
+      assert.ok(metadata.units_completed < metadata.units_total);
+    }
+    if (gameId === 'boss-battle') assert.notEqual(metadata.completed_at, null);
     assert.ok(metadata.events > 0);
     assert.ok(metadata.music_hits > 0);
     assert.equal(video.codec_name, 'h264');
@@ -67,7 +108,14 @@ try {
     assert.equal(video.pix_fmt, 'yuv420p');
     assert.equal(audio.codec_name, 'aac');
     assert.equal(audio.sample_rate, '48000');
-    results.push({ game: gameId, duration: Number(probe.format.duration), bytes: Number(probe.format.size), hits: metadata.music_hits });
+    results.push({
+      game: gameId,
+      duration: Number(probe.format.duration),
+      bytes: Number(probe.format.size),
+      hits: metadata.music_hits,
+      outcome: metadata.outcome,
+      completedAt: metadata.completed_at,
+    });
   }
   process.stdout.write(`${JSON.stringify({ ok: true, games: results }, null, 2)}\n`);
 } finally {

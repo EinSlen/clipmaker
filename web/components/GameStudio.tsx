@@ -31,6 +31,16 @@ type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
 type RenderedSoundPack = SoundPack | "glass" | "premium-foley";
 type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed";
+type GameOutcome =
+  | "escaped"
+  | "failed"
+  | "incomplete"
+  | "survived"
+  | "collision"
+  | "player"
+  | "boss"
+  | "draw"
+  | "comparison-complete";
 
 type GameResult = {
   filename: string;
@@ -48,6 +58,8 @@ type GameResult = {
   soundPack: RenderedSoundPack;
   musicMode: RenderedMusicMode;
   musicHits: number;
+  completedAt: number | null;
+  outcome: GameOutcome | null;
   musicUsed: string | null;
   musicTitle: string | null;
   musicSource: "jamendo" | "library" | "original";
@@ -65,6 +77,30 @@ type GameResult = {
   youtubeTitle: string;
   caption: string;
   tags: string[];
+};
+
+const gameOutcomeLabels: Record<GameOutcome, string> = {
+  escaped: "Sortie réussie naturellement",
+  failed: "Échec : aucune sortie trouvée",
+  incomplete: "Temps écoulé avant la sortie",
+  survived: "Parcours laser réussi",
+  collision: "Collision avec un laser",
+  player: "Victoire du joueur",
+  boss: "Victoire du boss",
+  draw: "Égalité",
+  "comparison-complete": "Comparaison des cinq niveaux terminée",
+};
+
+const gameOutcomeTones: Record<GameOutcome, string> = {
+  escaped: "text-emerald-200/90",
+  failed: "text-rose-200/90",
+  incomplete: "text-amber-200/90",
+  survived: "text-emerald-200/90",
+  collision: "text-rose-200/90",
+  player: "text-emerald-200/90",
+  boss: "text-violet-200/90",
+  draw: "text-amber-200/90",
+  "comparison-complete": "text-emerald-200/90",
 };
 
 const softBodyShapeLabels: Record<string, string> = {
@@ -130,7 +166,7 @@ export function GameStudio() {
   const [soundPack, setSoundPack] = React.useState<SoundPack>("auto");
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
   const [musicFile, setMusicFile] = React.useState("__discover__");
-  const [musicMode, setMusicMode] = React.useState<MusicMode>("continuous");
+  const [musicMode, setMusicMode] = React.useState<MusicMode>("hit-reveal");
   const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -218,7 +254,11 @@ export function GameStudio() {
     }
     setGame(nextGame);
     setDifficulty(definition.metricDefault);
-    setMusicMode("continuous");
+    setMusicMode(
+      nextGame === "shape-tunnel" || nextGame === "soft-body-slide"
+        ? "continuous"
+        : "hit-reveal"
+    );
     if (nextGame === "soft-body-slide") {
       setDuration(30);
       setMusicFile("");
@@ -1004,6 +1044,16 @@ export function GameStudio() {
                 {localizedSoftBodyVariant(result) && (
                   <p className="mt-1 text-[11px] text-amber-200/85">
                     Variante : {localizedSoftBodyVariant(result)}
+                  </p>
+                )}
+                {result.outcome && (
+                  <p
+                    className={`mt-2 text-[11px] font-semibold ${gameOutcomeTones[result.outcome]}`}
+                  >
+                    Issue : {gameOutcomeLabels[result.outcome]}
+                    {result.completedAt !== null
+                      ? ` à ${result.completedAt.toFixed(2)} s`
+                      : ""}
                   </p>
                 )}
                 <p className="mt-1 text-[11px] text-cyan-200/80">
