@@ -308,6 +308,20 @@ class SoftBodyAudioTests(unittest.TestCase):
         self.assertNotIn("timeline-fallback", source)
         self.assertIn('event_source = "no-physical-events"', source)
 
+    def test_stage_boundaries_are_replaced_with_clean_visible_frames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for frame in range(1, 181):
+                (frames / f"frame_{frame:04d}.png").write_bytes(str(frame).encode("ascii"))
+            repaired = PREMIUM_RENDERER.repair_stage_cut_frames(frames, 180, 5)
+            self.assertEqual(repaired, (37, 73, 109, 145))
+            for boundary in repaired:
+                self.assertEqual(
+                    (frames / f"frame_{boundary:04d}.png").read_bytes(),
+                    str(boundary + 1).encode("ascii"),
+                )
+            self.assertEqual((frames / "frame_0036.png").read_bytes(), b"36")
+
     def test_generated_bed_is_seeded_stereo_and_platform_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "first.wav"

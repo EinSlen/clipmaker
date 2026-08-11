@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -20,6 +21,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
+
+
+def repair_stage_cut_frames(frames: Path, frame_count: int, stage_count: int) -> tuple[int, ...]:
+    """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
+    repaired: list[int] = []
+    for stage_index in range(1, stage_count):
+        boundary = round(frame_count * stage_index / stage_count) + 1
+        source = frames / f"frame_{boundary + 1:04d}.png"
+        target = frames / f"frame_{boundary:04d}.png"
+        if source.is_file() and target.is_file():
+            shutil.copyfile(source, target)
+            repaired.append(boundary)
+    return tuple(repaired)
 
 
 def synth_premium_foley(
@@ -321,6 +335,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError(
                 f"Blender did not produce the expected final frame: {expected_last_frame.name}"
             )
+        repair_stage_cut_frames(frames, frame_count, len(stages))
         if motion_events.is_file():
             payload = json.loads(motion_events.read_text(encoding="utf-8"))
             exported_events = payload.get("events", [])
