@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from game_variants import GAME_CLASSES, create_game
+from game_variants import GAME_CLASSES, SOCIAL_HOOK_CENTER_Y, create_game
 
 
 THEMES = {
@@ -163,6 +163,22 @@ def synth_audio(duration: float, events: list[tuple[float, float, float, str]], 
         event_frequency = frequency
         event_strength = strength
         event_length = 0.18
+        if event_kind == "victory":
+            # A verdict is not a collision.  Give it a short ascending sting
+            # that remains recognisable with the automatic impact sound pack.
+            for offset, ratio, level, length in (
+                (0.0, 1.0, 1.0, 0.62),
+                (0.085, 1.25, 0.70, 0.56),
+                (0.170, 1.50, 0.50, 0.50),
+            ):
+                add_tone(
+                    start + offset,
+                    event_frequency * ratio,
+                    min(0.72, event_strength * level),
+                    length,
+                    "arcade",
+                )
+            continue
         if sound_pack == "meme":
             if event_kind == "bounce" and (event_index + seed) % 5 in (0, 3):
                 event_sound = "meow"
@@ -344,7 +360,14 @@ def synth_peaceful_music(output: Path, seed: int, duration: float = 48.0) -> Non
         wav.writeframes(pcm.tobytes())
 
 
-def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: float, seed: int) -> str:
+def build_hit_reveal_filter(
+    hit_times: list[float],
+    duration: float,
+    volume: float,
+    seed: int,
+    outcome_time: float | None = None,
+    ambient_floor: float = 0.0,
+) -> str:
     """Build a sequential sampler: every collision unlocks the next music slice."""
     selected: list[float] = []
     for hit_time in sorted([0.0, *hit_times]):
@@ -355,10 +378,17 @@ def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: flo
     if not selected:
         return f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.80[fx];[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
 
-    split_outputs = "".join(f"[source{index}]" for index in range(len(selected)))
+    bounded_outcome = (
+        clamp(outcome_time, 0.0, max(0.0, duration - 0.04))
+        if outcome_time is not None
+        else None
+    )
+    has_ambient = ambient_floor > 0.0
+    source_count = len(selected) + int(bounded_outcome is not None) + int(has_ambient)
+    split_outputs = "".join(f"[source{index}]" for index in range(source_count))
     filters = [
         "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.72[fx]",
-        f"[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={len(selected)}{split_outputs}",
+        f"[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={source_count}{split_outputs}",
     ]
     labels: list[str] = []
     source_cursor = (seed % 900) / 100.0
@@ -377,6 +407,25 @@ def build_hit_reveal_filter(hit_times: list[float], duration: float, volume: flo
         )
         labels.append(f"[{label}]")
         source_cursor += fragment
+
+    source_index = len(selected)
+    if bounded_outcome is not None:
+        outcome_duration = max(0.12, duration - bounded_outcome)
+        outcome_delay = max(0, round(bounded_outcome * 1000))
+        filters.append(
+            f"[source{source_index}]atrim=start={source_cursor:.3f}:duration={outcome_duration:.3f},"
+            f"asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.018,"
+            f"adelay={outcome_delay}:all=1[outcome_tail]"
+        )
+        labels.append("[outcome_tail]")
+        source_cursor += outcome_duration
+        source_index += 1
+    if has_ambient:
+        filters.append(
+            f"[source{source_index}]atrim=start=0:duration={duration:.3f},"
+            f"asetpts=PTS-STARTPTS,volume={clamp(ambient_floor, 0.0, 0.25):.3f}[ambient]"
+        )
+        labels.append("[ambient]")
 
     filters.append(
         f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
@@ -400,36 +449,45 @@ class BallEscape:
         self.rng = random.Random(seed)
         self.cx = width / 2
         self.cy = height * 0.505
-        self.ball_radius = max(4, round(width * 0.0105))
-
         # The 5.7M-view reference fills the vertical canvas with a dense rainbow
-        # vortex. Logical gates stay untouched for API/tests, while each gate is
-        # rendered as a small ribbon of aligned physical-looking bands. This
-        # gives the catalog's 10-20 gate range the visual density of successful
-        # 80+ ring clips without lying about completion metadata.
-        self.inner_radius = width * 0.066
-        self.outer_radius = min(width * 0.78, height * 0.47)
+        # vortex. Each logical gate is one thick, collidable rainbow ribbon;
+        # the narrow coloured lines below are surface stripes, not extra gates.
+        # Physics clears the gate only after the ball crosses its full depth.
+        self.inner_radius = width * 0.040
+        self.outer_radius = min(width * 0.84, height * 0.47)
         self.radial_step = (self.outer_radius - self.inner_radius) / max(1, rings)
         self.radii = [self.inner_radius + self.radial_step * i for i in range(rings)]
-        self.bands_per_ring = 7 if rings <= 24 else 4 if rings <= 48 else 2 if rings <= 96 else 1
-        self.band_span = self.radial_step * (0.84 if self.bands_per_ring > 1 else 0.0)
-        spiral_start = self.rng.uniform(0, 360)
-        spiral_step = self.rng.choice((-1, 1)) * self.rng.uniform(9.0, 19.0)
-        self.spiral_direction = 1 if spiral_step > 0 else -1
-        self.base_gaps = [(spiral_start + index * spiral_step + self.rng.uniform(-11.0, 11.0)) % 360 for index in range(rings)]
-        rotation_direction = self.rng.choice((-1, 1))
-        self.rotations = [rotation_direction * self.rng.uniform(21.0, 42.0) for _ in range(rings)]
-        self.gap_widths = [self.rng.uniform(57.0, 70.0) for _ in range(rings)]
+        # The public 10-20 ring range must leave genuine room for a whole ball
+        # between two obstacles.  Scaling the physical sphere with the authored
+        # radial step keeps that invariant at every supported ring count while
+        # still producing a 16-25 px diameter in the final 1080p encode.
+        target_ball_radius = max(2.0, width * 0.0125)
+        self.ball_radius = max(2.0, min(target_ball_radius, self.radial_step / 5.0))
+        # One physical ribbon has a filled body and at most three reflective
+        # surface lines. It must never read as seven independent obstacles.
+        self.bands_per_ring = 3 if rings <= 72 else 2 if rings <= 120 else 1
+        # Body-to-body spacing exceeds four ball radii.  After the sphere has
+        # fully left one ribbon and first touches the next, its centre therefore
+        # travels more than one complete ball diameter: a clear can never chain
+        # on the following simulation tick just because the geometry is dense.
+        self.band_span = max(
+            0.0,
+            min(
+                self.radial_step * (0.34 if self.bands_per_ring > 1 else 0.0),
+                self.radial_step - self.ball_radius * 4.12,
+            ),
+        )
+        self.gap_widths = [self.rng.uniform(70.0, 86.0) for _ in range(rings)]
+        self.base_gaps, self.rotations = self.build_gap_layout()
         self.active = 0
         self.level = 1
-        self.last_clear = 0.0
         self.completed_at: float | None = None
         self.position = [self.cx + 4, self.cy + 4]
         # Always launch upward first so gravity visibly bends the trajectory
         # into an arc instead of looking like random linear movement.
         launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
         start_angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
-        speed = width * 0.46
+        speed = width * 0.54
         self.velocity = [math.cos(start_angle) * speed, math.sin(start_angle) * speed]
         self.trail: list[tuple[float, float]] = []
         self.particles: list[dict[str, float | tuple[int, int, int]]] = []
@@ -443,13 +501,9 @@ class BallEscape:
         self.last_collision = -1.0
         self.streak = 0
         self.last_streak_at = 0.0
-        self.will_escape = seed % 4 != 0
-        self.final_unlock = duration * (0.850 + (seed % 5) * 0.006)
         self.failed_at: float | None = None
         self.simulation_time = 0.0
         self.camera_zoom = 1.0
-        self.level_started_at = 0.0
-        self.min_clear_interval = max(0.22, duration * 0.033)
         self.stars = [
             (
                 self.rng.uniform(0, width),
@@ -461,6 +515,50 @@ class BallEscape:
             for _ in range(34)
         ]
         self.background = self.make_background()
+
+    def build_gap_layout(self) -> tuple[list[float], list[float]]:
+        """Author independent openings without constructing an escape corridor.
+
+        This samples only the seed, clip duration and already-authored widths.
+        It never reads the ball, progress, collision state or time remaining.
+        Neighbouring openings remain physically disjoint for the entire clip.
+        The vortex rotates, but the tiny authored speed variations are bounded
+        so two adjacent gaps can never sweep across one another. This removes
+        both a static spiral corridor and the transient two-ring highways that
+        used to create near-simultaneous clears.
+        """
+        base_gaps: list[float] = []
+        rotations: list[float] = []
+
+        direction = self.rng.choice((-1.0, 1.0))
+        common_speed = direction * self.rng.uniform(30.8, 47.6)
+        # At most four degrees of relative drift per opening over the complete
+        # clip. The separation calculation below reserves twice that amount.
+        drift_limit = min(0.168, 5.6 / max(0.25, self.duration))
+
+        for index in range(self.ring_count):
+            rotation = common_speed + direction * self.rng.uniform(-drift_limit, drift_limit)
+            if index == 0:
+                base_gap = self.rng.uniform(0.0, 360.0)
+            else:
+                relative_drift = abs(rotation - rotations[-1]) * self.duration
+                safe_separation = (
+                    (self.gap_widths[index] + self.gap_widths[index - 1]) * 0.5
+                    + relative_drift
+                    + 12.0
+                )
+                # Sampling a side and a broad offset avoids a repeated spiral
+                # increment. The next opening is an independent zig-zag choice,
+                # never a continuation of the previous arc.
+                offset = self.rng.choice((-1.0, 1.0)) * self.rng.uniform(
+                    min(178.0, safe_separation),
+                    178.0,
+                )
+                base_gap = (base_gaps[-1] + offset) % 360.0
+            base_gaps.append(base_gap)
+            rotations.append(rotation)
+
+        return base_gaps, rotations
 
     def record_music_hit(self, time_sec: float) -> None:
         if not self.music_hits or time_sec - self.music_hits[-1] >= 0.075:
@@ -502,46 +600,24 @@ class BallEscape:
         return self.cx + (x - self.cx) * scale, self.cy + (y - self.cy) * scale
 
     def ring_gap(self, index: int, time_sec: float) -> float:
-        natural = (self.base_gaps[index] + self.rotations[index] * time_sec) % 360
-        if index == self.active and self.completed_at is None:
-            stalled = time_sec - self.last_clear
-            final_ring = index == self.ring_count - 1
-            late_chase = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0)
-            schedule_pressure = 0.0 if final_ring else clamp(
-                (time_sec - self.ring_deadline(index)) / max(0.20, self.duration * 0.035), 0.0, 1.0
-            )
-            help_after = 0.25 if final_ring and time_sec >= self.final_unlock else 0.58 - late_chase * 0.48
-            if stalled > help_after or schedule_pressure > 0.0:
-                dx, dy = self.position[0] - self.cx, self.position[1] - self.cy
-                ball_angle = math.degrees(math.atan2(dy, dx)) % 360
-                maximum_follow = 0.98 if final_ring and time_sec >= self.final_unlock and self.will_escape else 0.62 + late_chase * 0.38
-                follow = clamp((stalled - help_after) / 1.25, 0.0, maximum_follow)
-                follow = max(follow, schedule_pressure * 0.985)
-                return (natural + angle_delta(ball_angle, natural) * follow) % 360
-        return natural
+        """Return the authored rotation only; gameplay state never moves a gap."""
+        return (self.base_gaps[index] + self.rotations[index] * time_sec) % 360
 
-    def ring_deadline(self, index: int) -> float:
-        if index >= self.ring_count - 1:
-            return self.final_unlock
-        pre_final_rings = max(1, self.ring_count - 1)
-        paced_progress = 0.04 + 0.70 * (index + 1) / pre_final_rings
-        return self.level_started_at + self.duration * paced_progress
+    def ring_gap_width(self, index: int) -> float:
+        """Keep the physical opening identical for the full simulation."""
+        return self.gap_widths[index]
 
     def reset_level(self, time_sec: float) -> None:
         self.level += 1
-        self.level_started_at = time_sec
         self.active = 0
-        self.last_clear = time_sec
         self.completed_at = None
         self.position = [self.cx, self.cy]
         launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
         angle = self.rng.uniform(math.radians(launch_sector[0]), math.radians(launch_sector[1]))
-        speed = self.width * 0.50
+        speed = self.width * 0.57
         self.velocity = [math.cos(angle) * speed, math.sin(angle) * speed]
-        self.base_gaps = [(gap + self.rng.uniform(70, 210)) % 360 for gap in self.base_gaps]
+        self.base_gaps, self.rotations = self.build_gap_layout()
         self.streak = 0
-        self.will_escape = (self.seed + self.level * 3) % 4 != 0
-        self.final_unlock = time_sec + self.duration * (0.850 + ((self.seed + self.level) % 5) * 0.006)
         self.failed_at = None
 
     def add_particles(self, angle: float, color: tuple[int, int, int]) -> None:
@@ -589,8 +665,8 @@ class BallEscape:
         self.velocity[1] *= continuous_boost
 
         speed = math.hypot(*self.velocity)
-        min_speed = self.width * (0.42 + progress * 0.70 + time_progress * 0.24)
-        max_speed = self.width * (0.72 + progress * 1.08 + time_progress * 0.34)
+        min_speed = self.width * (0.54 + progress * 0.90 + time_progress * 0.32)
+        max_speed = self.width * (0.90 + progress * 1.30 + time_progress * 0.46)
         if speed < min_speed:
             scale = min_speed / max(speed, 0.001)
             self.velocity[0] *= scale
@@ -601,76 +677,40 @@ class BallEscape:
             self.velocity[1] *= scale
         self.max_speed_ratio = max(self.max_speed_ratio, math.hypot(*self.velocity) / max(1.0, self.width * 0.50))
 
-        if self.active < self.ring_count:
-            stalled = time_sec - self.last_clear
-            final_ring = self.active == self.ring_count - 1
-            late_chase = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0)
-            schedule_pressure = 0.0 if final_ring else clamp(
-                (time_sec - self.ring_deadline(self.active)) / max(0.20, self.duration * 0.035), 0.0, 1.0
-            )
-            help_after = 0.25 if final_ring and time_sec >= self.final_unlock else 0.54 - late_chase * 0.44
-            if stalled > help_after or schedule_pressure > 0.0:
-                gap_angle = math.radians(self.ring_gap(self.active, time_sec))
-                # Aim beyond the line. Targeting the ring itself pulls the ball
-                # back inward just before its full diameter has cleared it.
-                target_radius = self.radii[self.active] + self.ball_radius * 2.35
-                target_x = self.cx + math.cos(gap_angle) * target_radius
-                target_y = self.cy + math.sin(gap_angle) * target_radius
-                target_angle = math.atan2(target_y - self.position[1], target_x - self.position[0])
-                current_speed = math.hypot(*self.velocity)
-                max_blend = 0.18 if final_ring and time_sec >= self.final_unlock and self.will_escape else 0.075 + late_chase * 0.145
-                blend = clamp((stalled - help_after) * 0.055, 0.0, max_blend)
-                if schedule_pressure > 0.0:
-                    blend = max(blend, 0.035 + schedule_pressure * 0.115)
-                self.velocity[0] = self.velocity[0] * (1 - blend) + math.cos(target_angle) * current_speed * blend
-                self.velocity[1] = self.velocity[1] * (1 - blend) + math.sin(target_angle) * current_speed * blend
-
         self.position[0] += self.velocity[0] * dt
         self.position[1] += self.velocity[1] * dt
         dx, dy = self.position[0] - self.cx, self.position[1] - self.cy
         distance = max(0.001, math.hypot(dx, dy))
 
-        if self.active < self.ring_count:
+        if self.completed_at is None and self.failed_at is None and self.active < self.ring_count:
             radius = self.radii[self.active]
             nx, ny = dx / distance, dy / distance
             outward_speed = self.velocity[0] * nx + self.velocity[1] * ny
             ball_angle = math.degrees(math.atan2(dy, dx)) % 360
-            stalled = time_sec - self.last_clear
-            final_ring = self.active == self.ring_count - 1
-            gate_closed = final_ring and (time_sec < self.final_unlock or not self.will_escape)
-            if gate_closed:
-                widened_gap = 0.0
-            elif final_ring:
-                unlock_progress = clamp((time_sec - self.final_unlock) / max(0.25, self.duration * 0.08), 0.0, 1.0)
-                widened_gap = self.gap_widths[self.active] + unlock_progress * 70.0
-            else:
-                late_bonus = clamp((time_sec - self.duration * 0.58) / max(0.25, self.duration * 0.14), 0.0, 1.0) * 70.0
-                widened_gap = min(self.gap_widths[self.active] + 36.0 + late_bonus, self.gap_widths[self.active] + max(0.0, stalled - 0.58) * 22.0 + late_bonus)
-                schedule_pressure = clamp(
-                    (time_sec - self.ring_deadline(self.active)) / max(0.20, self.duration * 0.035), 0.0, 1.0
-                )
-                widened_gap = max(widened_gap, self.gap_widths[self.active] + schedule_pressure * 105.0)
+            gap_width = self.ring_gap_width(self.active)
             ball_clearance = self.ball_radius + max(2.0, self.width * 0.006)
             occupied_half_angle = math.degrees(math.asin(min(0.92, ball_clearance / max(radius, ball_clearance + 0.01))))
-            center_tolerance = max(0.0, widened_gap / 2 - occupied_half_angle)
-            in_gap = not gate_closed and abs(angle_delta(ball_angle, self.ring_gap(self.active, time_sec))) <= center_tolerance
+            center_tolerance = max(0.0, gap_width / 2 - occupied_half_angle)
+            in_gap = abs(angle_delta(ball_angle, self.ring_gap(self.active, time_sec))) <= center_tolerance
 
             if distance + self.ball_radius >= radius and outward_speed > 0:
-                can_clear = stalled >= self.min_clear_interval
-                if in_gap and can_clear:
-                    if distance >= radius + self.ball_radius * 0.75:
+                if in_gap:
+                    ribbon_outer_radius = radius + self.band_span
+                    if distance >= ribbon_outer_radius + self.ball_radius:
                         color = color_for(self.theme, self.active, self.ring_count)
                         self.add_particles(math.atan2(dy, dx), color)
-                        self.pulses.append({"radius": radius, "life": 0.42, "max_life": 0.42, "color": color})
+                        self.pulses.append({
+                            "radius": radius + self.band_span * 0.5,
+                            "life": 0.42,
+                            "max_life": 0.42,
+                            "color": color,
+                        })
                         self.flash = max(self.flash, 0.18)
                         self.impact_squash = max(self.impact_squash, 0.45)
                         self.events.append((time_sec, 620 + self.active * 2.2, 0.52, "clear"))
                         self.record_music_hit(time_sec)
                         clear_batch = 1
-                        next_active = min(self.ring_count, self.active + 1)
-                        if next_active >= self.ring_count and (time_sec < self.final_unlock or not self.will_escape):
-                            next_active = self.ring_count - 1
-                        self.active = next_active
+                        self.active = min(self.ring_count, self.active + 1)
                         if time_sec - self.last_streak_at < 0.34:
                             self.streak += clear_batch
                         else:
@@ -679,9 +719,9 @@ class BallEscape:
                         acceleration = min(1.060, 1.018 + self.active / max(1, self.ring_count) * 0.042)
                         self.velocity[0] *= acceleration
                         self.velocity[1] *= acceleration
-                        self.last_clear = time_sec
                         if self.active >= self.ring_count:
                             self.completed_at = time_sec
+                            self.failed_at = None
                             self.add_victory_particles()
                             self.flash = 0.72
                             self.events.extend([
@@ -711,7 +751,7 @@ class BallEscape:
                         self.impact_squash = 1.0
                         self.last_collision = time_sec
 
-        if self.completed_at is None and not self.will_escape and self.failed_at is None and time_sec >= self.duration - 0.62:
+        if self.completed_at is None and self.failed_at is None and time_sec >= self.duration - 0.62:
             self.failed_at = time_sec
             self.events.extend([
                 (time_sec, 196.0, 0.30, "impact"),
@@ -765,109 +805,149 @@ class BallEscape:
         rings_draw = ImageDraw.Draw(rings_layer)
         glow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         glow_draw = ImageDraw.Draw(glow_layer)
-        visual_total = max(1, self.ring_count * self.bands_per_ring)
-        dense = visual_total > 130
+        visual_total = max(1, self.ring_count)
+        dense = visual_total > 60
         base_width = max(1, round(self.width * (0.0018 if dense else 0.0027)))
 
         for index in range(self.active, self.ring_count):
             gap = self.ring_gap(index, time_sec)
-            gap_width = self.gap_widths[index]
-            final_active = index == self.active == self.ring_count - 1
-            gate_locked = final_active and (time_sec < self.final_unlock or not self.will_escape)
-            if final_active and not gate_locked:
-                unlock_progress = clamp(
-                    (time_sec - self.final_unlock) / max(0.25, self.duration * 0.08),
-                    0.0,
-                    1.0,
-                )
-                gap_width += unlock_progress * 70.0
+            gap_width = self.ring_gap_width(index)
+            start = gap + gap_width / 2
+            end = gap + 360 - gap_width / 2
 
-            for band in range(self.bands_per_ring):
-                band_fraction = band / max(1, self.bands_per_ring - 1)
+            # A continuous coloured body makes this read as one thick ribbon.
+            # Its radial depth matches the clear test in `_simulate_step`; the
+            # following two or three narrow lines are reflections, not gates.
+            tube_radius = (self.radii[index] + self.band_span * 0.5) * scale
+            # The opaque body is exactly the projected physical depth. Glow and
+            # the dark anti-alias outline may extend beyond it, but no coloured
+            # collision-looking surface exists outside the simulated ribbon.
+            tube_width = max(1, round(self.band_span * scale))
+            tube_box = (
+                self.cx - tube_radius,
+                self.cy - tube_radius,
+                self.cx + tube_radius,
+                self.cy + tube_radius,
+            )
+            ribbon_color = color_for(self.theme, index, visual_total, self.level * 0.012)
+            active_wave = 0.5 + 0.5 * math.sin(time_sec * 7.5 + index * 0.31)
+            body_strength = (0.42 + active_wave * 0.05) if index == self.active else 0.31
+            body_color = tuple(
+                min(255, round(7 + channel * body_strength))
+                for channel in ribbon_color
+            )
+            tube_alpha = round(118 + active_wave * 38) if index == self.active else 74
+            glow_draw.arc(
+                tube_box,
+                start=start,
+                end=end,
+                fill=(*ribbon_color, tube_alpha),
+                width=tube_width + max(3, base_width * 5),
+            )
+            rings_draw.arc(
+                tube_box,
+                start=start,
+                end=end,
+                fill=(0, 2, 8, 245),
+                width=tube_width + max(3, base_width * 2),
+            )
+            rings_draw.arc(
+                tube_box,
+                start=start,
+                end=end,
+                fill=(*body_color, 255),
+                width=tube_width,
+            )
+
+            # Rounded body caps agree with the angular ball-clearance check and
+            # remove the comb-like ends produced by many independent stripes.
+            body_cap_radius = max(1.0, tube_width * 0.5)
+            outline_cap_radius = body_cap_radius + max(1.0, base_width)
+            for angle in (start, end):
+                angle_rad = math.radians(angle)
+                cap_x = self.cx + math.cos(angle_rad) * tube_radius
+                cap_y = self.cy + math.sin(angle_rad) * tube_radius
+                rings_draw.ellipse(
+                    (
+                        cap_x - outline_cap_radius,
+                        cap_y - outline_cap_radius,
+                        cap_x + outline_cap_radius,
+                        cap_y + outline_cap_radius,
+                    ),
+                    fill=(0, 2, 8, 245),
+                )
+                rings_draw.ellipse(
+                    (
+                        cap_x - body_cap_radius,
+                        cap_y - body_cap_radius,
+                        cap_x + body_cap_radius,
+                        cap_y + body_cap_radius,
+                    ),
+                    fill=(*body_color, 255),
+                )
+
+            if self.bands_per_ring == 3:
+                reflection_fractions = (0.14, 0.50, 0.86)
+            elif self.bands_per_ring == 2:
+                reflection_fractions = (0.22, 0.78)
+            else:
+                reflection_fractions = (0.50,)
+
+            light = tuple(min(255, round(channel * 1.10 + 24)) for channel in ribbon_color)
+            for reflection_index, band_fraction in enumerate(reflection_fractions):
                 world_radius = self.radii[index] + self.band_span * band_fraction
                 radius = world_radius * scale
                 if radius < 2:
                     continue
-                visual_index = index * self.bands_per_ring + band
-                color = color_for(self.theme, visual_index, visual_total, self.level * 0.012)
-                active_wave = 0.5 + 0.5 * math.sin(time_sec * 7.5 + band * 0.35)
-                core_width = base_width + (1 if index == self.active and active_wave > 0.56 else 0)
+                core_width = base_width + (
+                    1
+                    if index == self.active and reflection_index == len(reflection_fractions) // 2 and active_wave > 0.56
+                    else 0
+                )
                 glow_alpha = 108 if index == self.active else 48
-                if gate_locked:
-                    glow_alpha = round(110 + active_wave * 55)
-
-                # Tiny offsets inside each ribbon create one continuous spiral.
-                band_gap = gap + self.spiral_direction * (
-                    band - (self.bands_per_ring - 1) / 2
-                ) * 1.15
-                start = band_gap + gap_width / 2
-                end = band_gap + 360 - gap_width / 2
                 bbox = (
                     self.cx - radius,
                     self.cy - radius,
                     self.cx + radius,
                     self.cy + radius,
                 )
-                light = tuple(min(255, round(channel * 1.08 + 18)) for channel in color)
+                reflection_color = light if reflection_index == len(reflection_fractions) // 2 else ribbon_color
 
-                if gate_locked:
-                    glow_draw.ellipse(
-                        bbox,
-                        outline=(*color, glow_alpha),
-                        width=max(3, core_width * 4),
+                glow_draw.arc(
+                    bbox,
+                    start=start,
+                    end=end,
+                    fill=(*reflection_color, glow_alpha),
+                    width=max(3, core_width * 4),
+                )
+                rings_draw.arc(
+                    bbox,
+                    start=start,
+                    end=end,
+                    fill=(0, 0, 0, 220),
+                    width=core_width + 2,
+                )
+                rings_draw.arc(
+                    bbox,
+                    start=start,
+                    end=end,
+                    fill=(*reflection_color, 255),
+                    width=core_width,
+                )
+                cap_radius = max(1.0, core_width * 0.58)
+                for angle in (start, end):
+                    angle_rad = math.radians(angle)
+                    cap_x = self.cx + math.cos(angle_rad) * radius
+                    cap_y = self.cy + math.sin(angle_rad) * radius
+                    rings_draw.ellipse(
+                        (
+                            cap_x - cap_radius,
+                            cap_y - cap_radius,
+                            cap_x + cap_radius,
+                            cap_y + cap_radius,
+                        ),
+                        fill=(*reflection_color, 255),
                     )
-                    rings_draw.ellipse(bbox, outline=(0, 0, 0, 210), width=core_width + 2)
-                    rings_draw.ellipse(bbox, outline=(*color, 255), width=core_width)
-                else:
-                    glow_draw.arc(
-                        bbox,
-                        start=start,
-                        end=end,
-                        fill=(*color, glow_alpha),
-                        width=max(3, core_width * 4),
-                    )
-                    rings_draw.arc(
-                        bbox,
-                        start=start,
-                        end=end,
-                        fill=(0, 0, 0, 220),
-                        width=core_width + 2,
-                    )
-                    rings_draw.arc(
-                        bbox,
-                        start=start,
-                        end=end,
-                        fill=(*color, 255),
-                        width=core_width,
-                    )
-                    highlight_radius = max(1.0, radius - core_width * 0.42)
-                    highlight_box = (
-                        self.cx - highlight_radius,
-                        self.cy - highlight_radius,
-                        self.cx + highlight_radius,
-                        self.cy + highlight_radius,
-                    )
-                    rings_draw.arc(
-                        highlight_box,
-                        start=start,
-                        end=end,
-                        fill=(*light, 175),
-                        width=1,
-                    )
-                    cap_radius = max(1.0, core_width * 0.58)
-                    for angle in (start, end):
-                        angle_rad = math.radians(angle)
-                        cap_x = self.cx + math.cos(angle_rad) * radius
-                        cap_y = self.cy + math.sin(angle_rad) * radius
-                        rings_draw.ellipse(
-                            (
-                                cap_x - cap_radius,
-                                cap_y - cap_radius,
-                                cap_x + cap_radius,
-                                cap_y + cap_radius,
-                            ),
-                            fill=(*light, 255),
-                        )
 
         ring_glow = glow_layer.filter(
             ImageFilter.GaussianBlur(radius=max(2, round(self.width * 0.0065)))
@@ -879,7 +959,7 @@ class BallEscape:
         effects_draw = ImageDraw.Draw(effects)
         ball_color = color_for(
             self.theme,
-            self.active * self.bands_per_ring + 2,
+            min(self.active, self.ring_count - 1),
             visual_total,
             time_sec * 0.018,
         )
@@ -939,7 +1019,7 @@ class BallEscape:
         bx, by = self.screen_point(self.position[0], self.position[1], scale)
         ball_speed = math.hypot(*self.velocity)
         speed_ratio = ball_speed / max(1.0, self.width * 0.46)
-        display_ball_radius = max(3.0, self.ball_radius * (0.82 + scale * 0.18))
+        display_ball_radius = max(5.0, self.ball_radius * (0.98 + scale * 0.12))
         if ball_speed > 0:
             streak_length = display_ball_radius * clamp(speed_ratio * 2.0, 1.8, 9.0)
             ux, uy = self.velocity[0] / ball_speed, self.velocity[1] / ball_speed
@@ -951,7 +1031,18 @@ class BallEscape:
         halo_radius = display_ball_radius * (2.8 + min(1.5, speed_ratio * 0.18))
         effects_draw.ellipse(
             (bx - halo_radius, by - halo_radius, bx + halo_radius, by + halo_radius),
-            fill=(*ball_color, 34),
+            fill=(*ball_color, 48),
+        )
+        locator_radius = display_ball_radius * 1.38
+        effects_draw.ellipse(
+            (
+                bx - locator_radius,
+                by - locator_radius,
+                bx + locator_radius,
+                by + locator_radius,
+            ),
+            outline=(245, 250, 255, 145),
+            width=max(1, round(self.width * 0.0015)),
         )
         image = Image.alpha_composite(
             image,
@@ -995,10 +1086,10 @@ class BallEscape:
             )
         ball_draw.ellipse(
             (bx - ball_rx, by - ball_ry, bx + ball_rx, by + ball_ry),
-            outline=(245, 250, 255, 225),
-            width=max(1, round(self.width * 0.0016)),
+            outline=(250, 253, 255, 250),
+            width=max(2, round(self.width * 0.0024)),
         )
-        highlight_radius = display_ball_radius * 0.24
+        highlight_radius = display_ball_radius * 0.29
         highlight_x = bx - ball_rx * 0.30
         highlight_y = by - ball_ry * 0.34
         ball_draw.ellipse(
@@ -1032,7 +1123,7 @@ class BallEscape:
         if self.completed_at is None and self.failed_at is None:
             draw_centered(
                 draw,
-                (self.cx, self.height * 0.087),
+                (self.cx, self.height * SOCIAL_HOOK_CENTER_Y),
                 self.title,
                 title_font,
                 (255, 255, 255, 245),
@@ -1056,7 +1147,10 @@ class BallEscape:
             counter_x, counter_y = self.cx, self.cy
             counter_dx, counter_dy = bx - self.cx, by - self.cy
             counter_distance = math.hypot(counter_dx, counter_dy)
-            counter_safe_radius = self.width * 0.052
+            # Include both the ball halo and the glyph footprint. The previous
+            # small radius technically avoided the centre point but still let
+            # the sphere visually merge with the number on a phone display.
+            counter_safe_radius = self.width * 0.082 + display_ball_radius
             if counter_distance < counter_safe_radius:
                 if counter_distance < 0.001:
                     velocity_length = max(0.001, ball_speed)
@@ -1166,7 +1260,14 @@ def render(args: argparse.Namespace) -> dict[str, object]:
 
         effective_music_mode = "continuous" if args.game == "shape-tunnel" else args.music_mode
         if effective_music_mode == "hit-reveal":
-            audio_filter = build_hit_reveal_filter(game.music_hits, actual_duration, args.music_volume, args.seed)
+            audio_filter = build_hit_reveal_filter(
+                game.music_hits,
+                actual_duration,
+                args.music_volume,
+                args.seed,
+                outcome_time=getattr(game, "music_outcome_at", None),
+                ambient_floor=0.10 if args.game == "boss-battle" else 0.0,
+            )
         else:
             audio_filter = f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.80[fx];[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={args.music_volume:.3f}[music];[fx][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=9[a]"
         mux = [
@@ -1177,13 +1278,24 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         ]
         subprocess.run(mux, check=True)
 
+    completed_at = round(game.completed_at, 3) if game.completed_at is not None else None
+    reported_difficulty = game.total if args.game == "laser-dodge" else difficulty
+    if args.game == "ball-escape":
+        outcome = "escaped" if game.completed_at is not None else "failed"
+    elif args.game == "shape-tunnel":
+        outcome = "escaped" if game.completed_at is not None else "incomplete"
+    elif args.game == "laser-dodge":
+        outcome = "collision" if game.crashed else "survived"
+    else:
+        outcome = game.winner if game.winner in {"player", "boss", "draw"} else "draw"
+
     return {
         "ok": True,
         "output": output.name,
         "duration": round(actual_duration, 3),
         "seed": args.seed,
         "game": args.game,
-        "difficulty": difficulty,
+        "difficulty": reported_difficulty,
         "rings": difficulty if args.game == "ball-escape" else None,
         "theme": args.theme,
         "sound_pack": selected_sound_pack,
@@ -1193,6 +1305,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "music_mode": effective_music_mode,
         "music_hits": len(game.music_hits),
         "events": len(game.events),
+        "completed_at": completed_at,
+        "outcome": outcome,
         "levels_completed": game.level - 1,
         "units_completed": game.active,
         "units_total": getattr(game, "total", getattr(game, "ring_count", difficulty)),
@@ -1207,11 +1321,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--game", choices=("ball-escape", *GAME_CLASSES), default="ball-escape")
     parser.add_argument("--difficulty", type=int)
-    parser.add_argument("--rings", type=int, default=240)
+    parser.add_argument("--rings", type=int, default=14)
     parser.add_argument("--theme", choices=sorted(THEMES), default="neon")
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr", "glass"), default="auto")
     parser.add_argument("--music")
-    parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="continuous")
+    parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="hit-reveal")
     parser.add_argument("--music-volume", type=float, default=0.62)
     parser.add_argument("--title", default="WILL THE BALL ESCAPE?")
     parser.add_argument("--width", type=int, default=1080)

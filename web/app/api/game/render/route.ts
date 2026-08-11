@@ -26,6 +26,17 @@ type RenderRequest = {
   title?: string;
 };
 
+type RenderOutcome =
+  | 'escaped'
+  | 'failed'
+  | 'incomplete'
+  | 'survived'
+  | 'collision'
+  | 'player'
+  | 'boss'
+  | 'draw'
+  | 'comparison-complete';
+
 let rendering = false;
 
 function numberInRange(value: unknown, fallback: number, min: number, max: number) {
@@ -99,7 +110,12 @@ export async function POST(request: Request) {
     const seed = numberInRange(body.seed, crypto.randomInt(100_000, 999_999_999), 1, 2_147_483_647);
     const theme = body.theme && ['neon', 'sunset', 'ice'].includes(body.theme) ? body.theme : 'neon';
     const soundPack = body.soundPack && ['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr'].includes(body.soundPack) ? body.soundPack : 'auto';
-    const musicMode = body.musicMode === 'hit-reveal' ? 'hit-reveal' : 'continuous';
+    const defaultMusicMode = game === 'shape-tunnel' || game === 'soft-body-slide'
+      ? 'continuous'
+      : 'hit-reveal';
+    const musicMode = body.musicMode === 'hit-reveal' || body.musicMode === 'continuous'
+      ? body.musicMode
+      : defaultMusicMode;
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const filename = `${game}-${seed}-${randomId()}.mp4`;
@@ -184,6 +200,8 @@ export async function POST(request: Request) {
       music_generated?: boolean;
       music_mode?: string;
       music_hits?: number;
+      completed_at?: number | null;
+      outcome?: RenderOutcome;
       units_completed?: number;
       units_total?: number;
       variant_key?: string;
@@ -219,6 +237,8 @@ export async function POST(request: Request) {
       soundPack: rendererMetadata.sound_pack || soundPack,
       musicMode: rendererMetadata.music_mode || musicMode,
       musicHits: rendererMetadata.music_hits || 0,
+      completedAt: rendererMetadata.completed_at ?? null,
+      outcome: rendererMetadata.outcome ?? null,
       musicUsed: musicPath ? path.basename(musicPath) : rendererMetadata.music || null,
       musicTitle,
       musicSource,

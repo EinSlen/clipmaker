@@ -18,7 +18,16 @@ from mathutils import Vector
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from soft_body_variants import SoftBodyVariant, solver_timing, variant_for_seed
+from soft_body_variants import (
+    SoftBodyVariant,
+    deformation_response,
+    natural_ramp_exit_time,
+    ramp_motion_state,
+    solver_timing,
+    stage_motion_for,
+    supported_body_damping,
+    variant_for_seed,
+)
 
 
 
@@ -244,50 +253,30 @@ def ramp_points(variant: SoftBodyVariant, segments: int = 112):
     ]
 
 
-def effective_ramp_exit_time(variant: SoftBodyVariant, trial_duration: float) -> float:
-    # Presets were authored for three-second trials.  Longer cinematic trials
-    # keep the ramp alive for multiple sweeps, then reserve the same natural
-    # fall/landing window at the end.
-    landing_window = max(1.72, 3.0 - variant.ramp.exit_time)
-    return max(0.8, trial_duration - landing_window)
+def effective_ramp_exit_time(
+    variant: SoftBodyVariant,
+    trial_duration: float,
+    phase_offset: float = 0.0,
+) -> float:
+    return natural_ramp_exit_time(variant, trial_duration, phase_offset)
 
 
-def ramp_position(time: float, variant: SoftBodyVariant, trial_duration: float) -> float:
-    ramp = variant.ramp
-    period = ramp.sweep_period
-    exit_time = effective_ramp_exit_time(variant, trial_duration)
-
-    def sweep(at: float) -> float:
-        return ramp.sweep_amplitude * math.sin(
-            math.tau * at / period - math.pi / 2 + variant.motion_phase
-        ) + ramp.secondary_amplitude * math.sin(
-            math.tau * at / (period * 0.5) - 0.18 - variant.motion_phase * 0.5
-        )
-
-    if time <= exit_time:
-        return sweep(time)
-    exit_duration = 0.22
-    ratio = max(0.0, min(1.0, (time - exit_time) / exit_duration))
-    smooth = ratio * ratio * (3.0 - 2.0 * ratio)
-    origin = sweep(exit_time)
-    return origin + (ramp.exit_x - origin) * smooth
+def ramp_position(
+    time: float,
+    variant: SoftBodyVariant,
+    trial_duration: float,
+    phase_offset: float = 0.0,
+) -> float:
+    return ramp_motion_state(time, variant, trial_duration, phase_offset)[0]
 
 
-def ramp_velocity(time: float, variant: SoftBodyVariant, trial_duration: float) -> float:
-    ramp = variant.ramp
-    period = ramp.sweep_period
-    exit_time = effective_ramp_exit_time(variant, trial_duration)
-    if time <= exit_time:
-        return (
-            ramp.sweep_amplitude * math.tau / period
-            * math.cos(math.tau * time / period - math.pi / 2 + variant.motion_phase)
-            + ramp.secondary_amplitude * math.tau / (period * 0.5)
-            * math.cos(math.tau * time / (period * 0.5) - 0.18 - variant.motion_phase * 0.5)
-        )
-    exit_duration = 0.22
-    ratio = max(0.0, min(1.0, (time - exit_time) / exit_duration))
-    origin = ramp_position(exit_time, variant, trial_duration)
-    return (ramp.exit_x - origin) * 6.0 * ratio * (1.0 - ratio) / exit_duration
+def ramp_velocity(
+    time: float,
+    variant: SoftBodyVariant,
+    trial_duration: float,
+    phase_offset: float = 0.0,
+) -> float:
+    return ramp_motion_state(time, variant, trial_duration, phase_offset)[1]
 
 
 def ramp_slope(local_x: float, variant: SoftBodyVariant, collision: bool = False) -> float:
@@ -305,7 +294,15 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
-def add_ramp(marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int, stage_frames: int):
+def add_ramp(
+    marble,
+    gold,
+    variant: SoftBodyVariant,
+    frame_end: int,
+    fps: int,
+    stage_frames: int,
+    stage_indices: tuple[int, ...],
+):
     segments = 192
     half_width, thickness = variant.ramp.half_width, variant.ramp.thickness * 0.68
     samples = [
@@ -359,8 +356,16 @@ def add_ramp(marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int, s
         trim.parent = ramp
 
     for frame in range(1, frame_end + 1):
-        local_frame = (frame - 1) % stage_frames
-        ramp.location.x = ramp_position(local_frame / fps, variant, stage_frames / fps)
+        stage_slot = min(len(stage_indices) - 1, (frame - 1) // stage_frames)
+        stage_index = stage_indices[stage_slot]
+        local_frame = (frame - 1) - stage_slot * stage_frames
+        stage_motion = stage_motion_for(variant, stage_index)
+        ramp.location.x = ramp_position(
+            local_frame / fps,
+            variant,
+            stage_frames / fps,
+            stage_motion.ramp_phase_offset,
+        )
         ramp.keyframe_insert("location", frame=frame)
     if ramp.animation_data and ramp.animation_data.action:
         for curve in ramp.animation_data.action.fcurves:
@@ -474,36 +479,50 @@ def collide_point(
     dt: float,
     variant: SoftBodyVariant,
     trial_duration: float,
-) -> tuple[Vector, Vector, float, float]:
+    ramp_phase_offset: float,
+    resolve_velocity: bool,
+) -> tuple[Vector, Vector, float, float, bool]:
     ramp_intensity = 0.0
     receiver_intensity = 0.0
-    local_x = point.x - ramp_position(time, variant, trial_duration)
+    ramp_contact = False
+    local_x = point.x - ramp_position(time, variant, trial_duration, ramp_phase_offset)
     if variant.ramp.minimum <= local_x <= variant.ramp.maximum:
         height = physics_ramp_height(local_x, variant)
         slope = physics_ramp_slope(local_x, variant)
         normal = Vector((-slope, 1.0)).normalized()
         signed_distance = (point.y - height) / math.sqrt(1.0 + slope * slope)
         if point.y > height - 0.55 and signed_distance < radius:
-            point += normal * (radius - signed_distance)
-            velocity = point - previous
-            ramp_step = Vector((ramp_velocity(time, variant, trial_duration) * dt, 0.0))
-            relative = velocity - ramp_step
-            normal_speed = relative.dot(normal)
-            ramp_intensity = max(ramp_intensity, abs(normal_speed) / max(dt, 1e-6))
-            if normal_speed < 0.0:
-                restitution = (0.36 - softness * 0.32) * variant.bounce_scale
-                tangent = Vector((normal.y, -normal.x))
-                velocity -= normal * ((1.0 + restitution) * normal_speed)
-                target_tangent = ramp_step.dot(tangent)
-                current_tangent = velocity.dot(tangent)
-                coupling = (0.11 + (1.0 - softness) * 0.07) * variant.coupling_scale
-                velocity += tangent * (target_tangent - current_tangent) * coupling
-                velocity *= 0.92 - softness * 0.16
-                previous = point - velocity
+            ramp_contact = True
+            correction = normal * (radius - signed_distance)
+            point += correction
+            # Positional projection is geometric, not kinetic. Preserve the
+            # pre-projection velocity so deep overlap cannot create a catapult.
+            previous += correction
+            if resolve_velocity:
+                velocity = point - previous
+                ramp_step = Vector(
+                    (ramp_velocity(time, variant, trial_duration, ramp_phase_offset) * dt, 0.0)
+                )
+                relative = velocity - ramp_step
+                normal_speed = relative.dot(normal)
+                ramp_intensity = max(ramp_intensity, abs(normal_speed) / max(dt, 1e-6))
+                if normal_speed < 0.0:
+                    restitution = (0.14 - softness * 0.10) * variant.bounce_scale
+                    tangent = Vector((normal.y, -normal.x))
+                    normal_impulse = -(1.0 + restitution) * normal_speed
+                    velocity += normal * normal_impulse
+                    target_tangent = ramp_step.dot(tangent)
+                    tangent_error = target_tangent - velocity.dot(tangent)
+                    friction = (0.018 + softness * 0.018) * variant.coupling_scale
+                    tangent_impulse = max(
+                        -normal_impulse * friction,
+                        min(normal_impulse * friction, tangent_error),
+                    )
+                    velocity += tangent * tangent_impulse
+                    previous = point - velocity
 
-    # Thin circular rim first, followed by the shallow concave receiver.  The
-    # opening remains real: misses continue below frame instead of landing on
-    # an invisible cylinder cap.
+    # Thin circular rim first. The opening remains real: misses continue below
+    # frame instead of landing on an invisible cylinder cap.
     receiver = variant.receiver
     rim_major = (receiver.outer_radius + receiver.inner_radius) * 0.5
     rim_minor = (receiver.outer_radius - receiver.inner_radius) * 0.55
@@ -513,35 +532,85 @@ def collide_point(
         minimum = radius + rim_minor
         if 1e-7 < delta.length < minimum:
             normal = delta.normalized()
-            point = center + normal * minimum
-            velocity = point - previous
-            normal_speed = velocity.dot(normal)
-            receiver_intensity = max(receiver_intensity, abs(normal_speed) / max(dt, 1e-6))
-            if normal_speed < 0.0:
-                velocity -= normal * ((1.42 - softness * 0.30) * normal_speed)
-                previous = point - velocity * (0.88 - softness * 0.20)
+            corrected = center + normal * minimum
+            correction = corrected - point
+            point = corrected
+            previous += correction
+            if resolve_velocity:
+                velocity = point - previous
+                normal_speed = velocity.dot(normal)
+                receiver_intensity = max(
+                    receiver_intensity,
+                    abs(normal_speed) / max(dt, 1e-6),
+                )
+                if normal_speed < 0.0:
+                    restitution = 0.40 - softness * 0.24
+                    normal_impulse = -(1.0 + restitution) * normal_speed
+                    velocity += normal * normal_impulse
+                    tangent = Vector((normal.y, -normal.x))
+                    tangent_impulse = max(
+                        -normal_impulse * (0.025 + softness * 0.030),
+                        min(
+                            normal_impulse * (0.025 + softness * 0.030),
+                            -velocity.dot(tangent),
+                        ),
+                    )
+                    velocity += tangent * tangent_impulse
+                    previous = point - velocity
 
-    receiver_x = point.x - receiver.x
-    if abs(receiver_x) < receiver.inner_radius and point.y < receiver.top + 0.34:
-        ratio = abs(receiver_x) / receiver.inner_radius
-        bowl_base = receiver.top - receiver.bowl_depth - 0.06
-        height = bowl_base + receiver.bowl_depth * ratio * ratio
-        slope = 2.0 * receiver.bowl_depth * receiver_x / (receiver.inner_radius * receiver.inner_radius)
-        normal = Vector((-slope, 1.0)).normalized()
-        signed_distance = (point.y - height) / math.sqrt(1.0 + slope * slope)
-        if signed_distance < radius:
-            point += normal * (radius - signed_distance)
-            velocity = point - previous
-            normal_speed = velocity.dot(normal)
-            receiver_intensity = max(receiver_intensity, abs(normal_speed) / max(dt, 1e-6))
-            if normal_speed < 0.0:
-                velocity -= normal * ((1.30 - softness * 0.18) * normal_speed)
-                velocity *= 0.74 - softness * 0.32
-                previous = point - velocity
-    return point, previous, ramp_intensity, receiver_intensity
+    # The receiver is an open tube.  Its two vertical marble walls can deflect
+    # a capsule, but there is no invisible floor or sticky catch volume.
+    wall_center_offset = (receiver.outer_radius + receiver.inner_radius) * 0.5
+    wall_half_thickness = (receiver.outer_radius - receiver.inner_radius) * 0.5
+    wall_bottom = -3.55
+    wall_top = receiver.top - rim_minor * 0.18
+    if wall_bottom < point.y < wall_top:
+        for side in (-1.0, 1.0):
+            wall_x = receiver.x + side * wall_center_offset
+            signed_distance = point.x - wall_x
+            minimum = radius + wall_half_thickness
+            if abs(signed_distance) < minimum:
+                if abs(signed_distance) > 1e-7:
+                    normal_x = 1.0 if signed_distance > 0.0 else -1.0
+                else:
+                    previous_distance = previous.x - wall_x
+                    normal_x = 1.0 if previous_distance >= 0.0 else -1.0
+                normal = Vector((normal_x, 0.0))
+                corrected_x = wall_x + normal_x * minimum
+                correction = Vector((corrected_x - point.x, 0.0))
+                point.x = corrected_x
+                previous += correction
+                if resolve_velocity:
+                    velocity = point - previous
+                    normal_speed = velocity.dot(normal)
+                    receiver_intensity = max(
+                        receiver_intensity,
+                        abs(normal_speed) / max(dt, 1e-6),
+                    )
+                    if normal_speed < 0.0:
+                        restitution = 0.34 - softness * 0.20
+                        normal_impulse = -(1.0 + restitution) * normal_speed
+                        velocity += normal * normal_impulse
+                        tangent = Vector((0.0, 1.0))
+                        tangent_impulse = max(
+                            -normal_impulse * (0.018 + softness * 0.022),
+                            min(
+                                normal_impulse * (0.018 + softness * 0.022),
+                                -velocity.dot(tangent),
+                            ),
+                        )
+                        velocity += tangent * tangent_impulse
+                        previous = point - velocity
+    return point, previous, ramp_intensity, receiver_intensity, ramp_contact
 
 
-def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: SoftBodyVariant):
+def simulate_chain(
+    softness_percent: int,
+    frame_count: int,
+    fps: int,
+    variant: SoftBodyVariant,
+    stage_index: int,
+):
     softness = softness_percent / 100.0
     node_count = 41
     # The simulated spine covers the cylindrical section only.  Hemispherical
@@ -549,66 +618,123 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: S
     # never collapses into the needle-like poles produced by the old solver.
     half_length = variant.shape.cylinder_half
     rest = 2.0 * half_length / (node_count - 1)
-    rotation = variant.start_rotation
+    stage_motion = stage_motion_for(variant, stage_index)
+    rotation = variant.start_rotation + stage_motion.rotation_offset
+    start_x = variant.start_x + stage_motion.spawn_x_offset
+    start_height = variant.start_height + stage_motion.spawn_height_offset
     points = []
     for index in range(node_count):
         local_x = -half_length + rest * index
         points.append(
             Vector(
                 (
-                    variant.start_x + math.cos(rotation) * local_x,
-                    variant.start_height + math.sin(rotation) * local_x,
+                    start_x + math.cos(rotation) * local_x,
+                    start_height + math.sin(rotation) * local_x,
                 )
             )
         )
-    previous = [point.copy() for point in points]
-    frames = []
+    substeps, dt, internal_damping, air_drag = solver_timing(fps, softness)
+    center = sum(points, Vector((0.0, 0.0))) / node_count
+    initial_linear_velocity = Vector(
+        (stage_motion.linear_velocity_x, stage_motion.linear_velocity_y)
+    )
+    previous = []
+    for point in points:
+        radius_from_center = point - center
+        angular_velocity = Vector(
+            (-radius_from_center.y, radius_from_center.x)
+        ) * (variant.initial_spin + stage_motion.angular_velocity)
+        previous.append(point - (initial_linear_velocity + angular_velocity) * dt)
+    supported_horizontal, supported_vertical = supported_body_damping(fps, softness)
+    class SimulationFrames(list):
+        """Rendered samples plus fixed-clock collision telemetry.
+
+        This remains a normal list for all existing shape-key consumers.  The
+        sidecar samples deliberately live at the physics rate, though, so
+        render FPS can never quantise Foley event timestamps.
+        """
+
+    frames = SimulationFrames()
+    frames.physics_samples = []
+    frames.receiver_entries = []
+    frames.physics_dt = dt
     impact_memory = 0.0
     node_impact_memory = [0.0] * node_count
     trial_duration = frame_count / fps
-    exit_time = effective_ramp_exit_time(variant, trial_duration)
+    exit_time = effective_ramp_exit_time(
+        variant,
+        trial_duration,
+        stage_motion.ramp_phase_offset,
+    )
+    released = False
+    ramp_clear_substeps = 0
+    support_grace_substeps = 0
+    support_grace_limit = max(3, round(0.10 / dt))
     # Render FPS must never change the game outcome.  The previous code used
     # 24 solver steps *per rendered frame*, so a 30 FPS production render had
     # ten times more damping/constraints than a 3 FPS scout.  Keep a stable
     # physics clock and only sample it at the requested render cadence.
-    substeps, dt, horizontal_damping, vertical_damping = solver_timing(fps, softness)
     iterations = max(40, round(88 - softness * 44))
-    target_bend = max(0.30, 1.0 - 0.70 * softness ** 1.35)
+    # Softness removes *bending* stiffness while the adjacent constraints keep
+    # the gel nearly inextensible.  At 75/100 the chain must be free to fold at
+    # an end-first impact; retaining the old 8%/3% long-range correction every
+    # 1/240 s made even the nominal 100% body read as a rigid baton.
+    target_bend = max(0.01, (1.0 - softness) ** 1.55)
     bend_strength = 1.0 - (1.0 - target_bend) ** (1.0 / iterations)
-    target_long_bend = max(0.16, 1.0 - 0.84 * softness ** 1.28)
+    target_long_bend = max(0.005, (1.0 - softness) ** 1.85)
     long_bend_strength = 1.0 - (1.0 - target_long_bend) ** (1.0 / iterations)
     collision_radii = [variant.shape.radius] * node_count
     neighbor_skip = max(5, math.ceil(2.0 * variant.shape.radius * 0.86 / rest) + 1)
+    physics_step = 0
 
-    for frame in range(frame_count):
+    # Include a shared terminal sample at exactly ``trial_duration``. Without
+    # it, a 3 fps scout stopped at 5.667 s while a 30 fps render reached
+    # 5.967 s, which could change the visible outcome and final Foley event.
+    for frame in range(frame_count + 1):
         frame_intensity = 0.0
         frame_ramp_intensity = 0.0
         frame_receiver_intensity = 0.0
         node_intensity = [0.0] * node_count
         if frame:
             for substep in range(substeps):
-                time = ((frame - 1) + (substep + 1) / substeps) / fps
-                for index in range(node_count):
-                    velocity = points[index] - previous[index]
-                    velocity.x *= horizontal_damping
-                    velocity.y *= vertical_damping
-                    # Moving ramps can otherwise catapult rigid presets outside
-                    # the vertical frame before the comparison becomes legible.
-                    # The cap behaves like air drag, not an invisible wall, and
-                    # still leaves enough lateral motion for distinct outcomes.
-                    max_horizontal_step = (2.65 - softness * 0.35) * dt
-                    velocity.x = max(-max_horizontal_step, min(max_horizontal_step, velocity.x))
-                    if time > exit_time:
-                        # A gentle post-ramp restoring acceleration keeps the
-                        # ballistic fall centred on the visible cup across the
-                        # seeded ramp phases, without teleporting the body.
-                        velocity.x += (variant.receiver.x - points[index].x) * 1.15 * dt * dt
+                # Count fixed simulation ticks rather than reconstructing time
+                # from the render frame.  For 3 and 30 FPS this is the exact
+                # same 240 Hz clock and therefore the same event timeline.
+                physics_step += 1
+                time = physics_step * dt
+                previous_substep_points = [point.copy() for point in points]
+                substep_ramp_intensity = 0.0
+                substep_receiver_intensity = 0.0
+                velocities = [point - old_point for point, old_point in zip(points, previous)]
+                use_support_damping = not released and support_grace_substeps > 0
+                if not use_support_damping:
+                    raw_center_velocity = sum(velocities, Vector((0.0, 0.0))) / node_count
+                    center_velocity = raw_center_velocity * air_drag
+                    integrated_velocities = [
+                        center_velocity
+                        + (velocity - raw_center_velocity) * internal_damping
+                        for velocity in velocities
+                    ]
+                else:
+                    # Strong damping is legitimate while the moving marble is
+                    # supporting the body.  It is permanently disabled after
+                    # release, so it cannot bend the ballistic arc toward a cup.
+                    integrated_velocities = [
+                        Vector(
+                            (
+                                velocity.x * supported_horizontal,
+                                velocity.y * supported_vertical,
+                            )
+                        )
+                        for velocity in velocities
+                    ]
+                for index, velocity in enumerate(integrated_velocities):
                     previous[index] = points[index].copy()
-                    fall_boost = 1.28 if time > exit_time else 1.0
                     points[index] += velocity + Vector(
-                        (0.0, -9.81 * variant.gravity_scale * fall_boost * dt * dt)
+                        (0.0, -9.81 * variant.gravity_scale * dt * dt)
                     )
 
+                substep_ramp_contact = False
                 for iteration in range(iterations):
                     direction = range(node_count - 1) if iteration % 2 == 0 else range(node_count - 2, -1, -1)
                     for index in direction:
@@ -627,21 +753,99 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: S
                         constrain_self_collision(points, collision_radii, neighbor_skip, softness)
                     for index in range(node_count):
                         radius = collision_radii[index]
-                        points[index], previous[index], ramp_hit, receiver_hit = collide_point(
+                        (
+                            points[index],
+                            previous[index],
+                            ramp_hit,
+                            receiver_hit,
+                            ramp_contact,
+                        ) = collide_point(
                             points[index], previous[index], radius, softness, time, dt, variant,
                             trial_duration,
+                            stage_motion.ramp_phase_offset,
+                            iteration == 0,
                         )
+                        substep_ramp_contact = substep_ramp_contact or ramp_contact
                         intensity = max(ramp_hit, receiver_hit)
+                        substep_ramp_intensity = max(substep_ramp_intensity, ramp_hit)
+                        substep_receiver_intensity = max(
+                            substep_receiver_intensity,
+                            receiver_hit,
+                        )
                         frame_intensity = max(frame_intensity, intensity)
                         frame_ramp_intensity = max(frame_ramp_intensity, ramp_hit)
                         frame_receiver_intensity = max(frame_receiver_intensity, receiver_hit)
                         node_intensity[index] = max(node_intensity[index], intensity)
-        impact_memory = max(min(1.0, frame_intensity / 8.0), impact_memory * (0.78 + softness * 0.13))
+                if not released:
+                    if substep_ramp_contact:
+                        ramp_clear_substeps = 0
+                        support_grace_substeps = support_grace_limit
+                    else:
+                        support_grace_substeps = max(0, support_grace_substeps - 1)
+                        if time >= exit_time:
+                            ramp_clear_substeps += 1
+                            if ramp_clear_substeps >= 3:
+                                released = True
+                                support_grace_substeps = 0
+
+                center_x = sum(point.x for point in points) / node_count
+                frames.physics_samples.append(
+                    (
+                        time,
+                        substep_ramp_intensity,
+                        substep_receiver_intensity,
+                        center_x,
+                    )
+                )
+
+                # A clean receiver entry has no collision impulse.  Detect the
+                # geometric crossing on the same fixed tick and linearly solve
+                # its within-tick time instead of waiting for a rendered frame.
+                receiver = variant.receiver
+                radius = variant.shape.radius
+                previous_low = min(point.y for point in previous_substep_points) - radius
+                current_low = min(point.y for point in points) - radius
+                drop = previous_low - current_low
+                if previous_low > receiver.top >= current_low and drop > 1e-12:
+                    crossing_ratio = max(
+                        0.0,
+                        min(1.0, (previous_low - receiver.top) / drop),
+                    )
+                    crossing_x = [
+                        previous_point.x
+                        + (current_point.x - previous_point.x) * crossing_ratio
+                        for previous_point, current_point in zip(
+                            previous_substep_points,
+                            points,
+                        )
+                    ]
+                    fully_inside_opening = max(
+                        abs(point_x - receiver.x) + radius
+                        for point_x in crossing_x
+                    ) < receiver.inner_radius
+                    if fully_inside_opening:
+                        crossing_time = (physics_step - 1 + crossing_ratio) * dt
+                        frames.receiver_entries.append(
+                            (
+                                crossing_time,
+                                drop / dt,
+                                sum(crossing_x) / node_count,
+                            )
+                        )
+        # Contact deformation is sampled for shape keys, but its relaxation is
+        # physical time rather than "per rendered frame".  This keeps the gel
+        # response identical in a 3 fps scout and a 30 fps production render.
+        impact_retention_per_second = 0.44 + softness * 0.28
+        node_retention_per_second = 0.48 + softness * 0.30
+        impact_memory = max(
+            min(1.0, frame_intensity / 8.0),
+            impact_memory * impact_retention_per_second ** (1.0 / fps),
+        )
         for index in range(node_count):
             local_contact = min(1.0, node_intensity[index] / 6.5)
             node_impact_memory[index] = max(
                 local_contact,
-                node_impact_memory[index] * (0.76 + softness * 0.19),
+                node_impact_memory[index] * node_retention_per_second ** (1.0 / fps),
             )
         frames.append(
             (
@@ -656,26 +860,56 @@ def simulate_chain(softness_percent: int, frame_count: int, fps: int, variant: S
     return frames
 
 
-def contact_events(simulated, softness: int, start: int, fps: int):
+def contact_events(
+    simulated,
+    softness: int,
+    start: int,
+    fps: int,
+    variant: SoftBodyVariant,
+):
     """Extract debounced Foley cues from the collisions actually simulated."""
 
     events = []
-    minimum_gap = max(2, round(fps * 0.14))
+    stage_offset = (start - 1) / fps
+    physics_samples = getattr(simulated, "physics_samples", None)
+    physics_dt = float(getattr(simulated, "physics_dt", 1.0 / fps))
+    if physics_samples is None:
+        # Compatibility for hand-authored diagnostic traces. Production
+        # simulations always provide the 240 Hz sidecar above.
+        physics_samples = [
+            (index / fps, sample[3], sample[4], sample[5])
+            for index, sample in enumerate(simulated)
+        ]
+
+    def event_frame(local_time: float) -> int:
+        local_frame = int(math.floor(local_time * fps + 0.5))
+        return min(start + local_frame, start + len(simulated) - 2)
+
+    minimum_gap = 0.14
+    peak_radius = max(1, round(0.035 / physics_dt))
     for kind, sample_index, threshold in (
-        ("ramp-contact", 3, 0.32),
-        ("receiver-contact", 4, 0.24),
+        ("ramp-contact", 1, 0.32),
+        ("receiver-contact", 2, 0.24),
     ):
-        trace = [sample[sample_index] for sample in simulated]
+        trace = [sample[sample_index] for sample in physics_samples]
         candidates = []
         for index, strength in enumerate(trace):
-            left = max(0, index - 2)
-            right = min(len(trace), index + 3)
-            if strength >= threshold and strength >= max(trace[left:right]):
+            left = max(0, index - peak_radius)
+            right = min(len(trace), index + peak_radius + 1)
+            local_peak = max(trace[left:right])
+            # Pick the first sample of a flat maximum. This keeps a sustained
+            # contact plateau from becoming render-rate-dependent chatter.
+            first_peak = left + trace[left:right].index(local_peak)
+            if strength >= threshold and strength == local_peak and index == first_peak:
                 candidates.append((index, strength))
 
         selected = []
         for index, strength in candidates:
-            if selected and index - selected[-1][0] < minimum_gap:
+            sample_time = float(physics_samples[index][0])
+            if (
+                selected
+                and sample_time - float(physics_samples[selected[-1][0]][0]) < minimum_gap
+            ):
                 if strength > selected[-1][1]:
                     selected[-1] = (index, strength)
             else:
@@ -686,17 +920,70 @@ def contact_events(simulated, softness: int, start: int, fps: int):
         event_limit = 6 if kind == "ramp-contact" else 3
         strongest = sorted(selected, key=lambda item: item[1], reverse=True)[:event_limit]
         for index, strength in sorted(strongest):
-            center_x = simulated[index][5]
+            local_time = float(physics_samples[index][0])
+            center_x = float(physics_samples[index][3])
             events.append(
                 {
-                    "time": (start - 1 + index) / fps,
-                    "frame": start + index,
+                    "time": stage_offset + local_time,
+                    "frame": event_frame(local_time),
                     "kind": kind,
                     "strength": min(1.0, 0.18 + math.sqrt(strength) * 0.24),
                     "pan": max(-0.72, min(0.72, center_x / 4.2)),
                     "softness": softness,
                 }
             )
+
+    # A clean pass through the opening has no rim impulse, but it still has a
+    # real geometric event: the lower capsule surface crosses the receiver top.
+    # Emit one understated entry cue only when no rim/wall cue already covers it.
+    receiver_entries = getattr(simulated, "receiver_entries", None)
+    if receiver_entries is None:
+        receiver_entries = []
+        receiver = variant.receiver
+        radius = variant.shape.radius
+        for index in range(1, len(simulated)):
+            previous_points = simulated[index - 1][0]
+            current_points = simulated[index][0]
+            previous_low = min(point.y for point in previous_points) - radius
+            current_low = min(point.y for point in current_points) - radius
+            drop = previous_low - current_low
+            if previous_low > receiver.top >= current_low and drop > 1e-12:
+                crossing_ratio = (previous_low - receiver.top) / drop
+                crossing_x = [
+                    previous_point.x
+                    + (current_point.x - previous_point.x) * crossing_ratio
+                    for previous_point, current_point in zip(previous_points, current_points)
+                ]
+                if max(
+                    abs(point_x - receiver.x) + radius for point_x in crossing_x
+                ) < receiver.inner_radius:
+                    receiver_entries.append(
+                        (
+                            (index - 1 + crossing_ratio) / fps,
+                            drop * fps,
+                            sum(crossing_x) / len(crossing_x),
+                        )
+                    )
+
+    for local_time, crossing_speed, center_x in receiver_entries:
+        event_time = stage_offset + float(local_time)
+        nearby_contact = any(
+            event["kind"] == "receiver-contact"
+            and abs(float(event["time"]) - event_time) <= 0.18
+            for event in events
+        )
+        if not nearby_contact:
+            events.append(
+                {
+                    "time": event_time,
+                    "frame": event_frame(float(local_time)),
+                    "kind": "receiver-entry",
+                    "strength": min(0.68, 0.28 + float(crossing_speed) * 0.055),
+                    "pan": max(-0.72, min(0.72, float(center_x) / 4.2)),
+                    "softness": softness,
+                }
+            )
+        break
     return sorted(events, key=lambda event: event["time"])
 
 
@@ -714,7 +1001,9 @@ def skin_capsule(
     rest = 2.0 * half_length / (node_count - 1)
     center = sum(chain_points, Vector((0.0, 0.0))) / node_count
     rigid_tangent = (chain_points[-1] - chain_points[0]).normalized()
-    visible_deformation = softness ** 1.18 * (0.96 - 0.06 * softness)
+    visible_deformation, contact_softness, buckling_softness = deformation_response(
+        softness
+    )
     displayed_points = []
     for index, point in enumerate(chain_points):
         local_x = -half_length + 2.0 * half_length * index / (node_count - 1)
@@ -736,6 +1025,104 @@ def skin_capsule(
             + smoothed_impacts[index + 1] * 0.24
             for index in range(1, node_count - 1)
         ] + [smoothed_impacts[-1]]
+    # Contact-driven axial compression and broad pressure bending provide the
+    # visible payoff expected from 75/100% gel.  The deformation comes solely
+    # from measured node impulses: in free flight (or at 0%) this is exactly
+    # zero.  Both operations preserve the chain centre, while the radius
+    # compensation below approximately conserves volume.
+    mean_impact = sum(smoothed_impacts) / node_count
+    peak_impact = max(smoothed_impacts)
+    contact_amount = contact_softness * min(
+        0.18,
+        mean_impact * 0.14 + peak_impact * 0.075,
+    )
+    buckling_profile = [0.0] * node_count
+    contact_memory = 0.0
+    if contact_amount > 1e-6:
+        displayed_center = sum(displayed_points, Vector((0.0, 0.0))) / node_count
+        display_axis = (displayed_points[-1] - displayed_points[0]).normalized()
+        support_normal = Vector((-display_axis.y, display_axis.x))
+        if support_normal.y < 0.0:
+            support_normal.negate()
+        # Pressure travels through the complete volume. The first mode is a
+        # broad arch; two wide alternating lobes create the recognisable
+        # 75/100% crumple from measured contact pressure. Their centres follow
+        # the pressure centroid, never the receiver. Axial coordinates remain
+        # monotonic, preventing V spikes and self-crossing loops.
+        pressure_amplitude = (
+            variant.shape.radius * contact_softness * peak_impact * 0.44
+        )
+        arch_weights = [
+            4.0
+            * (index / max(1, node_count - 1))
+            * (1.0 - index / max(1, node_count - 1))
+            for index in range(node_count)
+        ]
+        mean_arch = sum(arch_weights) / node_count
+        pressure_total = sum(smoothed_impacts)
+        pressure_centroid = (
+            sum(
+                index / max(1, node_count - 1) * value
+                for index, value in enumerate(smoothed_impacts)
+            )
+            / max(pressure_total, 1e-8)
+        )
+        phase_shift = math.sin(variant.wrinkle_phase) * 0.045
+        first_center = max(0.20, min(0.44, pressure_centroid - 0.16 + phase_shift))
+        second_center = max(
+            0.58,
+            min(0.82, pressure_centroid + 0.23 - phase_shift * 0.35),
+        )
+        mode_values = []
+        for index in range(node_count):
+            coordinate = index / max(1, node_count - 1)
+            envelope = 4.0 * coordinate * (1.0 - coordinate)
+            first_lobe = math.exp(-((coordinate - first_center) / 0.16) ** 2)
+            second_lobe = math.exp(-((coordinate - second_center) / 0.23) ** 2)
+            mode_values.append(
+                envelope * (first_lobe - 0.58 * second_lobe)
+            )
+        mean_mode = sum(mode_values) / node_count
+        mode_values = [value - mean_mode for value in mode_values]
+        mode_peak = max(1e-8, max(abs(value) for value in mode_values))
+        buckling_profile = [value / mode_peak for value in mode_values]
+        contact_memory = min(1.0, max(impact, mean_impact, peak_impact * 0.72))
+        extreme_boost = 1.0 + 0.55 * buckling_softness ** 3
+        buckling_amplitude = (
+            variant.shape.radius
+            * buckling_softness
+            * contact_memory
+            * (0.38 + peak_impact * 0.24)
+            * extreme_boost
+        )
+        contact_shape = []
+        for index, point in enumerate(displayed_points):
+            relative = point - displayed_center
+            axial = display_axis * relative.dot(display_axis)
+            transverse = relative - axial
+            pressure_offset = (arch_weights[index] - mean_arch) * pressure_amplitude
+            buckling_offset = buckling_profile[index] * buckling_amplitude
+            contact_shape.append(
+                displayed_center
+                + axial * (1.0 - contact_amount)
+                + transverse
+                + support_normal * (pressure_offset + buckling_offset)
+            )
+        for _ in range(3):
+            contact_shape = [
+                contact_shape[0] * 0.82 + contact_shape[1] * 0.18
+            ] + [
+                contact_shape[index - 1] * 0.18
+                + contact_shape[index] * 0.64
+                + contact_shape[index + 1] * 0.18
+                for index in range(1, node_count - 1)
+            ] + [
+                contact_shape[-1] * 0.82 + contact_shape[-2] * 0.18
+            ]
+        correction = displayed_center - sum(
+            contact_shape, Vector((0.0, 0.0))
+        ) / node_count
+        displayed_points = [point + correction for point in contact_shape]
     result = []
     for base in base_vertices:
         x, y, z = base
@@ -755,6 +1142,10 @@ def skin_capsule(
             blend = coordinate - first
         center = displayed_points[first].lerp(displayed_points[second], blend)
         local_impact = smoothed_impacts[first] * (1.0 - blend) + smoothed_impacts[second] * blend
+        local_fold = (
+            buckling_profile[first] * (1.0 - blend)
+            + buckling_profile[second] * blend
+        )
         before = displayed_points[max(0, first - 1)]
         after = displayed_points[min(node_count - 1, second + 1)]
         tangent = (after - before).normalized()
@@ -772,7 +1163,7 @@ def skin_capsule(
             ),
         )
         volume_scale = max(0.88, min(1.15, 1.0 / math.sqrt(local_stretch)))
-        contact_compression = min(0.62, local_impact * (0.18 + softness * 0.45))
+        contact_compression = min(0.78, local_impact * (0.20 + softness * 0.58))
         cross_radius = max(1e-5, math.sqrt(y * y + z * z))
         lower_weight = max(0.0, -z / cross_radius) ** 1.55
         upper_weight = max(0.0, z / cross_radius) ** 1.8
@@ -780,11 +1171,28 @@ def skin_capsule(
         # orthogonal expansion approximates incompressible gel and removes the
         # implausible shrinking seen in the previous mesh.
         normal_scale = max(
-            0.62,
-            1.0 - contact_compression * (0.46 * lower_weight + 0.08 * upper_weight),
+            0.52,
+            1.0 - contact_compression * (0.56 * lower_weight + 0.10 * upper_weight),
         )
-        mean_height_scale = max(0.68, 1.0 - contact_compression * 0.24)
-        depth_scale = min(1.22, 1.0 / math.sqrt(mean_height_scale))
+        mean_height_scale = max(0.62, 1.0 - contact_compression * 0.30)
+        depth_scale = min(1.28, 1.0 / math.sqrt(mean_height_scale))
+        # Two asymmetric, contact-fed surface creases add the localized folds
+        # visible in the reference without periodically changing the complete
+        # radius. One crease lives chiefly on the upper skin and the opposing
+        # one on the underside; the displaced volume expands out of plane.
+        fold_contact = (
+            buckling_softness
+            * contact_memory
+            * abs(local_fold)
+            * (1.0 + 0.45 * buckling_softness ** 3)
+        )
+        fold_crease = min(0.18, fold_contact * (0.13 + local_impact * 0.05))
+        crease_side = upper_weight if local_fold >= 0.0 else lower_weight
+        normal_scale *= 1.0 - fold_crease * (0.22 + crease_side * 0.78)
+        depth_scale = min(
+            1.36,
+            depth_scale / math.sqrt(max(0.72, 1.0 - fold_crease * 0.62)),
+        )
         radius_scale = volume_scale
         result.append(
             (
@@ -817,10 +1225,15 @@ def add_capsule(
     frame_end: int,
     fps: int,
     variant: SoftBodyVariant,
+    stage_index: int,
 ):
     base_vertices, faces = capsule_geometry(variant)
-    simulated = simulate_chain(softness, end - start + 1, fps, variant)
-    events = contact_events(simulated, softness, start, fps)
+    simulated = simulate_chain(softness, end - start + 1, fps, variant, stage_index)
+    events = contact_events(simulated, softness, start, fps, variant)
+    # The final state exists for FPS-independent outcome/event auditing at the
+    # exact trial boundary. Keep only the preceding N samples as N visible
+    # shape keys, otherwise Blender would compress N+1 states into N frames.
+    visible_simulated = simulated[:-1]
     shapes = [
         skin_capsule(
             base_vertices,
@@ -831,7 +1244,7 @@ def add_capsule(
             index,
             variant,
         )
-        for index, (points, impact, node_impacts, _ramp_hit, _receiver_hit, _center_x) in enumerate(simulated)
+        for index, (points, impact, node_impacts, _ramp_hit, _receiver_hit, _center_x) in enumerate(visible_simulated)
     ]
     capsule = add_mesh(f"Sliding cylinder {softness}%", shapes[0], faces, gold)
     basis = capsule.shape_key_add(name="Basis")
@@ -892,29 +1305,6 @@ def add_receiver(marble, gold, variant: SoftBodyVariant):
         )
     wall = add_mesh("Open marble receiver", vertices, faces, marble, bevel_width=0.035)
 
-    rings = 24
-    bowl_base = top - receiver.bowl_depth - 0.06
-    bowl_vertices = [(receiver.x, 0.0, bowl_base)]
-    for ring in range(1, rings + 1):
-        ratio = ring / rings
-        radius = inner_radius * ratio
-        z = bowl_base + receiver.bowl_depth * ratio * ratio
-        for segment in range(segments):
-            angle = math.tau * segment / segments
-            bowl_vertices.append((receiver.x + math.cos(angle) * radius, math.sin(angle) * radius, z))
-    bowl_faces = []
-    for segment in range(segments):
-        bowl_faces.append((0, 1 + segment, 1 + (segment + 1) % segments))
-    for ring in range(1, rings):
-        inner = 1 + (ring - 1) * segments
-        outer = 1 + ring * segments
-        for segment in range(segments):
-            following = (segment + 1) % segments
-            bowl_faces.append((inner + segment, outer + segment, outer + following, inner + following))
-    bowl = add_mesh("Concave receiver interior", bowl_vertices, bowl_faces, marble)
-    solidify = bowl.modifiers.new("Bowl thickness", "SOLIDIFY")
-    solidify.thickness = 0.08
-
     bpy.ops.mesh.primitive_torus_add(
         major_segments=96,
         minor_segments=16,
@@ -966,10 +1356,16 @@ def main() -> None:
     frame_end = max(5, round(args.duration * args.fps))
     if args.stage_softness is None:
         stages = variant.stages
+        stage_indices = tuple(range(len(stages)))
         stage_frames = max(1, round(frame_end / len(stages)))
         frame_end = stage_frames * len(stages)
     else:
-        stages = (min(variant.stages, key=lambda level: abs(level - args.stage_softness)),)
+        stage_index = min(
+            range(len(variant.stages)),
+            key=lambda index: abs(variant.stages[index] - args.stage_softness),
+        )
+        stages = (variant.stages[stage_index],)
+        stage_indices = (stage_index,)
         stage_frames = frame_end
 
     gold = liquid_gold_material(args.seed, variant)
@@ -977,12 +1373,21 @@ def main() -> None:
     backdrop = background_material(variant)
     add_background(backdrop)
     add_receiver(marble, gold, variant)
-    add_ramp(marble, gold, variant, frame_end, args.fps, stage_frames)
+    add_ramp(marble, gold, variant, frame_end, args.fps, stage_frames, stage_indices)
     all_events = []
-    for index, softness in enumerate(stages):
+    for index, (softness, stage_index) in enumerate(zip(stages, stage_indices)):
         start = 1 + index * stage_frames
         end = min(frame_end, (index + 1) * stage_frames)
-        _capsule, events = add_capsule(gold, softness, start, end, frame_end, args.fps, variant)
+        _capsule, events = add_capsule(
+            gold,
+            softness,
+            start,
+            end,
+            frame_end,
+            args.fps,
+            variant,
+            stage_index,
+        )
         all_events.extend(events)
 
     if args.events:
@@ -1007,6 +1412,8 @@ def main() -> None:
     camera.data.type = "ORTHO"
     camera.data.ortho_scale = 8.35
     camera.data.lens = 70
+    # Frame the complete unbiased left-to-right ballistic spread. The camera is
+    # fixed and never follows either the capsule or receiver during a trial.
     look_at(camera, (0.0, 0.0, 3.12))
     bpy.context.scene.camera = camera
 
