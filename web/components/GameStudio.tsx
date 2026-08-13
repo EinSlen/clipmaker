@@ -29,6 +29,7 @@ import type { MusicTrack } from "@/lib/types";
 type Theme = "neon" | "sunset" | "ice";
 type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
+type SoftBodyObstacle = "auto" | "moving-slide" | "stair-cascade" | "v-stairs" | "pipe-bend" | "peg-grid" | "twin-gears" | "compression-ring";
 type RenderedSoundPack = SoundPack | "glass" | "premium-foley";
 type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed";
 type GameOutcome =
@@ -71,6 +72,9 @@ type GameResult = {
   variantRamp: string | null;
   variantPalette: string | null;
   variantReceiver: string | null;
+  variantObstacle: string | null;
+  variantObstacleLabel: string | null;
+  variantSourceVideo: string | null;
   stagePreset: string | null;
   softnessStages: number[] | null;
   title: string;
@@ -127,15 +131,35 @@ const softBodyPaletteLabels: Record<string, string> = {
   "pale-gold": "studio or pâle",
 };
 
+const softBodyObstacles: { id: SoftBodyObstacle; label: string; description: string; image: string }[] = [
+  { id: "auto", label: "Rotation automatique", description: "Une famille différente est choisie par la graine.", image: "/game-previews/soft-body-slide.webp" },
+  { id: "moving-slide", label: "Rampe mobile", description: "Glissades, relances et chute dans le tube.", image: "/game-previews/soft-body-obstacles/moving-slide.webp" },
+  { id: "stair-cascade", label: "Cascade de marches", description: "Rebonds successifs sur un escalier suspendu.", image: "/game-previews/soft-body-obstacles/stair-cascade.webp" },
+  { id: "v-stairs", label: "Double escalier en V", description: "Deux descentes convergent vers le réceptacle.", image: "/game-previews/soft-body-obstacles/v-stairs.webp" },
+  { id: "pipe-bend", label: "Coude de tuyau", description: "Le corps se plie dans un conduit transparent.", image: "/game-previews/soft-body-obstacles/pipe-bend.webp" },
+  { id: "peg-grid", label: "Grille de plots", description: "Compression et déviation entre plusieurs plots.", image: "/game-previews/soft-body-obstacles/peg-grid.webp" },
+  { id: "twin-gears", label: "Doubles engrenages", description: "Deux roues contrarotatives entraînent le corps.", image: "/game-previews/soft-body-obstacles/twin-gears.webp" },
+  { id: "compression-ring", label: "Presse à rouleaux", description: "Une ouverture mobile mesure la déformation.", image: "/game-previews/soft-body-obstacles/compression-ring.webp" },
+];
+
+const softBodyObstacleLabels = Object.fromEntries(
+  softBodyObstacles.filter((item) => item.id !== "auto").map((item) => [item.id, item.label])
+) as Record<string, string>;
+
 function localizedSoftBodyVariant(result: GameResult): string | null {
   if (!result.variantShape || !result.variantRamp || !result.variantPalette) {
     return result.variantLabel;
   }
   return [
+    result.variantObstacle
+      ? softBodyObstacleLabels[result.variantObstacle] || result.variantObstacleLabel || result.variantObstacle
+      : null,
     softBodyShapeLabels[result.variantShape] || result.variantShape,
-    softBodyRampLabels[result.variantRamp] || result.variantRamp,
+    result.variantObstacle === "moving-slide"
+      ? softBodyRampLabels[result.variantRamp] || result.variantRamp
+      : null,
     softBodyPaletteLabels[result.variantPalette] || result.variantPalette,
-  ].join(" · ");
+  ].filter(Boolean).join(" · ");
 }
 
 const themes: { id: Theme; label: string; colors: string }[] = [
@@ -172,6 +196,7 @@ export function GameStudio() {
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
   const [title, setTitle] = React.useState("Will the ball escape?");
   const [seed, setSeed] = React.useState("");
+  const [softBodyObstacle, setSoftBodyObstacle] = React.useState<SoftBodyObstacle>("auto");
   const [rendering, setRendering] = React.useState(false);
   const [elapsed, setElapsed] = React.useState(0);
   const [batchSize, setBatchSize] = React.useState(1);
@@ -297,6 +322,7 @@ export function GameStudio() {
             musicMode,
             musicVolume,
             title,
+            obstacle: game === "soft-body-slide" ? softBodyObstacle : undefined,
             seed: requestedSeed
               ? ((requestedSeed + index - 1) % 2_147_483_647) + 1
               : undefined,
@@ -491,7 +517,7 @@ export function GameStudio() {
                   </span>
                   {item.id === "soft-body-slide" && (
                     <span className="absolute bottom-3 right-3 rounded-full border border-amber-200/20 bg-black/60 px-2.5 py-1 text-[9px] font-semibold text-amber-100 backdrop-blur">
-                      2 500+ variantes
+                      7 parcours physiques
                     </span>
                   )}
                   {(item.id === "laser-dodge" || item.id === "boss-battle") && (
@@ -627,6 +653,29 @@ export function GameStudio() {
                     Chaque graine compose un studio premium différent tout en
                     gardant le rendu marbre et métal de la référence.
                   </p>
+                  <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>Famille d’obstacles</span>
+                    <select
+                      value={softBodyObstacle}
+                      onChange={(event) => setSoftBodyObstacle(event.target.value as SoftBodyObstacle)}
+                      className="field-control h-11"
+                    >
+                      {softBodyObstacles.map((item) => (
+                        <option key={item.id} value={item.id}>{item.label}</option>
+                      ))}
+                    </select>
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      {softBodyObstacles.find((item) => item.id === softBodyObstacle)?.description}
+                    </span>
+                    <span className="relative mx-auto block aspect-[9/16] w-40 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={softBodyObstacles.find((item) => item.id === softBodyObstacle)?.image}
+                        alt={`Aperçu gameplay : ${softBodyObstacles.find((item) => item.id === softBodyObstacle)?.label}`}
+                        className="h-full w-full object-contain"
+                      />
+                    </span>
+                  </label>
                   <div className="flex h-11 items-center gap-3 rounded-xl border border-amber-200/20 bg-amber-200/5 px-3 text-xs font-medium text-white">
                     <span className="h-3 w-16 rounded-full bg-gradient-to-r from-slate-300 via-amber-200 to-yellow-600" />
                     <span>Variation studio automatique</span>
@@ -676,7 +725,7 @@ export function GameStudio() {
                 </h4>
                 <p className="mt-1 text-xs text-ink-500">
                   {game === "soft-body-slide"
-                    ? "Foley ASMR dynamique calé sur la rampe et le réceptacle. La musique reste facultative."
+                    ? "Foley ASMR dynamique calé sur chaque obstacle et le réceptacle. La musique reste facultative."
                     : "Associe une musique sous licence et des effets de collision adaptés au jeu."}
                 </p>
               </div>
@@ -880,8 +929,8 @@ export function GameStudio() {
                   </div>
                   {game === "soft-body-slide" && (
                     <span className="block text-[10px] leading-4 text-ink-500">
-                      La graine change la forme, la rampe, le métal, le décor,
-                      le réceptacle, la physique et les niveaux.
+                        La graine change la famille d’obstacles, la forme, le métal,
+                        le réceptacle, la physique et les niveaux.
                     </span>
                   )}
                   {game === "laser-dodge" && (

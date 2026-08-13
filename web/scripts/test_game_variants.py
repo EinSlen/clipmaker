@@ -20,6 +20,7 @@ from game_variants import (
 from soft_body_variants import (
     AIR_RETENTION_PER_SECOND,
     PHYSICS_HZ,
+    OBSTACLES,
     SHAPES,
     deformation_response,
     natural_ramp_exit_time,
@@ -136,6 +137,17 @@ class SoftBodyVariantTests(unittest.TestCase):
         keys = {variant_for_seed(seed).key for seed in range(10_000)}
         self.assertGreaterEqual(len(keys), 2_500)
 
+    def test_every_obstacle_family_can_be_forced_and_is_reported(self):
+        for obstacle in OBSTACLES:
+            variant = variant_for_seed(910104, obstacle.key)
+            self.assertEqual(variant.obstacle, obstacle)
+            self.assertIn(obstacle.key, variant.key)
+            self.assertEqual(variant.receiver.x, obstacle.receiver_x)
+
+    def test_automatic_obstacles_cover_the_complete_catalog(self):
+        resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}
+        self.assertEqual(resolved, {obstacle.key for obstacle in OBSTACLES})
+
     def test_capsule_presets_remain_slender_and_reference_scaled(self):
         for shape in SHAPES:
             total_length = 2.0 * (shape.cylinder_half + shape.radius)
@@ -164,8 +176,8 @@ class SoftBodyVariantTests(unittest.TestCase):
 
     def test_soft_body_solver_clock_is_render_fps_independent(self):
         expected_internal = 0.70 - 0.18
-        expected_supported_horizontal = 0.910 ** 60.0
-        expected_supported_vertical = (0.993 - 0.005) ** 60.0
+        expected_supported_horizontal = 0.990 ** 60.0
+        expected_supported_vertical = (0.998 - 0.001) ** 60.0
         for fps in (3, 24, 30, 60):
             substeps, dt, internal, air_drag = solver_timing(fps, 1.0)
             supported_horizontal, supported_vertical = supported_body_damping(fps, 1.0)
@@ -190,20 +202,16 @@ class SoftBodyVariantTests(unittest.TestCase):
             if fps in (3, 30):
                 self.assertEqual(steps_per_second, PHYSICS_HZ)
 
-    def test_ramp_exit_is_position_and_velocity_continuous(self):
+    def test_ramp_sweep_remains_periodic_for_the_complete_trial(self):
         variant = variant_for_seed(910104)
         for stage_index in range(5):
             phase = stage_motion_for(variant, stage_index).ramp_phase_offset
-            exit_time = natural_ramp_exit_time(variant, 6.0, phase)
-            epsilon = 1e-7
-            before = ramp_motion_state(exit_time - epsilon, variant, 6.0, phase)
-            at_exit = ramp_motion_state(exit_time, variant, 6.0, phase)
-            after = ramp_motion_state(exit_time + epsilon, variant, 6.0, phase)
-            self.assertAlmostEqual(before[0], at_exit[0], places=4)
-            self.assertAlmostEqual(at_exit[0], after[0], places=4)
-            self.assertAlmostEqual(before[1], at_exit[1], places=4)
-            self.assertAlmostEqual(at_exit[1], after[1], places=4)
-            self.assertGreater(abs(at_exit[1]), 1.0)
+            period = variant.ramp.sweep_period
+            for sample in (0.0, 0.37, 1.13, 4.72):
+                first = ramp_motion_state(sample, variant, 6.0, phase)
+                repeated = ramp_motion_state(sample + period, variant, 6.0, phase)
+                self.assertAlmostEqual(first[0], repeated[0], places=10)
+                self.assertAlmostEqual(first[1], repeated[1], places=10)
 
     def test_stage_motion_is_seeded_and_only_a_micro_variation(self):
         variant = variant_for_seed(910104)
@@ -219,8 +227,12 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_render_level_release_motion_is_neutral_and_nonzero(self):
         for seed in range(910100, 910125):
             variant = variant_for_seed(seed)
-            self.assertGreaterEqual(abs(variant.start_rotation), 0.10)
-            self.assertLessEqual(abs(variant.start_rotation), 0.24)
+            if variant.obstacle.key in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
+                self.assertGreater(variant.start_rotation, 1.40)
+                self.assertLess(variant.start_rotation, 1.75)
+            else:
+                self.assertGreaterEqual(abs(variant.start_rotation), 0.10)
+                self.assertLessEqual(abs(variant.start_rotation), 0.24)
             self.assertGreaterEqual(abs(variant.initial_spin), 0.20)
             self.assertLessEqual(abs(variant.initial_spin), 0.34)
             self.assertEqual(
@@ -314,7 +326,7 @@ class SoftBodyAudioTests(unittest.TestCase):
             for frame in range(1, 181):
                 (frames / f"frame_{frame:04d}.png").write_bytes(str(frame).encode("ascii"))
             repaired = PREMIUM_RENDERER.repair_stage_cut_frames(frames, 180, 5)
-            self.assertEqual(repaired, (37, 73, 109, 145))
+            self.assertEqual(repaired, (28, 51, 94, 140))
             for boundary in repaired:
                 self.assertEqual(
                     (frames / f"frame_{boundary:04d}.png").read_bytes(),

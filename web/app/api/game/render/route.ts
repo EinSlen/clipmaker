@@ -24,6 +24,7 @@ type RenderRequest = {
   musicMode?: 'hit-reveal' | 'continuous';
   musicVolume?: number;
   title?: string;
+  obstacle?: 'auto' | 'moving-slide' | 'stair-cascade' | 'v-stairs' | 'pipe-bend' | 'peg-grid' | 'twin-gears' | 'compression-ring';
 };
 
 type RenderOutcome =
@@ -118,6 +119,8 @@ export async function POST(request: Request) {
       : defaultMusicMode;
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
+    const obstacleKeys = ['auto', 'moving-slide', 'stair-cascade', 'v-stairs', 'pipe-bend', 'peg-grid', 'twin-gears', 'compression-ring'] as const;
+    const obstacle = body.obstacle && obstacleKeys.includes(body.obstacle) ? body.obstacle : 'auto';
     const filename = `${game}-${seed}-${randomId()}.mp4`;
     const output = path.join(RENDERS_DIR, filename);
     const script = path.join(process.cwd(), 'scripts', game === 'soft-body-slide' ? 'render-premium-3d.py' : 'render-ball-escape.py');
@@ -191,6 +194,7 @@ export async function POST(request: Request) {
       '--music-volume', String(musicVolume),
       '--music-mode', musicMode,
     ];
+    if (game === 'soft-body-slide') rendererArgs.push('--obstacle', obstacle);
     if (musicPath) rendererArgs.push('--music', musicPath);
     const renderer = await runRenderer(rendererArgs);
     let rendererMetadata: {
@@ -210,6 +214,9 @@ export async function POST(request: Request) {
       variant_ramp?: string;
       variant_palette?: string;
       variant_receiver?: string;
+      variant_obstacle?: string;
+      variant_obstacle_label?: string;
+      variant_source_video?: string;
       stage_preset?: string;
       softness_stages?: number[];
     } = {};
@@ -250,6 +257,9 @@ export async function POST(request: Request) {
       variantRamp: rendererMetadata.variant_ramp || null,
       variantPalette: rendererMetadata.variant_palette || null,
       variantReceiver: rendererMetadata.variant_receiver || null,
+      variantObstacle: rendererMetadata.variant_obstacle || null,
+      variantObstacleLabel: rendererMetadata.variant_obstacle_label || null,
+      variantSourceVideo: rendererMetadata.variant_source_video || null,
       stagePreset: rendererMetadata.stage_preset || null,
       softnessStages: rendererMetadata.softness_stages || null,
       title,

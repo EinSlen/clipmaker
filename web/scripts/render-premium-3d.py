@@ -15,7 +15,7 @@ import wave
 from array import array
 from pathlib import Path
 
-from soft_body_variants import variant_for_seed, variant_summary
+from soft_body_variants import OBSTACLE_KEYS, stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -26,8 +26,9 @@ def softness_stages(seed: int) -> tuple[int, ...]:
 def repair_stage_cut_frames(frames: Path, frame_count: int, stage_count: int) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
+    spans = stage_frame_spans(frame_count, stage_count)
     for stage_index in range(1, stage_count):
-        boundary = round(frame_count * stage_index / stage_count) + 1
+        boundary = spans[stage_index][0]
         source = frames / f"frame_{boundary + 1:04d}.png"
         target = frames / f"frame_{boundary:04d}.png"
         if source.is_file() and target.is_file():
@@ -284,10 +285,10 @@ def build_video_filter(duration: float, stages: tuple[int, ...]) -> str:
     filters = [
         "fps=30:round=up",
     ]
-    segment = duration / len(stages)
-    for index, softness in enumerate(stages):
-        start = index * segment
-        end = duration if index == len(stages) - 1 else (index + 1) * segment - 0.001
+    for index, (softness, (start, stop)) in enumerate(
+        zip(stages, stage_time_spans(duration, len(stages)))
+    ):
+        end = duration if index == len(stages) - 1 else stop - 0.001
         filters.append(
             f"drawtext=fontfile='{font_file}':text='{softness}% SOFT':expansion=none:"
             "fontcolor=white:fontsize=78:x=(w-text_w)/2:y=112:"
@@ -309,7 +310,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     video_preset = os.environ.get("PREMIUM_VIDEO_PRESET", "slow")
     video_crf = os.environ.get("PREMIUM_VIDEO_CRF", "14")
     frame_count = round(args.duration * fps)
-    variant = variant_for_seed(args.seed)
+    variant = variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
     events: list[dict[str, object]] = []
     event_source = "simulated-collision-peaks"
@@ -327,6 +328,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             "--frames", str(frames), "--duration", str(args.duration), "--fps", str(fps),
             "--width", str(width), "--height", str(height), "--samples", str(samples), "--seed", str(args.seed),
             "--softness", str(args.difficulty), "--theme", args.theme, "--title", args.title,
+            "--obstacle", args.obstacle,
             "--events", str(motion_events),
         ]
         subprocess.run(blender_command, check=True)
@@ -412,6 +414,7 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--obstacle", choices=("auto",) + OBSTACLE_KEYS, default="auto")
     parser.add_argument("--theme", choices=("neon", "sunset", "ice"), default="sunset")
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--music")

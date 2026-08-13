@@ -9,14 +9,15 @@ reproduit exactement le même jeu, les mêmes impacts et la même bande-son.
 - **Organic Escape** — balle à traînée qui brise des contours organiques avec impacts ASMR accordés.
 - **Laser Dodge** — pilote néon, lasers mobiles, collisions géométriques et échecs tardifs variables.
 - **Boss Battle** — arène physique, arme articulée, Warden blindé, impacts et vainqueur déterministes.
-- **Soft Body Slide 3D** — scène Blender premium avec capsule déformable, matériaux métal/marbre et éclairage studio.
+- **Soft Body 3D** — scène Blender premium avec capsule déformable, sept familles d'obstacles physiques, matériaux métal/marbre et éclairage studio.
 
 Les trajectoires, collisions et issues viennent des solveurs physiques. Aucun trou ne suit une balle,
 aucune vitesse n'est corrigée vers une ouverture et aucun vainqueur n'est imposé après coup. Une graine
 peut donc produire une réussite, un impact ou un échec naturel, désormais indiqué explicitement dans le rendu.
 
 Les quatre moteurs 2D possèdent leur propre réglage dans l'interface : anneaux, couches, lasers ou
-points de vie. Soft Body sélectionne automatiquement cinq niveaux et une variante 3D complète. Les
+points de vie. Soft Body compare cinq niveaux et permet de choisir une famille d'obstacles ou une
+rotation automatique reproductible par graine. Les
 thèmes, graines, sons, musiques et durées restent communs lorsque le moteur les prend en charge afin
 de créer beaucoup de variantes sans dupliquer le code de publication.
 
@@ -24,7 +25,7 @@ de créer beaucoup de variantes sans dupliquer le code de publication.
 
 1. Ouvrir l'onglet **Jeux** et choisir un format.
 2. Régler la durée, la difficulté, la palette et l'accroche en anglais. Soft Body verrouille la durée
-   à 30 secondes et compare automatiquement cinq niveaux de souplesse.
+   à 30 secondes, compare automatiquement cinq niveaux de souplesse et propose sept parcours physiques.
 3. Garder la découverte musicale automatique. **Révélation à l'impact** est sélectionnée par défaut
    pour Ball Escape, Laser Dodge et Boss Battle ; Organic Escape conserve une bande-son continue et
    Soft Body un mix Foley/ambiance synchronisé aux contacts physiques.
@@ -79,8 +80,9 @@ curl -X POST http://127.0.0.1:3000/api/game/render \
 Valeurs de `game` : `ball-escape`, `shape-tunnel`, `laser-dodge`, `boss-battle`, `soft-body-slide`.
 
 Le moteur `soft-body-slide` utilise Blender Eevee en mode headless. Il rejoue cinq essais progressifs
-avec une rampe mobile, une capsule à contraintes physiques et un vrai réceptacle ouvert. La graine
-sélectionne une combinaison reproductible parmi plus de 2 000 variantes : forme, parcours, palette,
+avec une capsule à contraintes physiques et un vrai réceptacle ouvert. Le paramètre `obstacle` accepte
+`auto`, `moving-slide`, `stair-cascade`, `v-stairs`, `pipe-bend`, `peg-grid`, `twin-gears` ou
+`compression-ring`. La graine sélectionne une combinaison reproductible de forme, parcours, palette,
 réceptacle, progression de souplesse et paramètres physiques. Son mix par défaut associe les Foley
 ASMR synchronisés à une musique ambiante originale qui change avec la graine ; une piste choisie ou
 sous licence peut la remplacer. Blender est inclus dans l'image Docker officielle du projet.

@@ -19,11 +19,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 from soft_body_variants import (
+    OBSTACLE_KEYS,
+    REFERENCE_SCENE_OFFSET_X,
     SoftBodyVariant,
     deformation_response,
     natural_ramp_exit_time,
     ramp_motion_state,
     solver_timing,
+    stage_frame_spans,
     stage_motion_for,
     supported_body_damping,
     variant_for_seed,
@@ -42,6 +45,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--softness", type=int, required=True)
     parser.add_argument("--stage-softness", type=int)
+    parser.add_argument("--obstacle", choices=("auto",) + OBSTACLE_KEYS, default="auto")
     parser.add_argument("--events")
     parser.add_argument("--theme", choices=("neon", "sunset", "ice"), required=True)
     parser.add_argument("--title", required=True)
@@ -294,14 +298,86 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
+def obstacle_segments(variant: SoftBodyVariant):
+    """Return visible/collision-aligned line obstacles in the simulation plane."""
+
+    key = variant.obstacle.key
+    if key == "stair-cascade":
+        return [
+            ((-3.15 + index * 0.76, 5.55 - index * 0.52),
+             (-2.51 + index * 0.76, 5.55 - index * 0.52), 0.110)
+            for index in range(7)
+        ]
+    if key == "v-stairs":
+        result = []
+        for index in range(5):
+            z = 5.62 - index * 0.46
+            left_x = -3.18 + index * 0.46
+            right_x = 3.18 - index * 0.46
+            result.append(((left_x, z), (left_x + 0.62, z), 0.105))
+            result.append(((right_x - 0.62, z), (right_x, z), 0.105))
+        return result
+    if key == "pipe-bend":
+        # An open elbow assembled from short tangent segments.  The glass mesh
+        # below uses these exact coordinates, so contacts never float.
+        centerline = [
+            (-1.82, 5.55), (-1.82, 4.82), (-1.68, 4.30), (-1.35, 3.88),
+            (-0.86, 3.58), (-0.25, 3.43), (0.42, 3.36), (1.10, 3.31),
+        ]
+        walls = []
+        half_opening = 0.47
+        for index in range(len(centerline) - 1):
+            start, end = centerline[index], centerline[index + 1]
+            dx, dz = end[0] - start[0], end[1] - start[1]
+            length = max(1e-9, math.hypot(dx, dz))
+            normal = (-dz / length, dx / length)
+            for side in (-1.0, 1.0):
+                offset = (normal[0] * half_opening * side, normal[1] * half_opening * side)
+                walls.append((
+                    ((start[0] + offset[0]), (start[1] + offset[1])),
+                    ((end[0] + offset[0]), (end[1] + offset[1])),
+                    0.085,
+                ))
+        return walls
+    return []
+
+
+def obstacle_circles(time: float, variant: SoftBodyVariant):
+    """Return (centre, radius, centre velocity, angular speed) colliders."""
+
+    key = variant.obstacle.key
+    if key == "peg-grid":
+        circles = []
+        for row in range(5):
+            z = 5.30 - row * 0.64
+            offset = 0.33 if row % 2 else 0.0
+            for column in range(7):
+                circles.append((Vector((-1.98 + column * 0.66 + offset, z)), 0.115, Vector((0.0, 0.0)), 0.0))
+        return circles
+    if key == "twin-gears":
+        speed = math.tau / 1.38
+        return [
+            (Vector((-0.80, 3.78)), 0.60, Vector((0.0, 0.0)), -speed),
+            (Vector((0.80, 3.78)), 0.60, Vector((0.0, 0.0)), speed),
+        ]
+    if key == "compression-ring":
+        angle = math.tau * time / 1.72 - math.pi / 2
+        half_gap = 0.92 - 0.28 * (0.5 + 0.5 * math.sin(angle))
+        velocity = -0.28 * 0.5 * math.tau / 1.72 * math.cos(angle)
+        return [
+            (Vector((-half_gap, 3.82)), 0.58, Vector((-velocity, 0.0)), 0.0),
+            (Vector((half_gap, 3.82)), 0.58, Vector((velocity, 0.0)), 0.0),
+        ]
+    return []
+
+
 def add_ramp(
     marble,
     gold,
     variant: SoftBodyVariant,
     frame_end: int,
     fps: int,
-    stage_frames: int,
-    stage_indices: tuple[int, ...],
+    stage_spans: tuple[tuple[int, int, int], ...],
 ):
     segments = 192
     half_width, thickness = variant.ramp.half_width, variant.ramp.thickness * 0.68
@@ -356,9 +432,11 @@ def add_ramp(
         trim.parent = ramp
 
     for frame in range(1, frame_end + 1):
-        stage_slot = min(len(stage_indices) - 1, (frame - 1) // stage_frames)
-        stage_index = stage_indices[stage_slot]
-        local_frame = (frame - 1) - stage_slot * stage_frames
+        stage_index, start, end = next(
+            span for span in stage_spans if span[1] <= frame <= span[2]
+        )
+        local_frame = frame - start
+        stage_frames = end - start + 1
         stage_motion = stage_motion_for(variant, stage_index)
         ramp.location.x = ramp_position(
             local_frame / fps,
@@ -372,6 +450,117 @@ def add_ramp(
             for point in curve.keyframe_points:
                 point.interpolation = "LINEAR"
     return ramp
+
+
+def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int):
+    """Build the selected obstacle family from the same primitives as physics."""
+
+    key = variant.obstacle.key
+    if key == "moving-slide":
+        return
+
+    if key == "pipe-bend":
+        glass = material("Clear pipe glass", (0.66, 0.82, 0.92, 0.34), roughness=0.10, clearcoat=0.48)
+        glass.blend_method = "BLEND"
+        glass.use_screen_refraction = True
+        walls = obstacle_segments(variant)
+        for side in range(2):
+            side_segments = walls[side::2]
+            path = [side_segments[0][0], *[segment[1] for segment in side_segments]]
+            curve = bpy.data.curves.new(f"Continuous glass pipe wall {side + 1}", type="CURVE")
+            curve.dimensions = "3D"
+            curve.resolution_u = 10
+            curve.bevel_depth = 0.085
+            curve.bevel_resolution = 5
+            spline = curve.splines.new("NURBS")
+            spline.points.add(len(path) - 1)
+            for point, coordinate in zip(spline.points, path):
+                point.co = (coordinate[0], 0.0, coordinate[1], 1.0)
+            spline.use_endpoint_u = True
+            spline.order_u = min(3, len(path))
+            wall = bpy.data.objects.new(f"Continuous glass pipe wall {side + 1}", curve)
+            bpy.context.collection.objects.link(wall)
+            wall.data.materials.append(glass)
+    else:
+        for index, (start, end, thickness) in enumerate(obstacle_segments(variant)):
+            midpoint = ((start[0] + end[0]) * 0.5, 0.0, (start[1] + end[1]) * 0.5)
+            length = math.hypot(end[0] - start[0], end[1] - start[1])
+            angle = math.atan2(end[1] - start[1], end[0] - start[0])
+            bpy.ops.mesh.primitive_cube_add(size=1.0, location=midpoint, rotation=(0.0, -angle, 0.0))
+            block = bpy.context.object
+            block.name = f"{variant.obstacle.label} segment {index + 1}"
+            block.dimensions = (length, variant.ramp.half_width * 2.0, thickness * 2.0)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            block.data.materials.append(marble)
+            bevel = block.modifiers.new("Marble edge", "BEVEL")
+            bevel.width = min(0.045, thickness * 0.32)
+            bevel.segments = 3
+
+    circles = obstacle_circles(0.0, variant)
+    for index, (center, radius, _velocity, _angular_speed) in enumerate(circles):
+        gear_root = None
+        if key == "twin-gears":
+            gear_root = bpy.data.objects.new(f"Gear {index + 1} physical root", None)
+            bpy.context.collection.objects.link(gear_root)
+            gear_root.location = (center.x, 0.0, center.y)
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=64,
+            radius=radius - 0.15 if key == "twin-gears" else radius,
+            depth=variant.ramp.half_width * 2.15,
+            location=(center.x, 0.0, center.y),
+            rotation=(math.pi / 2, 0.0, 0.0),
+        )
+        collider = bpy.context.object
+        collider.name = f"{variant.obstacle.label} collider {index + 1}"
+        collider.data.materials.append(marble if key == "peg-grid" else gold)
+        if gear_root is not None:
+            collider.parent = gear_root
+            collider.location = (0.0, 0.0, 0.0)
+        bevel = collider.modifiers.new("Polished obstacle edge", "BEVEL")
+        bevel.width = 0.035
+        bevel.segments = 3
+        if key == "twin-gears":
+            for tooth in range(16):
+                angle = math.tau * tooth / 16
+                bpy.ops.mesh.primitive_cube_add(
+                    size=1.0,
+                    location=(0.0, 0.0, 0.0),
+                    rotation=(0.0, -angle, 0.0),
+                )
+                tooth_obj = bpy.context.object
+                tooth_obj.name = f"Gear {index + 1} tooth {tooth + 1}"
+                tooth_obj.dimensions = (0.22, variant.ramp.half_width * 1.8, 0.10)
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+                tooth_obj.data.materials.append(marble)
+                tooth_obj.parent = gear_root
+                tooth_obj.location = (
+                    math.cos(angle) * (radius - 0.10),
+                    0.0,
+                    math.sin(angle) * (radius - 0.10),
+                )
+            for frame in range(1, frame_end + 1):
+                gear_root.rotation_euler[1] = _angular_speed * (frame - 1) / fps
+                gear_root.keyframe_insert("rotation_euler", index=1, frame=frame)
+            if gear_root.animation_data and gear_root.animation_data.action:
+                for curve in gear_root.animation_data.action.fcurves:
+                    for point in curve.keyframe_points:
+                        point.interpolation = "LINEAR"
+
+    if key == "compression-ring":
+        # Animate the two rollers with the exact analytic centres used by the
+        # collider. Their motion compresses the body; it never targets the cup.
+        roller_objects = [obj for obj in bpy.context.collection.objects if obj.name.startswith(variant.obstacle.label)]
+        for frame in range(1, frame_end + 1):
+            time = (frame - 1) / fps
+            states = obstacle_circles(time, variant)
+            for obj, state in zip(roller_objects, states):
+                obj.location.x = state[0].x
+                obj.keyframe_insert("location", frame=frame)
+        for obj in roller_objects:
+            if obj.animation_data and obj.animation_data.action:
+                for curve in obj.animation_data.action.fcurves:
+                    for point in curve.keyframe_points:
+                        point.interpolation = "LINEAR"
 
 
 def capsule_geometry(
@@ -470,6 +659,55 @@ def smooth_centerline(points, rest: float, passes: int):
     return result
 
 
+def resolve_obstacle_contact(
+    point: Vector,
+    previous: Vector,
+    center: Vector,
+    minimum: float,
+    surface_step: Vector,
+    softness: float,
+    dt: float,
+    resolve_velocity: bool,
+) -> tuple[Vector, Vector, float, bool]:
+    delta = point - center
+    distance = delta.length
+    if distance >= minimum:
+        return point, previous, 0.0, False
+    if distance > 1e-8:
+        normal = delta / distance
+    else:
+        fallback = point - previous
+        normal = fallback.normalized() if fallback.length > 1e-8 else Vector((0.0, 1.0))
+    correction = normal * (minimum - distance)
+    point += correction
+    previous += correction
+    intensity = 0.0
+    if resolve_velocity:
+        velocity = point - previous
+        relative = velocity - surface_step
+        normal_speed = relative.dot(normal)
+        intensity = abs(normal_speed) / max(dt, 1e-6)
+        if normal_speed < 0.0:
+            normal_impulse = -(1.44 - softness * 0.25) * normal_speed
+            velocity += normal * normal_impulse
+            tangent = Vector((normal.y, -normal.x))
+            tangent_error = surface_step.dot(tangent) - velocity.dot(tangent)
+            friction_limit = normal_impulse * (0.055 + softness * 0.065)
+            velocity += tangent * max(-friction_limit, min(friction_limit, tangent_error))
+            previous = point - velocity
+    return point, previous, intensity, True
+
+
+def closest_segment_point(point: Vector, start, end) -> Vector:
+    a, b = Vector(start), Vector(end)
+    direction = b - a
+    length_squared = direction.length_squared
+    if length_squared <= 1e-12:
+        return a
+    progress = max(0.0, min(1.0, (point - a).dot(direction) / length_squared))
+    return a + direction * progress
+
+
 def collide_point(
     point: Vector,
     previous: Vector,
@@ -486,7 +724,7 @@ def collide_point(
     receiver_intensity = 0.0
     ramp_contact = False
     local_x = point.x - ramp_position(time, variant, trial_duration, ramp_phase_offset)
-    if variant.ramp.minimum <= local_x <= variant.ramp.maximum:
+    if variant.obstacle.key == "moving-slide" and variant.ramp.minimum <= local_x <= variant.ramp.maximum:
         height = physics_ramp_height(local_x, variant)
         slope = physics_ramp_slope(local_x, variant)
         normal = Vector((-slope, 1.0)).normalized()
@@ -507,19 +745,58 @@ def collide_point(
                 normal_speed = relative.dot(normal)
                 ramp_intensity = max(ramp_intensity, abs(normal_speed) / max(dt, 1e-6))
                 if normal_speed < 0.0:
-                    restitution = (0.14 - softness * 0.10) * variant.bounce_scale
+                    # The moving reference ramp repeatedly relaunches the
+                    # capsule.  A near-inelastic 0.14 response made ours settle
+                    # on the marble for four seconds before a scripted-looking
+                    # drop.  Keep rigid stages crisp and soft stages damped,
+                    # while allowing both to become airborne after real hits.
+                    restitution = (0.52 - softness * 0.28) * variant.bounce_scale
                     tangent = Vector((normal.y, -normal.x))
                     normal_impulse = -(1.0 + restitution) * normal_speed
                     velocity += normal * normal_impulse
                     target_tangent = ramp_step.dot(tangent)
                     tangent_error = target_tangent - velocity.dot(tangent)
-                    friction = (0.018 + softness * 0.018) * variant.coupling_scale
+                    friction = (0.045 + softness * 0.020) * variant.coupling_scale
                     tangent_impulse = max(
                         -normal_impulse * friction,
                         min(normal_impulse * friction, tangent_error),
                     )
                     velocity += tangent * tangent_impulse
                     previous = point - velocity
+
+    if variant.obstacle.key != "moving-slide":
+        for start, end, thickness in obstacle_segments(variant):
+            point, previous, intensity, contact = resolve_obstacle_contact(
+                point,
+                previous,
+                closest_segment_point(point, start, end),
+                radius + thickness,
+                Vector((0.0, 0.0)),
+                softness,
+                dt,
+                resolve_velocity,
+            )
+            ramp_intensity = max(ramp_intensity, intensity)
+            ramp_contact = ramp_contact or contact
+        for center, obstacle_radius, center_velocity, angular_speed in obstacle_circles(time, variant):
+            broadphase = radius + obstacle_radius + 0.06
+            if abs(point.x - center.x) > broadphase or abs(point.y - center.y) > broadphase:
+                continue
+            delta = point - center
+            tangent = Vector((-delta.y, delta.x)).normalized() if delta.length > 1e-8 else Vector((1.0, 0.0))
+            surface_step = (center_velocity + tangent * angular_speed * obstacle_radius) * dt
+            point, previous, intensity, contact = resolve_obstacle_contact(
+                point,
+                previous,
+                center,
+                radius + obstacle_radius,
+                surface_step,
+                softness,
+                dt,
+                resolve_velocity,
+            )
+            ramp_intensity = max(ramp_intensity, intensity)
+            ramp_contact = ramp_contact or contact
 
     # Thin circular rim first. The opening remains real: misses continue below
     # frame instead of landing on an invisible cylinder cap.
@@ -620,7 +897,8 @@ def simulate_chain(
     rest = 2.0 * half_length / (node_count - 1)
     stage_motion = stage_motion_for(variant, stage_index)
     rotation = variant.start_rotation + stage_motion.rotation_offset
-    start_x = variant.start_x + stage_motion.spawn_x_offset
+    scene_offset = REFERENCE_SCENE_OFFSET_X if variant.obstacle.key == "moving-slide" else 0.0
+    start_x = variant.start_x + scene_offset + stage_motion.spawn_x_offset
     start_height = variant.start_height + stage_motion.spawn_height_offset
     points = []
     for index in range(node_count):
@@ -638,6 +916,10 @@ def simulate_chain(
     initial_linear_velocity = Vector(
         (stage_motion.linear_velocity_x, stage_motion.linear_velocity_y)
     )
+    if variant.obstacle.key == "stair-cascade":
+        initial_linear_velocity.x += 0.62
+    elif variant.obstacle.key == "v-stairs":
+        initial_linear_velocity.x += 0.48
     previous = []
     for point in points:
         radius_from_center = point - center
@@ -683,7 +965,11 @@ def simulate_chain(
     bend_strength = 1.0 - (1.0 - target_bend) ** (1.0 / iterations)
     target_long_bend = max(0.005, (1.0 - softness) ** 1.85)
     long_bend_strength = 1.0 - (1.0 - target_long_bend) ** (1.0 / iterations)
-    collision_radii = [variant.shape.radius] * node_count
+    # Soft material compresses at narrow passages. Keeping the collision radius
+    # fully rigid made 100% softness unable to pass gaps that its visible mesh
+    # clearly squeezed through. Adjacent constraints still conserve its volume.
+    collision_radius = variant.shape.radius * (1.0 - softness * 0.18)
+    collision_radii = [collision_radius] * node_count
     neighbor_skip = max(5, math.ceil(2.0 * variant.shape.radius * 0.86 / rest) + 1)
     physics_step = 0
 
@@ -819,11 +1105,17 @@ def simulate_chain(
                             points,
                         )
                     ]
-                    fully_inside_opening = max(
-                        abs(point_x - receiver.x) + radius
+                    # A soft capsule enters progressively: one end crosses,
+                    # bends on the rim, then the remaining body follows. Requiring
+                    # every solver node plus a full radius to fit on the very
+                    # first tick missed the visible 100% entry. Count a genuine
+                    # entry once a clear majority of its spine is over the open
+                    # aperture; this only records geometry and applies no force.
+                    inside_fraction = sum(
+                        abs(point_x - receiver.x) + radius < receiver.inner_radius
                         for point_x in crossing_x
-                    ) < receiver.inner_radius
-                    if fully_inside_opening:
+                    ) / len(crossing_x)
+                    if inside_fraction >= 0.70:
                         crossing_time = (physics_step - 1 + crossing_ratio) * dt
                         frames.receiver_entries.append(
                             (
@@ -887,8 +1179,10 @@ def contact_events(
 
     minimum_gap = 0.14
     peak_radius = max(1, round(0.035 / physics_dt))
+    obstacle_key = getattr(getattr(variant, "obstacle", None), "key", "moving-slide")
+    primary_contact_kind = "ramp-contact" if obstacle_key == "moving-slide" else "obstacle-contact"
     for kind, sample_index, threshold in (
-        ("ramp-contact", 1, 0.32),
+        (primary_contact_kind, 1, 0.32),
         ("receiver-contact", 2, 0.24),
     ):
         trace = [sample[sample_index] for sample in physics_samples]
@@ -917,7 +1211,7 @@ def contact_events(
 
         # Contact solvers can emit tiny residual peaks while resting.  Preserve
         # the meaningful impacts and cap pathological high-frequency chatter.
-        event_limit = 6 if kind == "ramp-contact" else 3
+        event_limit = 6 if kind in {"ramp-contact", "obstacle-contact"} else 3
         strongest = sorted(selected, key=lambda item: item[1], reverse=True)[:event_limit]
         for index, strength in sorted(strongest):
             local_time = float(physics_samples[index][0])
@@ -1352,13 +1646,12 @@ def add_background(value):
 def main() -> None:
     args = arguments()
     reset_scene()
-    variant = variant_for_seed(args.seed)
+    variant = variant_for_seed(args.seed, args.obstacle)
     frame_end = max(5, round(args.duration * args.fps))
     if args.stage_softness is None:
         stages = variant.stages
         stage_indices = tuple(range(len(stages)))
-        stage_frames = max(1, round(frame_end / len(stages)))
-        frame_end = stage_frames * len(stages)
+        spans = stage_frame_spans(frame_end, len(stages))
     else:
         stage_index = min(
             range(len(variant.stages)),
@@ -1366,18 +1659,24 @@ def main() -> None:
         )
         stages = (variant.stages[stage_index],)
         stage_indices = (stage_index,)
-        stage_frames = frame_end
+        spans = ((1, frame_end),)
+
+    stage_spans = tuple(
+        (stage_index, start, end)
+        for stage_index, (start, end) in zip(stage_indices, spans)
+    )
 
     gold = liquid_gold_material(args.seed, variant)
     marble = marble_material(variant)
     backdrop = background_material(variant)
     add_background(backdrop)
     add_receiver(marble, gold, variant)
-    add_ramp(marble, gold, variant, frame_end, args.fps, stage_frames, stage_indices)
+    if variant.obstacle.key == "moving-slide":
+        add_ramp(marble, gold, variant, frame_end, args.fps, stage_spans)
+    else:
+        add_obstacle_geometry(marble, gold, variant, frame_end, args.fps)
     all_events = []
-    for index, (softness, stage_index) in enumerate(zip(stages, stage_indices)):
-        start = 1 + index * stage_frames
-        end = min(frame_end, (index + 1) * stage_frames)
+    for softness, (stage_index, start, end) in zip(stages, stage_spans):
         _capsule, events = add_capsule(
             gold,
             softness,
@@ -1406,15 +1705,16 @@ def main() -> None:
             encoding="utf-8",
         )
 
-    bpy.ops.object.camera_add(location=(1.05, -14.8, 7.25))
+    target = variant.obstacle
+    bpy.ops.object.camera_add(location=(target.camera_target_x + 1.05, -14.8, 7.25))
     camera = bpy.context.object
     camera.name = "Fixed reference camera"
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 8.35
+    camera.data.ortho_scale = target.camera_scale
     camera.data.lens = 70
     # Frame the complete unbiased left-to-right ballistic spread. The camera is
     # fixed and never follows either the capsule or receiver during a trial.
-    look_at(camera, (0.0, 0.0, 3.12))
+    look_at(camera, (target.camera_target_x, 0.0, target.camera_target_z))
     bpy.context.scene.camera = camera
 
     key_color = mix_color(variant.palette.key_light, (1.0, 0.93, 0.83), 0.72)

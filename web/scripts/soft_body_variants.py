@@ -14,6 +14,46 @@ import random
 Color = tuple[float, float, float]
 PHYSICS_HZ = 240
 AIR_RETENTION_PER_SECOND = 0.992
+REFERENCE_SWEEP_SCALE = 1.35
+# Static composition offset shared by the ramp and capsule. It never depends
+# on the receiver or on the simulated body state.
+REFERENCE_SCENE_OFFSET_X = 2.44
+REFERENCE_STAGE_DURATIONS = (4.438, 3.804, 7.173, 7.675, 6.841)
+
+
+def stage_frame_spans(frame_count: int, stage_count: int = 5) -> tuple[tuple[int, int], ...]:
+    """Return one-based inclusive spans matching the reference's edit rhythm."""
+
+    if frame_count < stage_count or stage_count <= 0:
+        raise ValueError("frame_count must provide at least one frame per stage")
+    weights = REFERENCE_STAGE_DURATIONS if stage_count == 5 else (1.0,) * stage_count
+    total = sum(weights)
+    boundaries = [0]
+    cumulative = 0.0
+    for weight in weights[:-1]:
+        cumulative += weight
+        boundaries.append(round(frame_count * cumulative / total))
+    boundaries.append(frame_count)
+    return tuple(
+        (boundaries[index] + 1, boundaries[index + 1])
+        for index in range(stage_count)
+    )
+
+
+def stage_time_spans(duration: float, stage_count: int = 5) -> tuple[tuple[float, float], ...]:
+    """Return second-based label spans with the same reference timing."""
+
+    if duration <= 0.0 or stage_count <= 0:
+        raise ValueError("duration and stage_count must be positive")
+    weights = REFERENCE_STAGE_DURATIONS if stage_count == 5 else (1.0,) * stage_count
+    total = sum(weights)
+    boundaries = [0.0]
+    cumulative = 0.0
+    for weight in weights[:-1]:
+        cumulative += weight
+        boundaries.append(duration * cumulative / total)
+    boundaries.append(duration)
+    return tuple(zip(boundaries, boundaries[1:]))
 
 
 def deformation_response(softness: float) -> tuple[float, float, float]:
@@ -50,14 +90,20 @@ def solver_timing(fps: int, softness: float) -> tuple[int, float, float, float]:
 
 
 def supported_body_damping(fps: int, softness: float) -> tuple[float, float]:
-    """Return strong per-step damping while the body is still ramp-supported."""
+    """Return light contact damping without gluing the body to the ramp.
+
+    The reference relies on the moving marble repeatedly launching the body.
+    Heavy support damping made our capsule settle on the surface for most of a
+    trial, which removed the airborne relaunches that make the comparison read
+    as a physics simulation.
+    """
 
     if fps <= 0:
         raise ValueError("fps must be positive")
     substeps = max(1, round(PHYSICS_HZ / fps))
     actual_hz = fps * substeps
-    horizontal = 0.910 ** (60.0 / actual_hz)
-    vertical = (0.993 - softness * 0.005) ** (60.0 / actual_hz)
+    horizontal = 0.990 ** (60.0 / actual_hz)
+    vertical = (0.998 - softness * 0.001) ** (60.0 / actual_hz)
     return horizontal, vertical
 
 
@@ -120,6 +166,21 @@ class ReceiverPreset:
 
 
 @dataclass(frozen=True)
+class ObstaclePreset:
+    """One complete Oopsi-style physical setup, not a cosmetic skin."""
+
+    key: str
+    label: str
+    source_video: str
+    start_x: float
+    start_height: float
+    receiver_x: float
+    camera_target_x: float
+    camera_target_z: float
+    camera_scale: float
+
+
+@dataclass(frozen=True)
 class StageMotion:
     """Tiny seeded imperfections that keep repeated trials from looking cloned.
 
@@ -147,6 +208,7 @@ class SoftBodyVariant:
     ramp: RampPreset
     palette: PalettePreset
     receiver: ReceiverPreset
+    obstacle: ObstaclePreset
     start_x: float
     start_height: float
     start_rotation: float
@@ -193,8 +255,20 @@ RECEIVERS = (
     ReceiverPreset("classic-cup", "Classic cup", -0.65, 1.17, 1.05, 0.76, 0.46),
     ReceiverPreset("narrow-cup", "Narrow cup", -0.72, 1.04, 0.92, 0.72, 0.56),
     ReceiverPreset("wide-bowl", "Wide bowl", -0.58, 1.34, 1.21, 0.82, 0.35),
-    ReceiverPreset("deep-pedestal", "Deep pedestal", -0.65, 1.13, 1.00, 0.90, 0.66),
+    ReceiverPreset("deep-pedestal", "Deep pedestal", -0.65, 1.33, 1.20, 0.90, 0.66),
 )
+
+
+OBSTACLES = (
+    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.55, 0.0, 3.12, 8.35),
+    ObstaclePreset("stair-cascade", "Falling stair cascade", "7640793378799586581", -2.75, 6.45, 2.35, -0.10, 3.35, 8.15),
+    ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.38, 0.0, 0.0, 3.35, 8.20),
+    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -1.82, 6.52, 2.75, -0.05, 3.45, 8.05),
+    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", -0.32, 6.48, 0.0, 0.0, 3.35, 8.05),
+    ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 8.00),
+    ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 8.00),
+)
+OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
 
 
 STAGE_PRESETS = (
@@ -235,11 +309,11 @@ def ramp_sweep_state(
     phase = variant.motion_phase + phase_offset
     primary_angle = math.tau * time / period - math.pi / 2 + phase
     secondary_angle = math.tau * time / (period * 0.5) - 0.18 - phase * 0.5
-    position = (
+    position = REFERENCE_SCENE_OFFSET_X + REFERENCE_SWEEP_SCALE * (
         ramp.sweep_amplitude * math.sin(primary_angle)
         + ramp.secondary_amplitude * math.sin(secondary_angle)
     )
-    velocity = (
+    velocity = REFERENCE_SWEEP_SCALE * (
         ramp.sweep_amplitude * math.tau / period * math.cos(primary_angle)
         + ramp.secondary_amplitude * math.tau / (period * 0.5) * math.cos(secondary_angle)
     )
@@ -263,17 +337,19 @@ def ramp_motion_state(
     trial_duration: float,
     phase_offset: float = 0.0,
 ) -> tuple[float, float]:
-    """Return a C1 ramp path that coasts off-screen with inherited velocity."""
+    """Return the continuous reference-style sweep for the complete trial.
 
-    exit_time = natural_ramp_exit_time(variant, trial_duration, phase_offset)
-    if time <= exit_time:
-        return ramp_sweep_state(time, variant, phase_offset)
-    origin, exit_velocity = ramp_sweep_state(exit_time, variant, phase_offset)
-    elapsed = time - exit_time
-    return origin + exit_velocity * elapsed, exit_velocity
+    The earlier authored exit made the ramp abruptly stop oscillating and
+    coast away near the end of every stage.  That guaranteed a clean drop but
+    also made all five trials look choreographed.  A perpetual sweep lets the
+    capsule leave the edge, rebound, miss or enter solely from contact physics.
+    """
+
+    del trial_duration
+    return ramp_sweep_state(time, variant, phase_offset)
 
 
-def variant_for_seed(seed: int) -> SoftBodyVariant:
+def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVariant:
     """Return a stable cross-product variant; adjacent seeds change every axis."""
 
     positive = abs(int(seed))
@@ -281,11 +357,31 @@ def variant_for_seed(seed: int) -> SoftBodyVariant:
     ramp = RAMPS[(positive * 3 + positive // 5 + 1) % len(RAMPS)]
     palette = PALETTES[(positive * 7 + positive // 11 + 2) % len(PALETTES)]
     receiver = RECEIVERS[(positive * 5 + positive // 7 + 1) % len(RECEIVERS)]
+    if obstacle_key and obstacle_key != "auto":
+        obstacle = next((item for item in OBSTACLES if item.key == obstacle_key), None)
+        if obstacle is None:
+            raise ValueError(f"Unknown soft-body obstacle family: {obstacle_key}")
+    else:
+        obstacle = OBSTACLES[(positive * 13 + positive // 17 + 4) % len(OBSTACLES)]
+    receiver = ReceiverPreset(
+        receiver.key,
+        receiver.label,
+        obstacle.receiver_x,
+        receiver.outer_radius,
+        receiver.inner_radius,
+        receiver.top,
+        receiver.bowl_depth,
+    )
     stage_key, stages = STAGE_PRESETS[(positive * 11 + positive // 13 + 3) % len(STAGE_PRESETS)]
     rng = random.Random(positive ^ 0x5F7B0D17)
-    start_x = 0.30 + rng.uniform(-0.34, 0.34)
-    start_height = 6.48 + rng.uniform(-0.20, 0.28)
-    start_rotation = rng.uniform(-0.24, 0.18)
+    start_x = obstacle.start_x + rng.uniform(-0.12, 0.12)
+    start_height = obstacle.start_height + rng.uniform(-0.08, 0.12)
+    if obstacle.key in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
+        start_rotation = math.pi / 2 + rng.uniform(-0.10, 0.10)
+    elif obstacle.key == "twin-gears":
+        start_rotation = rng.uniform(-0.10, 0.10)
+    else:
+        start_rotation = rng.uniform(-0.24, 0.18)
     gravity_scale = rng.uniform(0.92, 1.10)
     bounce_scale = rng.uniform(0.90, 1.12)
     coupling_scale = rng.uniform(0.88, 1.16)
@@ -298,14 +394,14 @@ def variant_for_seed(seed: int) -> SoftBodyVariant:
     # motion is deliberately unrelated to the receiver position.
     release_rng = random.Random(positive ^ 0xA31C5E7B)
     minimum_tilt = release_rng.uniform(0.10, 0.15)
-    if abs(start_rotation) < minimum_tilt:
+    if obstacle.key not in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"} and abs(start_rotation) < minimum_tilt:
         fallback_sign = -1.0 if release_rng.random() < 0.5 else 1.0
         start_rotation = math.copysign(
             minimum_tilt,
             start_rotation if abs(start_rotation) > 1e-9 else fallback_sign,
         )
     initial_spin = math.copysign(release_rng.uniform(0.20, 0.34), start_rotation)
-    key = f"{shape.key}--{ramp.key}--{palette.key}--{receiver.key}--{stage_key}"
+    key = f"{obstacle.key}--{shape.key}--{ramp.key}--{palette.key}--{receiver.key}--{stage_key}"
     label = f"{shape.label} · {ramp.label} · {palette.label}"
     return SoftBodyVariant(
         key=key,
@@ -316,6 +412,7 @@ def variant_for_seed(seed: int) -> SoftBodyVariant:
         ramp=ramp,
         palette=palette,
         receiver=receiver,
+        obstacle=obstacle,
         start_x=start_x,
         start_height=start_height,
         start_rotation=start_rotation,
@@ -337,6 +434,9 @@ def variant_summary(variant: SoftBodyVariant) -> dict[str, object]:
         "variant_ramp": variant.ramp.key,
         "variant_palette": variant.palette.key,
         "variant_receiver": variant.receiver.key,
+        "variant_obstacle": variant.obstacle.key,
+        "variant_obstacle_label": variant.obstacle.label,
+        "variant_source_video": variant.obstacle.source_video,
         "stage_preset": variant.stage_key,
         "softness_stages": list(variant.stages),
     }
