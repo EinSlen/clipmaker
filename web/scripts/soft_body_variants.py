@@ -81,6 +81,8 @@ def stage_attempt_frame_spans(
         "twin-gears": 1.35,
         "compression-ring": 2.35,
     }.get(obstacle_key, 6.0)
+    if obstacle_key == "peg-grid" and softness >= 50:
+        target_seconds = 2.25
     if obstacle_key == "pipe-bend" and softness >= 100:
         target_seconds = 2.30
     if obstacle_key == "stair-cascade":
@@ -102,6 +104,8 @@ def stage_attempt_frame_spans(
         "twin-gears": 1.25,
         "compression-ring": 2.10,
     }.get(obstacle_key, target_seconds)
+    if obstacle_key == "peg-grid" and softness >= 50:
+        minimum_complete_seconds = 1.90
     if obstacle_key == "pipe-bend" and softness >= 100:
         minimum_complete_seconds = 2.00
     frame_count = end - start + 1
@@ -109,7 +113,7 @@ def stage_attempt_frame_spans(
     if obstacle_key == "compression-ring" and 3.40 < duration < 4.10:
         target = round(minimum_complete_seconds * fps)
         return ((start, start + target - 1), (start + target, end))
-    if obstacle_key == "peg-grid":
+    if obstacle_key == "peg-grid" and softness < 50:
         target = round(target_seconds * fps)
         if frame_count > target + round(0.90 * fps):
             return ((start, start + target - 1), (start + target, end))
@@ -143,8 +147,46 @@ def deformation_response(softness: float) -> tuple[float, float, float]:
     value = max(0.0, min(1.0, float(softness)))
     visible = value ** 0.92 * (0.97 - 0.05 * value)
     pressure = value ** 1.65
-    buckling = max(0.0, (value - 0.32) / 0.68) ** 1.15
+    # The reference already shows a small, readable bend at 25% when a
+    # cylinder starts entering a narrow peg opening.  Keep that response
+    # subtle, while reserving the large multi-fold silhouette for 75/100%.
+    buckling = max(0.0, (value - 0.18) / 0.82) ** 1.25
     return visible, pressure, buckling
+
+
+def obstacle_collision_radius_scale(softness: float, obstacle_key: str) -> float:
+    """Return the physical cross-section available to narrow obstacles.
+
+    A soft body's visible volume is conserved by the skinning pass, but its
+    collision cross-section must be allowed to flatten.  Peg-grid openings in
+    the source are deliberately sized so 0% is blocked, 25% starts entering,
+    and 50%+ can squeeze through.  Other obstacles retain the conservative
+    collision envelope used by the general solver.
+    """
+
+    value = max(0.0, min(1.0, float(softness)))
+    general = 1.0 - value * 0.18
+    if obstacle_key == "peg-grid":
+        # 25% can visibly enter but remains fractionally wider than the gap;
+        # from 50% onward the flattened cross-section clears the opening.
+        return min(general, 1.0 - 0.28 * value ** 0.62)
+    return general
+
+
+def obstacle_drag_retention_per_second(softness: float, obstacle_key: str) -> float:
+    """Model repeated bar friction while a partly soft body crosses a grid."""
+
+    value = max(0.0, min(1.0, float(softness)))
+    if obstacle_key != "peg-grid" or value < 0.18 or value >= 0.50:
+        return 1.0
+    progress = (value - 0.18) / 0.32
+    return math.exp(math.log(1e-6) * (1.0 - progress) + math.log(0.18) * progress)
+
+
+def obstacle_specimen_offsets(obstacle_key: str) -> tuple[float, ...]:
+    """Match obstacle references that release multiple bodies together."""
+
+    return (-0.64, 0.64) if obstacle_key == "peg-grid" else (0.0,)
 
 
 def solver_timing(fps: int, softness: float) -> tuple[int, float, float, float]:
@@ -340,7 +382,7 @@ OBSTACLES = (
     ObstaclePreset("stair-cascade", "Falling stair cascade", "7640793378799586581", -2.00, 6.45, 1.55, 0.30, 3.35, 9.30),
     ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.38, 0.0, 0.0, 3.35, 8.20),
     ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 8.05),
-    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", -0.32, 6.48, 0.0, 0.0, 3.35, 8.05),
+    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 8.05),
     ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 8.00),
     ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 8.00),
 )

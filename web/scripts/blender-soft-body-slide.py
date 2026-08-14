@@ -25,6 +25,9 @@ from soft_body_variants import (
     SoftBodyVariant,
     deformation_response,
     natural_ramp_exit_time,
+    obstacle_collision_radius_scale,
+    obstacle_drag_retention_per_second,
+    obstacle_specimen_offsets,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
@@ -351,10 +354,9 @@ def static_obstacle_circles(key: str):
     if key == "peg-grid":
         circles = []
         for row in range(5):
-            z = 5.30 - row * 0.64
-            offset = 0.33 if row % 2 else 0.0
-            for column in range(7):
-                circles.append((Vector((-1.98 + column * 0.66 + offset, z)), 0.115, Vector((0.0, 0.0)), 0.0))
+            z = 5.15 - row * 0.62
+            for column in range(6):
+                circles.append((Vector((-1.60 + column * 0.64, z)), 0.115, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
         speed = math.tau / 1.38
@@ -386,6 +388,24 @@ def obstacle_circles(time: float, variant: SoftBodyVariant):
             (Vector((half_gap, 3.82)), 0.58, Vector((velocity, 0.0)), 0.0),
         ]
     return []
+
+
+def nearby_obstacle_circles(point: Vector, time: float, variant: SoftBodyVariant):
+    """Return only spatially relevant colliders for dense static grids."""
+
+    if variant.obstacle.key != "peg-grid":
+        return obstacle_circles(time, variant)
+    circles = static_obstacle_circles("peg-grid")
+    nearest_row = round((5.15 - point.y) / 0.62)
+    nearest_column = round((point.x + 1.60) / 0.64)
+    candidates = []
+    for row in range(max(0, nearest_row - 1), min(4, nearest_row + 1) + 1):
+        for column in range(
+            max(0, nearest_column - 1),
+            min(5, nearest_column + 1) + 1,
+        ):
+            candidates.append(circles[row * 6 + column])
+    return tuple(candidates)
 
 
 def add_ramp(
@@ -514,6 +534,23 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
             bevel.segments = 3
 
     circles = obstacle_circles(0.0, variant)
+    if key == "peg-grid":
+        glass = material("Peg board glass", (0.76, 0.86, 0.94, 0.10), roughness=0.16, clearcoat=0.28)
+        glass.node_tree.nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.10
+        glass.blend_method = "BLEND"
+        if hasattr(glass, "shadow_method"):
+            glass.shadow_method = "NONE"
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 0.34, 3.91))
+        panel = bpy.context.object
+        panel.name = "Transparent peg board"
+        panel.dimensions = (4.18, 0.055, 3.18)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        panel.data.materials.append(glass)
+        if hasattr(panel, "visible_shadow"):
+            panel.visible_shadow = False
+        bevel = panel.modifiers.new("Soft glass edge", "BEVEL")
+        bevel.width = 0.035
+        bevel.segments = 3
     if key == "pipe-bend":
         bpy.ops.mesh.primitive_torus_add(
             major_segments=96,
@@ -818,7 +855,11 @@ def collide_point(
             )
             ramp_intensity = max(ramp_intensity, intensity)
             ramp_contact = ramp_contact or contact
-        for center, obstacle_radius, center_velocity, angular_speed in obstacle_circles(time, variant):
+        for center, obstacle_radius, center_velocity, angular_speed in nearby_obstacle_circles(
+            point,
+            time,
+            variant,
+        ):
             broadphase = radius + obstacle_radius + 0.06
             if abs(point.x - center.x) > broadphase or abs(point.y - center.y) > broadphase:
                 continue
@@ -927,6 +968,8 @@ def simulate_chain(
     fps: int,
     variant: SoftBodyVariant,
     stage_index: int,
+    instance_offset_x: float = 0.0,
+    instance_rotation_offset: float = 0.0,
 ):
     softness = softness_percent / 100.0
     node_count = 41
@@ -936,9 +979,9 @@ def simulate_chain(
     half_length = variant.shape.cylinder_half
     rest = 2.0 * half_length / (node_count - 1)
     stage_motion = stage_motion_for(variant, stage_index)
-    rotation = variant.start_rotation + stage_motion.rotation_offset
+    rotation = variant.start_rotation + stage_motion.rotation_offset + instance_rotation_offset
     scene_offset = REFERENCE_SCENE_OFFSET_X if variant.obstacle.key == "moving-slide" else 0.0
-    start_x = variant.start_x + scene_offset + stage_motion.spawn_x_offset
+    start_x = variant.start_x + scene_offset + stage_motion.spawn_x_offset + instance_offset_x
     start_height = variant.start_height + stage_motion.spawn_height_offset
     points = []
     for index in range(node_count):
@@ -1008,7 +1051,10 @@ def simulate_chain(
     # Soft material compresses at narrow passages. Keeping the collision radius
     # fully rigid made 100% softness unable to pass gaps that its visible mesh
     # clearly squeezed through. Adjacent constraints still conserve its volume.
-    collision_radius = variant.shape.radius * (1.0 - softness * 0.18)
+    collision_radius = variant.shape.radius * obstacle_collision_radius_scale(
+        softness,
+        variant.obstacle.key,
+    )
     collision_radii = [collision_radius] * node_count
     neighbor_skip = max(5, math.ceil(2.0 * variant.shape.radius * 0.86 / rest) + 1)
     physics_step = 0
@@ -1053,6 +1099,16 @@ def simulate_chain(
                             )
                         )
                         for velocity in velocities
+                    ]
+                center_height = sum(point.y for point in points) / node_count
+                if variant.obstacle.key == "peg-grid" and 2.20 <= center_height <= 5.72:
+                    porous_retention = obstacle_drag_retention_per_second(
+                        softness,
+                        variant.obstacle.key,
+                    ) ** dt
+                    integrated_velocities = [
+                        velocity * porous_retention
+                        for velocity in integrated_velocities
                     ]
                 for index, velocity in enumerate(integrated_velocities):
                     previous[index] = points[index].copy()
@@ -1560,10 +1616,24 @@ def add_capsule(
     fps: int,
     variant: SoftBodyVariant,
     stage_index: int,
+    instance_index: int = 0,
+    instance_offset_x: float = 0.0,
+    instance_rotation_offset: float = 0.0,
+    render_subdivision: int = 3,
 ):
     base_vertices, faces = capsule_geometry(variant)
-    simulated = simulate_chain(softness, end - start + 1, fps, variant, stage_index)
+    simulated = simulate_chain(
+        softness,
+        end - start + 1,
+        fps,
+        variant,
+        stage_index,
+        instance_offset_x,
+        instance_rotation_offset,
+    )
     events = contact_events(simulated, softness, start, fps, variant)
+    for event in events:
+        event["body"] = instance_index + 1
     # The final state exists for FPS-independent outcome/event auditing at the
     # exact trial boundary. Keep only the preceding N samples as N visible
     # shape keys, otherwise Blender would compress N+1 states into N frames.
@@ -1580,7 +1650,12 @@ def add_capsule(
         )
         for index, (points, impact, node_impacts, _ramp_hit, _receiver_hit, _center_x) in enumerate(visible_simulated)
     ]
-    capsule = add_mesh(f"Sliding cylinder {softness}%", shapes[0], faces, gold)
+    capsule = add_mesh(
+        f"Sliding cylinder {softness}% body {instance_index + 1}",
+        shapes[0],
+        faces,
+        gold,
+    )
     basis = capsule.shape_key_add(name="Basis")
     capsule.data.shape_keys.use_relative = False
     for index, shape in enumerate(shapes[1:], start=1):
@@ -1603,8 +1678,8 @@ def add_capsule(
                 point.interpolation = "CONSTANT"
     subdivision = capsule.modifiers.new("Polished capsule surface", "SUBSURF")
     subdivision.subdivision_type = "CATMULL_CLARK"
-    subdivision.levels = 2
-    subdivision.render_levels = 3
+    subdivision.levels = min(2, render_subdivision)
+    subdivision.render_levels = render_subdivision
     return capsule, events
 
 
@@ -1728,17 +1803,26 @@ def main() -> None:
         for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
             if attempt_index:
                 attempt_cut_frames.append(attempt_start)
-            _capsule, events = add_capsule(
-                gold,
-                softness,
-                attempt_start,
-                attempt_end,
-                frame_end,
-                args.fps,
-                variant,
-                stage_index + attempt_index * len(stages),
-            )
-            all_events.extend(events)
+            specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
+            for instance_index, instance_offset in enumerate(specimen_offsets):
+                rotation_offset = 0.0
+                if len(specimen_offsets) > 1:
+                    rotation_offset = 0.045 if instance_index == 0 else -0.045
+                _capsule, events = add_capsule(
+                    gold,
+                    softness,
+                    attempt_start,
+                    attempt_end,
+                    frame_end,
+                    args.fps,
+                    variant,
+                    stage_index + attempt_index * len(stages),
+                    instance_index,
+                    instance_offset,
+                    rotation_offset,
+                    1 if args.width < 360 else 3,
+                )
+                all_events.extend(events)
 
     if args.events:
         events_path = Path(args.events)

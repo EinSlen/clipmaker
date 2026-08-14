@@ -24,6 +24,9 @@ from soft_body_variants import (
     SHAPES,
     deformation_response,
     natural_ramp_exit_time,
+    obstacle_collision_radius_scale,
+    obstacle_drag_retention_per_second,
+    obstacle_specimen_offsets,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
@@ -145,8 +148,11 @@ class SoftBodyVariantTests(unittest.TestCase):
             )
 
     def test_peg_payoff_and_pipe_resets_have_enough_physical_time(self):
-        peg = stage_attempt_frame_spans(1, 206, 30, "peg-grid", 100)
-        self.assertGreaterEqual((peg[0][1] - peg[0][0] + 1) / 30, 4.0)
+        peg_quarter = stage_attempt_frame_spans(1, 115, 30, "peg-grid", 25)
+        self.assertGreaterEqual((peg_quarter[0][1] - peg_quarter[0][0] + 1) / 30, 3.8)
+        peg_soft = stage_attempt_frame_spans(1, 206, 30, "peg-grid", 100)
+        self.assertGreater(len(peg_soft), 1)
+        self.assertLessEqual(max((end - start + 1) / 30 for start, end in peg_soft), 2.6)
         pipe = stage_attempt_frame_spans(1, 206, 30, "pipe-bend", 100)
         self.assertGreater(len(pipe), 1)
         self.assertLessEqual(max((end - start + 1) / 30 for start, end in pipe), 2.4)
@@ -198,7 +204,7 @@ class SoftBodyVariantTests(unittest.TestCase):
         self.assertNotIn("unsharp", value)
         self.assertNotIn("scale=", value)
 
-    def test_softness_response_reserves_crumpling_for_high_stages(self):
+    def test_softness_response_starts_at_25_and_reserves_crumpling_for_high_stages(self):
         responses = [
             deformation_response(level / 100.0)
             for level in (0, 25, 50, 75, 100)
@@ -207,9 +213,41 @@ class SoftBodyVariantTests(unittest.TestCase):
             values = [response[axis] for response in responses]
             self.assertEqual(values, sorted(values))
         self.assertEqual(responses[0], (0.0, 0.0, 0.0))
-        self.assertEqual(responses[1][2], 0.0)
+        self.assertGreater(responses[1][2], 0.0)
+        self.assertLess(responses[1][2], responses[2][2] * 0.35)
         self.assertGreater(responses[2][2], 0.0)
         self.assertGreater(responses[4][2] - responses[3][2], 0.30)
+
+    def test_peg_grid_releases_two_bodies_and_matches_softness_thresholds(self):
+        self.assertEqual(obstacle_specimen_offsets("peg-grid"), (-0.64, 0.64))
+        for obstacle in OBSTACLES:
+            if obstacle.key != "peg-grid":
+                self.assertEqual(obstacle_specimen_offsets(obstacle.key), (0.0,))
+        shape = max(SHAPES, key=lambda item: item.radius)
+        peg_spacing = 0.64
+        peg_radius = 0.115
+        opening = peg_spacing - 2.0 * peg_radius
+        rigid_diameter = 2.0 * shape.radius * obstacle_collision_radius_scale(0.0, "peg-grid")
+        quarter_soft_diameter = 2.0 * shape.radius * obstacle_collision_radius_scale(0.25, "peg-grid")
+        half_soft_diameter = 2.0 * shape.radius * obstacle_collision_radius_scale(0.50, "peg-grid")
+        self.assertGreater(rigid_diameter, opening)
+        self.assertGreater(quarter_soft_diameter, opening)
+        self.assertLess(quarter_soft_diameter - opening, rigid_diameter - opening)
+        self.assertLess(half_soft_diameter, opening)
+
+    def test_peg_grid_uses_long_25_percent_and_short_repeated_soft_attempts(self):
+        quarter = stage_attempt_frame_spans(1, 115, 30, "peg-grid", 25)
+        half = stage_attempt_frame_spans(1, 216, 30, "peg-grid", 50)
+        self.assertEqual(quarter, ((1, 115),))
+        self.assertGreaterEqual(len(half), 3)
+        self.assertLessEqual(max((end - start + 1) / 30 for start, end in half), 2.6)
+
+    def test_peg_grid_friction_holds_25_percent_but_releases_50_percent(self):
+        quarter = obstacle_drag_retention_per_second(0.25, "peg-grid")
+        self.assertGreater(quarter, 0.0)
+        self.assertLess(quarter, 1e-3)
+        self.assertEqual(obstacle_drag_retention_per_second(0.50, "peg-grid"), 1.0)
+        self.assertEqual(obstacle_drag_retention_per_second(0.25, "moving-slide"), 1.0)
 
     def test_soft_body_solver_clock_is_render_fps_independent(self):
         expected_internal = 0.70 - 0.18
