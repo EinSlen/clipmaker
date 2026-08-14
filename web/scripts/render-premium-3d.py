@@ -23,12 +23,20 @@ def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
 
 
-def repair_stage_cut_frames(frames: Path, frame_count: int, stage_count: int) -> tuple[int, ...]:
+def repair_stage_cut_frames(
+    frames: Path,
+    frame_count: int,
+    stage_count: int,
+    extra_boundaries: tuple[int, ...] = (),
+) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
     spans = stage_frame_spans(frame_count, stage_count)
-    for stage_index in range(1, stage_count):
-        boundary = spans[stage_index][0]
+    boundaries = {spans[stage_index][0] for stage_index in range(1, stage_count)}
+    boundaries.update(
+        boundary for boundary in extra_boundaries if 1 < boundary < frame_count
+    )
+    for boundary in sorted(boundaries):
         source = frames / f"frame_{boundary + 1:04d}.png"
         target = frames / f"frame_{boundary:04d}.png"
         if source.is_file() and target.is_file():
@@ -337,12 +345,20 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError(
                 f"Blender did not produce the expected final frame: {expected_last_frame.name}"
             )
-        repair_stage_cut_frames(frames, frame_count, len(stages))
+        attempt_cuts: tuple[int, ...] = ()
         if motion_events.is_file():
             payload = json.loads(motion_events.read_text(encoding="utf-8"))
+            exported_cuts = payload.get("attempt_cuts", [])
+            if isinstance(exported_cuts, list):
+                attempt_cuts = tuple(
+                    int(boundary)
+                    for boundary in exported_cuts
+                    if isinstance(boundary, (int, float))
+                )
             exported_events = payload.get("events", [])
             if isinstance(exported_events, list):
                 events = [event for event in exported_events if isinstance(event, dict)]
+        repair_stage_cut_frames(frames, frame_count, len(stages), attempt_cuts)
         if not events:
             # Silence is truthful here: Foley must correspond to a measured
             # collision or a clean geometric receiver entry exported by

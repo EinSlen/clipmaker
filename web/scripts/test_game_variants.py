@@ -26,6 +26,7 @@ from soft_body_variants import (
     natural_ramp_exit_time,
     ramp_motion_state,
     solver_timing,
+    stage_attempt_frame_spans,
     stage_motion_for,
     supported_body_damping,
     variant_for_seed,
@@ -114,6 +115,42 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_obstacle_attempt_spans_cover_every_frame_without_empty_tails(self):
+        for obstacle in OBSTACLES:
+            for softness in (0, 25, 50, 75, 100):
+                spans = stage_attempt_frame_spans(101, 330, 30, obstacle.key, softness)
+                self.assertEqual(spans[0][0], 101)
+                self.assertEqual(spans[-1][1], 330)
+                for previous, following in zip(spans, spans[1:]):
+                    self.assertEqual(previous[1] + 1, following[0])
+                self.assertTrue(all(end >= start for start, end in spans))
+                self.assertGreaterEqual(spans[-1][1] - spans[-1][0] + 1, 27)
+
+    def test_fast_obstacles_repeat_during_long_levels(self):
+        for obstacle in ("pipe-bend", "peg-grid", "twin-gears", "compression-ring"):
+            self.assertGreater(
+                len(stage_attempt_frame_spans(1, 230, 30, obstacle, 100)),
+                1,
+            )
+
+    def test_obstacle_receivers_remain_inside_the_vertical_camera(self):
+        for obstacle in OBSTACLES:
+            variant = variant_for_seed(910104, obstacle.key)
+            half_width = obstacle.camera_scale * (1080 / 1920) * 0.5
+            self.assertLessEqual(
+                abs(variant.receiver.x - obstacle.camera_target_x)
+                + variant.receiver.outer_radius,
+                half_width,
+                obstacle.key,
+            )
+
+    def test_peg_payoff_and_pipe_resets_have_enough_physical_time(self):
+        peg = stage_attempt_frame_spans(1, 206, 30, "peg-grid", 100)
+        self.assertGreaterEqual((peg[0][1] - peg[0][0] + 1) / 30, 4.0)
+        pipe = stage_attempt_frame_spans(1, 206, 30, "pipe-bend", 100)
+        self.assertGreater(len(pipe), 1)
+        self.assertLessEqual(max((end - start + 1) / 30 for start, end in pipe), 2.4)
+
     def test_same_seed_resolves_to_same_variant(self):
         self.assertEqual(variant_for_seed(424242), variant_for_seed(424242))
 
@@ -325,8 +362,10 @@ class SoftBodyAudioTests(unittest.TestCase):
             frames = Path(directory)
             for frame in range(1, 181):
                 (frames / f"frame_{frame:04d}.png").write_bytes(str(frame).encode("ascii"))
-            repaired = PREMIUM_RENDERER.repair_stage_cut_frames(frames, 180, 5)
-            self.assertEqual(repaired, (28, 51, 94, 140))
+            repaired = PREMIUM_RENDERER.repair_stage_cut_frames(
+                frames, 180, 5, (70, 120)
+            )
+            self.assertEqual(repaired, (28, 51, 70, 94, 120, 140))
             for boundary in repaired:
                 self.assertEqual(
                     (frames / f"frame_{boundary:04d}.png").read_bytes(),

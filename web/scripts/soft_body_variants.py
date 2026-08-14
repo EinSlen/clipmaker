@@ -56,6 +56,82 @@ def stage_time_spans(duration: float, stage_count: int = 5) -> tuple[tuple[float
     return tuple(zip(boundaries, boundaries[1:]))
 
 
+def stage_attempt_frame_spans(
+    start: int,
+    end: int,
+    fps: int,
+    obstacle_key: str,
+    softness: int,
+) -> tuple[tuple[int, int], ...]:
+    """Split a long level into complete, reference-style physical attempts.
+
+    Several source scenes release more than one specimen at the same softness.
+    Doing the same prevents a body that has already left the camera from
+    leaving half of a seven-second level empty. Cuts only happen between whole
+    rendered frames and the final tail is never shorter than 0.9 seconds.
+    """
+
+    if fps <= 0 or start <= 0 or end < start:
+        raise ValueError("invalid attempt span")
+    target_seconds = {
+        "moving-slide": 4.20,
+        "v-stairs": 3.45,
+        "pipe-bend": 3.40,
+        "peg-grid": 4.05,
+        "twin-gears": 1.35,
+        "compression-ring": 2.35,
+    }.get(obstacle_key, 6.0)
+    if obstacle_key == "pipe-bend" and softness >= 100:
+        target_seconds = 2.30
+    if obstacle_key == "stair-cascade":
+        if softness <= 0:
+            target_seconds = 2.80
+        elif softness <= 25:
+            target_seconds = 3.60
+        elif softness <= 50:
+            target_seconds = 4.50
+        elif softness <= 75:
+            target_seconds = 5.00
+        else:
+            target_seconds = 5.60
+    minimum_complete_seconds = {
+        "moving-slide": 3.00,
+        "v-stairs": 3.25,
+        "pipe-bend": 3.00,
+        "peg-grid": 3.35,
+        "twin-gears": 1.25,
+        "compression-ring": 2.10,
+    }.get(obstacle_key, target_seconds)
+    if obstacle_key == "pipe-bend" and softness >= 100:
+        minimum_complete_seconds = 2.00
+    frame_count = end - start + 1
+    duration = frame_count / fps
+    if obstacle_key == "compression-ring" and 3.40 < duration < 4.10:
+        target = round(minimum_complete_seconds * fps)
+        return ((start, start + target - 1), (start + target, end))
+    if obstacle_key == "peg-grid":
+        target = round(target_seconds * fps)
+        if frame_count > target + round(0.90 * fps):
+            return ((start, start + target - 1), (start + target, end))
+        return ((start, end),)
+    if obstacle_key == "stair-cascade":
+        target = round(target_seconds * fps)
+        if frame_count > target + round(0.90 * fps):
+            return ((start, start + target - 1), (start + target, end))
+        return ((start, end),)
+    attempt_count = max(1, min(6, round(duration / target_seconds)))
+    while attempt_count > 1 and duration / attempt_count < minimum_complete_seconds:
+        attempt_count -= 1
+    boundaries = [
+        start + round(frame_count * index / attempt_count)
+        for index in range(attempt_count + 1)
+    ]
+    return tuple(
+        (boundaries[index], boundaries[index + 1] - 1)
+        for index in range(attempt_count)
+    )
+
+
 def deformation_response(softness: float) -> tuple[float, float, float]:
     """Map a percentage to centreline, pressure and broad-buckling response.
 
@@ -260,10 +336,10 @@ RECEIVERS = (
 
 
 OBSTACLES = (
-    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.55, 0.0, 3.12, 8.35),
-    ObstaclePreset("stair-cascade", "Falling stair cascade", "7640793378799586581", -2.75, 6.45, 2.35, -0.10, 3.35, 8.15),
+    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.0, 3.12, 9.10),
+    ObstaclePreset("stair-cascade", "Falling stair cascade", "7640793378799586581", -2.00, 6.45, 1.55, 0.30, 3.35, 9.30),
     ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.38, 0.0, 0.0, 3.35, 8.20),
-    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -1.82, 6.52, 2.75, -0.05, 3.45, 8.05),
+    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 8.05),
     ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", -0.32, 6.48, 0.0, 0.0, 3.35, 8.05),
     ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 8.00),
     ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 8.00),
@@ -378,8 +454,6 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
     start_height = obstacle.start_height + rng.uniform(-0.08, 0.12)
     if obstacle.key in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
         start_rotation = math.pi / 2 + rng.uniform(-0.10, 0.10)
-    elif obstacle.key == "twin-gears":
-        start_rotation = rng.uniform(-0.10, 0.10)
     else:
         start_rotation = rng.uniform(-0.24, 0.18)
     gravity_scale = rng.uniform(0.92, 1.10)

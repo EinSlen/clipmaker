@@ -7,6 +7,7 @@ palette, receiver, softness progression and deterministic constraint physics.
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 import math
 import sys
@@ -26,6 +27,7 @@ from soft_body_variants import (
     natural_ramp_exit_time,
     ramp_motion_state,
     solver_timing,
+    stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
     supported_body_damping,
@@ -298,14 +300,15 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
+@lru_cache(maxsize=64)
 def obstacle_segments(variant: SoftBodyVariant):
     """Return visible/collision-aligned line obstacles in the simulation plane."""
 
     key = variant.obstacle.key
     if key == "stair-cascade":
         return [
-            ((-3.15 + index * 0.76, 5.55 - index * 0.52),
-             (-2.51 + index * 0.76, 5.55 - index * 0.52), 0.110)
+            ((-2.35 + index * 0.62, 5.55 - index * 0.52),
+             (-1.83 + index * 0.62, 5.55 - index * 0.52), 0.110)
             for index in range(7)
         ]
     if key == "v-stairs":
@@ -321,8 +324,9 @@ def obstacle_segments(variant: SoftBodyVariant):
         # An open elbow assembled from short tangent segments.  The glass mesh
         # below uses these exact coordinates, so contacts never float.
         centerline = [
-            (-1.82, 5.55), (-1.82, 4.82), (-1.68, 4.30), (-1.35, 3.88),
-            (-0.86, 3.58), (-0.25, 3.43), (0.42, 3.36), (1.10, 3.31),
+            (-0.85, 5.70), (-0.85, 5.15), (-0.82, 4.65), (-0.68, 4.24),
+            (-0.42, 3.94), (-0.08, 3.75), (0.25, 3.55), (0.36, 3.24),
+            (0.36, 2.92),
         ]
         walls = []
         half_opening = 0.47
@@ -342,10 +346,8 @@ def obstacle_segments(variant: SoftBodyVariant):
     return []
 
 
-def obstacle_circles(time: float, variant: SoftBodyVariant):
-    """Return (centre, radius, centre velocity, angular speed) colliders."""
-
-    key = variant.obstacle.key
+@lru_cache(maxsize=16)
+def static_obstacle_circles(key: str):
     if key == "peg-grid":
         circles = []
         for row in range(5):
@@ -353,13 +355,28 @@ def obstacle_circles(time: float, variant: SoftBodyVariant):
             offset = 0.33 if row % 2 else 0.0
             for column in range(7):
                 circles.append((Vector((-1.98 + column * 0.66 + offset, z)), 0.115, Vector((0.0, 0.0)), 0.0))
-        return circles
+        return tuple(circles)
     if key == "twin-gears":
         speed = math.tau / 1.38
-        return [
+        return (
             (Vector((-0.80, 3.78)), 0.60, Vector((0.0, 0.0)), -speed),
             (Vector((0.80, 3.78)), 0.60, Vector((0.0, 0.0)), speed),
-        ]
+        )
+    if key == "pipe-bend":
+        ring_x, ring_z = 0.36, 1.82
+        return (
+            (Vector((ring_x - 0.34, ring_z)), 0.15, Vector((0.0, 0.0)), 0.0),
+            (Vector((ring_x + 0.34, ring_z)), 0.15, Vector((0.0, 0.0)), 0.0),
+        )
+    return ()
+
+
+def obstacle_circles(time: float, variant: SoftBodyVariant):
+    """Return (centre, radius, centre velocity, angular speed) colliders."""
+
+    key = variant.obstacle.key
+    if key in {"peg-grid", "twin-gears", "pipe-bend"}:
+        return static_obstacle_circles(key)
     if key == "compression-ring":
         angle = math.tau * time / 1.72 - math.pi / 2
         half_gap = 0.92 - 0.28 * (0.5 + 0.5 * math.sin(angle))
@@ -497,6 +514,21 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
             bevel.segments = 3
 
     circles = obstacle_circles(0.0, variant)
+    if key == "pipe-bend":
+        bpy.ops.mesh.primitive_torus_add(
+            major_segments=96,
+            minor_segments=24,
+            location=(0.36, 0.0, 1.82),
+            major_radius=0.34,
+            minor_radius=0.15,
+        )
+        rebound_ring = bpy.context.object
+        rebound_ring.name = "Physical rebound torus"
+        rebound_ring.data.materials.append(gold)
+        bevel = rebound_ring.modifiers.new("Rounded rebound edge", "BEVEL")
+        bevel.width = 0.018
+        bevel.segments = 2
+        circles = ()
     for index, (center, radius, _velocity, _angular_speed) in enumerate(circles):
         gear_root = None
         if key == "twin-gears":
@@ -766,6 +798,14 @@ def collide_point(
 
     if variant.obstacle.key != "moving-slide":
         for start, end, thickness in obstacle_segments(variant):
+            padding = radius + thickness + 0.06
+            if (
+                point.x < min(start[0], end[0]) - padding
+                or point.x > max(start[0], end[0]) + padding
+                or point.y < min(start[1], end[1]) - padding
+                or point.y > max(start[1], end[1]) + padding
+            ):
+                continue
             point, previous, intensity, contact = resolve_obstacle_contact(
                 point,
                 previous,
@@ -1676,18 +1716,29 @@ def main() -> None:
     else:
         add_obstacle_geometry(marble, gold, variant, frame_end, args.fps)
     all_events = []
+    attempt_cut_frames = []
     for softness, (stage_index, start, end) in zip(stages, stage_spans):
-        _capsule, events = add_capsule(
-            gold,
-            softness,
+        attempt_spans = stage_attempt_frame_spans(
             start,
             end,
-            frame_end,
             args.fps,
-            variant,
-            stage_index,
+            variant.obstacle.key,
+            softness,
         )
-        all_events.extend(events)
+        for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
+            if attempt_index:
+                attempt_cut_frames.append(attempt_start)
+            _capsule, events = add_capsule(
+                gold,
+                softness,
+                attempt_start,
+                attempt_end,
+                frame_end,
+                args.fps,
+                variant,
+                stage_index + attempt_index * len(stages),
+            )
+            all_events.extend(events)
 
     if args.events:
         events_path = Path(args.events)
@@ -1698,6 +1749,7 @@ def main() -> None:
                     "fps": args.fps,
                     "duration": frame_end / args.fps,
                     "stages": list(stages),
+                    "attempt_cuts": attempt_cut_frames,
                     "events": all_events,
                 },
                 indent=2,
