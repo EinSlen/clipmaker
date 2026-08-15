@@ -1,5 +1,4 @@
 clips/
-Bangers-Regular.ttf
 final_compilation_tiktok.mp4
 final_compilation.mp4
 
@@ -25,6 +24,8 @@ web/.env
 web/.env.local
 web/uploads/
 web/renders/
+web/config/publisher.json
+web/data/publisher/
 web/public/music/*/
 web/public/music/*.mp3
 web/public/music/*.m4a

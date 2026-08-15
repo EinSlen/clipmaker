@@ -1,13 +1,14 @@
 services:
   clipmaker:
     build:
-      context: ./web
+      context: .
+      dockerfile: web/Dockerfile
       target: runtime
     image: clipmaker:latest
     container_name: clipmaker
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${CLIPMAKER_BIND_HOST:-127.0.0.1}:3000:3000"
     env_file:
       - ./web/.env.local
     environment:
@@ -19,20 +20,45 @@ services:
       GAME_RENDER_FPS: "${GAME_RENDER_FPS:-60}"
       YOUTUBE_BROWSER_PATH: /usr/bin/chromium
       YOUTUBE_BROWSER_DATA_DIR: /repo/.youtube-browser
-      YOUTUBE_BROWSER_DRY_RUN: "${YOUTUBE_BROWSER_DRY_RUN:-true}"
-      CLIPMAKER_UPLOAD_TOKEN: "${CLIPMAKER_UPLOAD_TOKEN:-}"
     volumes:
       # Mount the whole repo so the app sees vendor/TiktokAutoUploader/CookiesDir/.
       - ./:/repo
       - ./web/uploads:/app/uploads
       - ./web/renders:/app/renders
       - ./web/public/music:/app/public/music
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Orchestrateur quotidien. Il reste inactif tant que le profil `publisher`
+  # n'est pas démarré et que config/publisher.json conserve dryRun=true.
+  publisher:
+    image: clipmaker:latest
+    container_name: clipmaker-publisher
+    restart: unless-stopped
+    profiles: ["publisher"]
+    env_file:
+      - ./web/.env.local
+    environment:
+      REPO_ROOT: /repo
+      PUBLISHER_CONFIG: /repo/web/config/publisher.json
+      PUBLISHER_BASE_URL: http://clipmaker:3000
+    depends_on:
+      clipmaker:
+        condition: service_healthy
+    volumes:
+      - ./:/repo
+    command: ["node", "/repo/web/scripts/publisher.mjs", "daemon", "--config", "/repo/web/config/publisher.json"]
 
   # Connexion YouTube initiale sur un VPS Linux. Le port noVNC n'écoute que
   # localhost : utiliser un tunnel SSH avant d'ouvrir http://localhost:6080.
   youtube-auth:
     build:
-      context: ./web
+      context: .
+      dockerfile: web/Dockerfile
       target: youtube-auth
     image: clipmaker-youtube-auth:latest
     profiles: ["youtube-auth"]
@@ -47,6 +73,25 @@ services:
     volumes:
       - ./:/repo
     command: ["bash", "scripts/youtube-auth-vnc.sh"]
+
+  # Connexion TikTok initiale, accessible seulement à travers un tunnel SSH.
+  tiktok-auth:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      target: youtube-auth
+    image: clipmaker-youtube-auth:latest
+    profiles: ["tiktok-auth"]
+    ports:
+      - "127.0.0.1:6081:6080"
+    environment:
+      REPO_ROOT: /repo
+      TIKTOK_USERNAME: "${TIKTOK_USERNAME:-}"
+      AUTH_PUBLIC_PORT: "6081"
+      DISPLAY: :99
+    volumes:
+      - ./:/repo
+    command: ["bash", "scripts/tiktok-auth-vnc.sh"]
 
   # Public HTTPS URL with zero config, no account, no token. Ephemeral domain
   # (regenerated on each restart). Bring it up with:

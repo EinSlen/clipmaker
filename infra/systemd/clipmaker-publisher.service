@@ -1,0 +1,16 @@
+[Unit]
+Description=ClipMaker daily publisher check
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/clipmaker
+EnvironmentFile=-/opt/clipmaker/web/.env.local
+ExecStart=/usr/bin/docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs due --config /repo/web/config/publisher.json
+TimeoutStartSec=infinity
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

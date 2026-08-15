@@ -212,6 +212,9 @@ export function GameStudio() {
   const [uploading, setUploading] = React.useState(false);
   const [uploadMessage, setUploadMessage] = React.useState<string | null>(null);
   const [tiktokSound, setTiktokSound] = React.useState("");
+  const [tiktokVisibility, setTiktokVisibility] = React.useState<"private" | "public">("private");
+  const [tiktokConfirmPublic, setTiktokConfirmPublic] = React.useState(false);
+  const [adminToken, setAdminToken] = React.useState("");
   const [publishTab, setPublishTab] = React.useState<"tiktok" | "youtube">(
     "tiktok"
   );
@@ -226,6 +229,8 @@ export function GameStudio() {
   }, []);
 
   React.useEffect(() => {
+    const savedToken = window.sessionStorage.getItem("clipmaker-upload-token");
+    if (savedToken) setAdminToken(savedToken);
     try {
       const routes = JSON.parse(
         window.localStorage.getItem("clipmaker-game-tiktok-routes") || "{}"
@@ -238,6 +243,12 @@ export function GameStudio() {
     }
     setRoutesHydrated(true);
   }, []);
+
+  function updateAdminToken(value: string) {
+    setAdminToken(value);
+    if (value) window.sessionStorage.setItem("clipmaker-upload-token", value);
+    else window.sessionStorage.removeItem("clipmaker-upload-token");
+  }
 
   React.useEffect(() => {
     if (!routesHydrated) return;
@@ -401,12 +412,22 @@ export function GameStudio() {
       for (const username of pendingAccounts) {
         const response = await fetch("/api/tiktok/upload", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(window.sessionStorage.getItem("clipmaker-upload-token")
+              ? {
+                  "x-clipmaker-upload-token":
+                    window.sessionStorage.getItem("clipmaker-upload-token") || "",
+                }
+              : {}),
+          },
           body: JSON.stringify({
             filename: result.filename,
             username,
             caption: caption.slice(0, 2000),
             musicId: tiktokSound.trim() || undefined,
+            visibility: tiktokVisibility,
+            confirmPublic: tiktokVisibility === "public" && tiktokConfirmPublic,
           }),
         });
         const data = await response.json();
@@ -1188,6 +1209,46 @@ export function GameStudio() {
                   </label>
                   <TikTokTargetPicker value={accounts} onChange={setAccounts} />
                   <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>Visibilité</span>
+                    <select
+                      value={tiktokVisibility}
+                      onChange={(event) => {
+                        const value = event.target.value as "private" | "public";
+                        setTiktokVisibility(value);
+                        if (value === "private") setTiktokConfirmPublic(false);
+                      }}
+                      className="field-control h-11"
+                    >
+                      <option value="private">Privée — test recommandé</option>
+                      <option value="public">Publique</option>
+                    </select>
+                  </label>
+                  {tiktokVisibility === "public" && (
+                    <label className="flex items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">
+                      <input
+                        type="checkbox"
+                        checked={tiktokConfirmPublic}
+                        onChange={(event) => setTiktokConfirmPublic(event.target.checked)}
+                        className="mt-0.5 size-4"
+                      />
+                      Je confirme que cette vidéo doit être publiée publiquement sur les comptes sélectionnés.
+                    </label>
+                  )}
+                  <label className="block space-y-1.5 text-xs text-ink-400">
+                    <span>Jeton de publication</span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={adminToken}
+                      onChange={(event) => updateAdminToken(event.target.value)}
+                      placeholder="CLIPMAKER_UPLOAD_TOKEN"
+                      className="field-control h-11"
+                    />
+                    <span className="block text-[10px] leading-4 text-ink-500">
+                      Conservé uniquement dans cette session du navigateur.
+                    </span>
+                  </label>
+                  <label className="block space-y-1.5 text-xs text-ink-400">
                     <span>
                       Son TikTok officiel — URL ou identifiant facultatif
                     </span>
@@ -1207,6 +1268,7 @@ export function GameStudio() {
                     disabled={
                       uploading ||
                       !accounts.length ||
+                      (tiktokVisibility === "public" && !tiktokConfirmPublic) ||
                       accounts.every((username) =>
                         publishedAccounts.includes(username)
                       )

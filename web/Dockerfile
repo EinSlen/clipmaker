@@ -1,19 +1,26 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY web/package.json web/package-lock.json* ./
 RUN npm ci
+
+FROM node:20-bookworm-slim AS tiktok-signature-deps
+WORKDIR /tiktok-signature
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY vendor/TiktokAutoUploader/tiktok_uploader/tiktok-signature/package.json \
+     vendor/TiktokAutoUploader/tiktok_uploader/tiktok-signature/package-lock.json ./
+RUN npm ci --omit=dev
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY web/ .
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runtime-base
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
-COPY tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
+COPY web/tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
 
 # ffmpeg + Python + Blender for rendering, Chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,13 +41,17 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/config ./config
 COPY --from=builder /app/data ./data
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=tiktok-signature-deps /tiktok-signature/node_modules /opt/tiktok-signature/node_modules
 
 # Expects a bind mount of the parent repo at /repo (so vendor/ + uploads/ + renders/ persist)
 ENV PYTHON_BIN=python3
 ENV BLENDER_BIN=blender
+ENV NODE_PATH=/opt/tiktok-signature/node_modules
 EXPOSE 3000
 CMD ["npm", "start"]
 

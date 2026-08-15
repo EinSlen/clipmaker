@@ -7,5 +7,7 @@ uploads/*
 !uploads/.gitkeep
 renders/*
 !renders/.gitkeep
+config/publisher.json
+data/publisher/
 public/music/*
 !public/music/README.txt
