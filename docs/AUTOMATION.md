@@ -1,11 +1,12 @@
 # Publication quotidienne
 
-ClipMaker possède un orchestrateur idempotent pour générer puis publier une vidéo par jour et par chaîne. Il peut fonctionner comme service Docker permanent ou être appelé toutes les quinze minutes par un timer systemd.
+ClipMaker possède un orchestrateur idempotent pour générer puis publier une vidéo par jour et par compte. Chaque compte garde un seul jeu, tandis que la seed et les variantes changent quotidiennement. Le service peut fonctionner comme conteneur Docker permanent ou être appelé toutes les quinze minutes par un timer systemd.
 
 ## Garanties
 
 - Une clé de job stable `date:channel` empêche les doublons.
-- La seed et la rotation des jeux sont déterministes pour chaque journée.
+- Chaque compte est affecté à un jeu fixe ; la seed quotidienne reste déterministe.
+- Un même profil YouTube ou compte TikTok ne peut pas être affecté deux fois.
 - L'état est écrit atomiquement dans `web/data/publisher/`.
 - Un verrou inter-processus empêche deux rendus ou publications simultanés.
 - Une cible déjà publiée n'est jamais renvoyée lors d'un retry.
@@ -21,13 +22,36 @@ cp web/config/publisher.example.json web/config/publisher.json
 nano web/config/publisher.json
 ```
 
-Un objet dans `channels` représente une paire de comptes et une rotation éditoriale. Duplique cet objet pour publier des jeux différents sur plusieurs comptes. Les heures utilisent `timeZone`, `Europe/Paris` par défaut.
+Un objet dans `channels` représente une affectation fixe : un jeu et ses cibles YouTube/TikTok. Les deux cibles d'un même objet reçoivent donc le même jeu. Duplique l'objet pour chaque autre compte et choisis un autre `game.id`. Les heures utilisent `timeZone`, `Europe/Paris` par défaut.
+
+Exemple minimal avec deux comptes séparés :
+
+```json
+{
+  "channels": [
+    {
+      "id": "ball-account",
+      "game": { "id": "ball-escape", "difficulty": 14, "duration": 15 },
+      "youtube": { "enabled": true, "account": "ball-channel", "privacy": "private" },
+      "tiktok": { "enabled": false }
+    },
+    {
+      "id": "softbody-account",
+      "game": { "id": "soft-body-slide", "obstacle": "auto", "duration": 30 },
+      "youtube": { "enabled": false, "account": "softbody-channel", "privacy": "private" },
+      "tiktok": { "enabled": true, "username": "softbody.daily", "visibility": "private" }
+    }
+  ]
+}
+```
+
+Si le même `youtube.account` ou `tiktok.username` actif apparaît dans deux objets, ClipMaker refuse de démarrer. L'ancien champ `rotation` reste accepté uniquement lorsqu'il contient exactement un jeu, afin de faciliter la migration.
 
 Paramètres importants :
 
 - `generateTime` : heure à partir de laquelle le rendu nocturne peut commencer.
 - `publishTime` : heure à partir de laquelle la vidéo prête peut être envoyée.
-- `rotation` : ordre quotidien des jeux et réglages.
+- `game` : jeu fixe du compte et ses réglages de rendu (`id`, difficulté, durée, thème, son, obstacle).
 - `youtube.enabled` / `tiktok.enabled` : cibles actives.
 - `dryRun` : doit rester `true` pendant les tests.
 
@@ -92,13 +116,13 @@ Commandes utiles :
 docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs status \
   --config /repo/web/config/publisher.json
 
-# Génération immédiate d'une chaîne
+# Génération immédiate du jeu affecté à un compte
 docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs generate \
-  --config /repo/web/config/publisher.json --channel main
+  --config /repo/web/config/publisher.json --channel ball-account
 
 # Reprendre uniquement les plateformes non publiées
 docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs publish \
-  --config /repo/web/config/publisher.json --channel main
+  --config /repo/web/config/publisher.json --channel ball-account
 ```
 
 ## 4. Activer le service Docker
@@ -115,7 +139,7 @@ docker compose --profile publisher up -d --build
 docker compose logs -f publisher
 ```
 
-Le daemon relit la configuration à chaque cycle. Un redémarrage n'est donc pas nécessaire pour changer la rotation ou les horaires.
+Le daemon relit la configuration à chaque cycle. Un redémarrage n'est donc pas nécessaire pour changer l'affectation d'un compte, les réglages du jeu ou les horaires. Un job quotidien déjà créé conserve toutefois son jeu et sa seed ; le changement s'applique au prochain job.
 
 ## 5. Alternative systemd
 

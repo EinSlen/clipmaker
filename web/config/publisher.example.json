@@ -11,61 +11,51 @@
   "stateDir": "../data/publisher",
   "channels": [
     {
-      "id": "main",
+      "id": "ball-account",
       "enabled": true,
       "generateTime": "00:30",
       "publishTime": "18:30",
-      "rotation": [
-        {
-          "game": "ball-escape",
-          "difficulty": 14,
-          "duration": 15,
-          "theme": "neon",
-          "soundPack": "auto",
-          "musicMode": "hit-reveal",
-          "musicVolume": 0.55
-        },
-        {
-          "game": "shape-tunnel",
-          "difficulty": 200,
-          "duration": 15,
-          "theme": "neon",
-          "soundPack": "asmr",
-          "musicMode": "continuous",
-          "musicVolume": 0.55
-        },
-        {
-          "game": "laser-dodge",
-          "difficulty": 24,
-          "duration": 15,
-          "theme": "ice",
-          "soundPack": "arcade",
-          "musicMode": "hit-reveal",
-          "musicVolume": 0.55
-        },
-        {
-          "game": "boss-battle",
-          "difficulty": 300,
-          "duration": 15,
-          "theme": "sunset",
-          "soundPack": "impact",
-          "musicMode": "hit-reveal",
-          "musicVolume": 0.55
-        },
-        {
-          "game": "soft-body-slide",
-          "difficulty": 100,
-          "duration": 30,
-          "theme": "sunset",
-          "soundPack": "asmr",
-          "musicMode": "continuous",
-          "musicVolume": 0.35,
-          "obstacle": "auto"
-        }
-      ],
+      "game": {
+        "id": "ball-escape",
+        "difficulty": 14,
+        "duration": 15,
+        "theme": "neon",
+        "soundPack": "auto",
+        "musicMode": "hit-reveal",
+        "musicVolume": 0.55
+      },
       "youtube": {
         "enabled": false,
-        "account": "default",
+        "account": "ball-channel",
+        "privacy": "private",
+        "confirmPublic": false
+      },
+      "tiktok": {
+        "enabled": false,
+        "username": null,
+        "musicId": null,
+        "visibility": "private",
+        "confirmPublic": false
+      }
+    },
+    {
+      "id": "softbody-account",
+      "enabled": true,
+      "generateTime": "02:00",
+      "publishTime": "20:00",
+      "game": {
+        "id": "soft-body-slide",
+        "difficulty": 100,
+        "duration": 30,
+        "theme": "sunset",
+        "soundPack": "asmr",
+        "musicMode": "continuous",
+        "musicVolume": 0.35,
+        "obstacle": "auto"
+      },
+      "youtube": {
+        "enabled": false,
+        "account": "softbody-channel",
         "privacy": "private",
         "confirmPublic": false
       },

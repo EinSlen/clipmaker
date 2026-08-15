@@ -59,11 +59,11 @@ function finiteNumber(value, fallback, min, max, label) {
   return parsed;
 }
 
-function normalizeRotationEntry(entry, channelId, index) {
+function normalizeGameEntry(entry, channelId, source = 'game') {
   if (!entry || typeof entry !== 'object') {
-    throw new Error(`channels.${channelId}.rotation[${index}] must be an object.`);
+    throw new Error(`channels.${channelId}.${source} must be an object.`);
   }
-  const game = requiredString(entry.game, `channels.${channelId}.rotation[${index}].game`);
+  const game = requiredString(entry.id ?? entry.game, `channels.${channelId}.${source}.id`);
   if (!GAME_IDS.includes(game)) throw new Error(`Unknown game in ${channelId}: ${game}`);
   const limits = GAME_LIMITS[game];
   const normalized = { game };
@@ -150,14 +150,28 @@ function normalizeChannel(value, index) {
   if (!value || typeof value !== 'object') throw new Error(`channels[${index}] must be an object.`);
   const id = requiredString(value.id, `channels[${index}].id`);
   if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(id)) throw new Error(`Invalid channel id: ${id}`);
-  const rotation = Array.isArray(value.rotation) ? value.rotation : [];
-  if (!rotation.length) throw new Error(`Channel ${id} needs at least one rotation entry.`);
+  if (value.game !== undefined && value.rotation !== undefined) {
+    throw new Error(`Channel ${id} cannot define both game and rotation.`);
+  }
+  let gameEntry = value.game;
+  let gameSource = 'game';
+  if (gameEntry === undefined && value.rotation !== undefined) {
+    if (!Array.isArray(value.rotation) || value.rotation.length !== 1) {
+      throw new Error(
+        `Channel ${id} must have exactly one fixed game. Replace rotation with a single game object.`,
+      );
+    }
+    [gameEntry] = value.rotation;
+    gameSource = 'rotation[0]';
+  }
+  if (typeof gameEntry === 'string') gameEntry = { id: gameEntry };
+  if (gameEntry === undefined) throw new Error(`Channel ${id} needs one fixed game.`);
   return {
     id,
     enabled: value.enabled !== false,
     generateTime: assertTime(value.generateTime || '00:30'),
     publishTime: assertTime(value.publishTime || '18:30'),
-    rotation: rotation.map((entry, rotationIndex) => normalizeRotationEntry(entry, id, rotationIndex)),
+    game: normalizeGameEntry(gameEntry, id, gameSource),
     youtube: normalizeYoutube(value.youtube, id),
     tiktok: normalizeTiktok(value.tiktok, id),
   };
@@ -170,9 +184,29 @@ export async function readPublisherConfig(filePath, env = process.env) {
   const channels = (Array.isArray(raw.channels) ? raw.channels : []).map(normalizeChannel);
   if (!channels.length) throw new Error('Publisher config needs at least one channel.');
   const ids = new Set();
+  const youtubeAccounts = new Map();
+  const tiktokAccounts = new Map();
   for (const channel of channels) {
     if (ids.has(channel.id)) throw new Error(`Duplicate channel id: ${channel.id}`);
     ids.add(channel.id);
+    if (channel.enabled && channel.youtube.enabled) {
+      const account = channel.youtube.account.toLocaleLowerCase('en-US');
+      if (youtubeAccounts.has(account)) {
+        throw new Error(
+          `YouTube account "${channel.youtube.account}" is assigned to both ${youtubeAccounts.get(account)} and ${channel.id}.`,
+        );
+      }
+      youtubeAccounts.set(account, channel.id);
+    }
+    if (channel.enabled && channel.tiktok.enabled) {
+      const account = channel.tiktok.username.toLocaleLowerCase('en-US');
+      if (tiktokAccounts.has(account)) {
+        throw new Error(
+          `TikTok account "${channel.tiktok.username}" is assigned to both ${tiktokAccounts.get(account)} and ${channel.id}.`,
+        );
+      }
+      tiktokAccounts.set(account, channel.id);
+    }
   }
   const configDir = path.dirname(absolutePath);
   return {

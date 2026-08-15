@@ -9,7 +9,7 @@ import {
   withStateLock,
 } from './state.mjs';
 import { doctorEndpoints, renderVideo, uploadTiktok, uploadYoutube } from './api-client.mjs';
-import { addDays, dateInTimeZone, dayOrdinal, isTimeDue } from './time.mjs';
+import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 
 function deterministicSeed(date, channelId, namespace) {
   const digest = crypto.createHash('sha256').update(`${namespace}:${channelId}:${date}`).digest();
@@ -17,14 +17,12 @@ function deterministicSeed(date, channelId, namespace) {
 }
 
 export function planForDate(config, channel, date) {
-  const rotationIndex = Math.abs(dayOrdinal(date)) % channel.rotation.length;
   return {
     id: `${date}:${channel.id}`,
     date,
     channelId: channel.id,
     seed: deterministicSeed(date, channel.id, config.seedNamespace),
-    rotationIndex,
-    renderRequest: { ...channel.rotation[rotationIndex] },
+    renderRequest: { ...channel.game },
   };
 }
 
@@ -311,6 +309,7 @@ export async function doctor(config) {
     channels.push({
       id: channel.id,
       enabled: channel.enabled,
+      game: channel.game.game,
       targets: {
         youtube: channel.youtube.enabled,
         tiktok: channel.tiktok.enabled,

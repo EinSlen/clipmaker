@@ -60,7 +60,7 @@ clipMaker/
 │   ├── src/lib/             rendu, musique et intégrations
 │   ├── src/automation/      planification, état et idempotence
 │   ├── scripts/             moteurs Python et CLI de publication
-│   └── config/              exemple de rotation quotidienne
+│   └── config/              affectations fixes compte → jeu
 ├── infra/systemd/           timer Linux optionnel
 ├── docs/                    exploitation et moteurs
 ├── vendor/                  fork TikTok Auto Uploader

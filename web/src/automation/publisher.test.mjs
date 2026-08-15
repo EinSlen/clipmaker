@@ -21,10 +21,7 @@ function sampleChannel() {
     enabled: true,
     generateTime: '00:30',
     publishTime: '18:30',
-    rotation: [
-      { game: 'ball-escape', difficulty: 14 },
-      { game: 'soft-body-slide', obstacle: 'auto' },
-    ],
+    game: { game: 'ball-escape', difficulty: 14 },
     youtube: { enabled: false, account: 'default', privacy: 'private', confirmPublic: false },
     tiktok: { enabled: false, username: null, musicId: null, visibility: 'private', confirmPublic: false },
   };
@@ -36,7 +33,7 @@ test('date helpers are deterministic across month boundaries', () => {
   assert.equal(isTimeDue('18:30', new Date('2026-08-15T16:30:00Z'), 'Europe/Paris'), true);
 });
 
-test('daily plans are stable and rotate content', () => {
+test('daily plans are stable and keep one fixed game per account', () => {
   const config = { seedNamespace: 'test' };
   const channel = sampleChannel();
   const first = planForDate(config, channel, '2026-08-15');
@@ -44,7 +41,8 @@ test('daily plans are stable and rotate content', () => {
   const next = planForDate(config, channel, '2026-08-16');
   assert.deepEqual(first, repeated);
   assert.notEqual(first.seed, next.seed);
-  assert.notEqual(first.rotationIndex, next.rotationIndex);
+  assert.equal(first.renderRequest.game, 'ball-escape');
+  assert.deepEqual(first.renderRequest, next.renderRequest);
 });
 
 test('configuration is safe by default and refuses unconfirmed public uploads', async (t) => {
@@ -53,7 +51,7 @@ test('configuration is safe by default and refuses unconfirmed public uploads', 
   const base = {
     channels: [{
       id: 'main',
-      rotation: [{ game: 'ball-escape' }],
+      game: { id: 'ball-escape' },
       youtube: { enabled: false, account: 'default', privacy: 'private' },
       tiktok: { enabled: false },
     }],
@@ -66,13 +64,60 @@ test('configuration is safe by default and refuses unconfirmed public uploads', 
   await fs.writeFile(configPath, JSON.stringify(base));
   await assert.rejects(() => readPublisherConfig(configPath, {}), /confirmPublic/);
   base.channels[0].youtube = { enabled: false, account: 'default', privacy: 'private' };
-  base.channels[0].rotation = [{ game: 'laser-dodge', difficulty: 200 }];
+  base.channels[0].game = { id: 'laser-dodge', difficulty: 200 };
   await fs.writeFile(configPath, JSON.stringify(base));
   await assert.rejects(() => readPublisherConfig(configPath, {}), /laser-dodge difficulty/);
-  base.channels[0].rotation = [{ game: 'ball-escape' }];
+  base.channels[0].game = { id: 'ball-escape' };
   base.channels[0].tiktok = { enabled: true, username: 'clipmaker.test', visibility: 'public' };
   await fs.writeFile(configPath, JSON.stringify(base));
   await assert.rejects(() => readPublisherConfig(configPath, {}), /TikTok public publishing/);
+});
+
+test('configuration enforces one game and one assignment per platform account', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = path.join(directory, 'publisher.json');
+  const base = {
+    channels: [{
+      id: 'ball-account',
+      game: { id: 'ball-escape' },
+      youtube: { enabled: true, account: 'main', privacy: 'private' },
+      tiktok: { enabled: true, username: 'clipmaker.main', visibility: 'private' },
+    }],
+  };
+  await fs.writeFile(configPath, JSON.stringify(base));
+  const config = await readPublisherConfig(configPath, {});
+  assert.equal(config.channels[0].game.game, 'ball-escape');
+
+  base.channels[0].game = undefined;
+  base.channels[0].rotation = [{ game: 'ball-escape' }, { game: 'laser-dodge' }];
+  await fs.writeFile(configPath, JSON.stringify(base));
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /exactly one fixed game/);
+
+  base.channels[0].rotation = [{ game: 'ball-escape' }];
+  await fs.writeFile(configPath, JSON.stringify(base));
+  const legacy = await readPublisherConfig(configPath, {});
+  assert.equal(legacy.channels[0].game.game, 'ball-escape');
+
+  base.channels[0].game = { id: 'ball-escape' };
+  delete base.channels[0].rotation;
+  base.channels.push({
+    id: 'laser-account',
+    game: { id: 'laser-dodge' },
+    youtube: { enabled: true, account: 'MAIN', privacy: 'private' },
+    tiktok: { enabled: false },
+  });
+  await fs.writeFile(configPath, JSON.stringify(base));
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /YouTube account.*both/);
+
+  base.channels[1].youtube.enabled = false;
+  base.channels[1].tiktok = { enabled: true, username: 'ClipMaker.Main', visibility: 'private' };
+  await fs.writeFile(configPath, JSON.stringify(base));
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /TikTok account.*both/);
+
+  base.channels[1].enabled = false;
+  await fs.writeFile(configPath, JSON.stringify(base));
+  const disabledDuplicate = await readPublisherConfig(configPath, {});
+  assert.equal(disabledDuplicate.channels.length, 2);
 });
 
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
