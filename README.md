@@ -81,12 +81,17 @@ docker compose config --quiet
 Le smoke de rendu encode de vrais MP4. Le rendu Soft Body final est volontairement beaucoup plus
 long et se valide séparément à cause du coût Blender.
 
+Le workflow manuel **Cloud render capability** construit réellement les sept obstacles 3D,
+chronomètre des images natives 1080×1920/128 samples et génère les quatre candidats 2D en qualité
+publication si la 3D dépasse le budget du runner. Il ne contient aucun secret et ne publie rien.
+
 ## Documentation
 
 - [Générateur et variantes](docs/GAME-GENERATOR.md)
 - [Automatisation quotidienne](docs/AUTOMATION.md)
 - [Connexion YouTube par session](docs/YOUTUBE-UPLOAD.md)
 - [Machine recommandée et installation Linux](docs/HARDWARE.md)
+- [Test 3D et candidats 2D sur GitHub Actions](docs/GITHUB-ACTIONS.md)
 - [Ancien pipeline archivé](legacy/compiler/README.md)
 
 Les sessions de navigateur, cookies, rendus, secrets et états de publication sont exclus de Git.

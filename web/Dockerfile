@@ -58,6 +58,20 @@ CMD ["npm", "start"]
 # Small default runtime used by the long-running application service.
 FROM runtime-base AS runtime
 
+# Reproducible GitHub Actions image. It keeps the complete source tree and
+# development dependencies so the cloud runner tests the same Blender/FFmpeg
+# stack as production without installing tools directly on the host runner.
+FROM runtime-base AS ci
+ENV NODE_ENV=test
+# runtime-base already contains the built application, source, scripts and
+# node_modules. TypeScript only needs the project configuration files omitted
+# from the lean runtime image.
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/next-env.d.ts ./next-env.d.ts
+COPY --from=builder /app/postcss.config.js ./postcss.config.js
+COPY --from=builder /app/tailwind.config.ts ./tailwind.config.ts
+CMD ["npm", "test"]
+
 # One-shot interactive image used only to create a YouTube browser session on Linux.
 FROM runtime-base AS youtube-auth
 RUN apt-get update && apt-get install -y --no-install-recommends \

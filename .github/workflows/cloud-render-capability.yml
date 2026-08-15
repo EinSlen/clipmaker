@@ -1,0 +1,117 @@
+name: Cloud render capability
+
+on:
+  workflow_dispatch:
+    inputs:
+      obstacle:
+        description: 3D obstacle used for the native timing benchmark
+        required: true
+        default: moving-slide
+        type: choice
+        options:
+          - moving-slide
+          - stair-cascade
+          - v-stairs
+          - pipe-bend
+          - peg-grid
+          - twin-gears
+          - compression-ring
+          - auto
+      seed:
+        description: Deterministic 3D seed
+        required: true
+        default: "910104"
+        type: string
+      run_2d_suite:
+        description: Render the four production-quality 2D fallbacks
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-render-capability
+  cancel-in-progress: false
+
+jobs:
+  render-capability:
+    name: Native 3D benchmark and 2D fallback
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    env:
+      CI_SEED: ${{ inputs.seed }}
+      CI_OBSTACLE: ${{ inputs.obstacle }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Build the reproducible rendering image
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:capability .
+
+      - name: Run deterministic tests
+        run: docker run --rm --init clipmaker-ci:capability npm test
+
+      - name: Benchmark native 3D and construct every obstacle
+        id: render3d
+        run: |
+          mkdir -p artifacts/3d
+          docker run --rm --init \
+            --volume "$PWD/artifacts:/artifacts" \
+            clipmaker-ci:capability \
+            python3 scripts/ci_3d_capability.py \
+              --output /artifacts/3d \
+              --seed "$CI_SEED" \
+              --obstacle "$CI_OBSTACLE" \
+              --smoke-timeout-minutes 8 \
+              --benchmark-timeout-minutes 100 \
+              --max-hours 5.25
+
+      - name: Read the 3D decision
+        id: decision
+        run: |
+          feasible="$(python3 -c 'import json; print(str(json.load(open("artifacts/3d/result.json"))["feasible"]).lower())')"
+          echo "feasible=$feasible" >> "$GITHUB_OUTPUT"
+          cat artifacts/3d/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Render production 2D candidates
+        id: render2d
+        if: ${{ inputs.run_2d_suite || steps.decision.outputs.feasible != 'true' }}
+        run: |
+          mkdir -p artifacts/2d
+          docker run --rm --init \
+            --volume "$PWD/artifacts:/artifacts" \
+            clipmaker-ci:capability \
+            node scripts/ci-2d-candidates.mjs --output /artifacts/2d
+          cat artifacts/2d/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload native 3D evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3d-native-capability-${{ inputs.obstacle }}-${{ inputs.seed }}
+          path: artifacts/3d
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload 2D production candidates
+        if: ${{ always() && steps.render2d.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2d-production-candidates
+          path: artifacts/2d
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Require at least one usable rendering path
+        if: always()
+        env:
+          THREE_D_FEASIBLE: ${{ steps.decision.outputs.feasible }}
+          TWO_D_OUTCOME: ${{ steps.render2d.outcome }}
+        run: |
+          if [ "$THREE_D_FEASIBLE" != "true" ] && [ "$TWO_D_OUTCOME" != "success" ]; then
+            echo "Neither native 3D nor the 2D fallback completed successfully." >&2
+            exit 1
+          fi
