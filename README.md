@@ -13,7 +13,7 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 Prérequis : Docker Engine avec le plugin Compose.
 
 ```bash
-git clone --recurse-submodules https://github.com/EinSlen/clipMaker.git
+git clone https://github.com/EinSlen/clipMaker.git
 cd clipMaker
 cp web/.env.example web/.env.local
 docker compose up -d --build clipmaker
@@ -47,8 +47,8 @@ Après avoir connecté les comptes et validé un upload privé, le daemon peut �
 docker compose --profile publisher up -d --build
 ```
 
-La procédure complète, les protections pour la publication publique, le multi-compte et
-l'alternative systemd sont décrits dans [docs/AUTOMATION.md](docs/AUTOMATION.md).
+Les affectations compte → jeu sont définies dans `web/config/publisher.json`. Le dry-run reste
+activé par défaut afin d'éviter toute publication accidentelle.
 
 ## Architecture
 
@@ -62,9 +62,7 @@ clipMaker/
 │   ├── scripts/             moteurs Python et CLI de publication
 │   └── config/              affectations fixes compte → jeu
 ├── infra/systemd/           timer Linux optionnel
-├── docs/                    exploitation et moteurs
 ├── vendor/                  fork TikTok Auto Uploader
-├── legacy/                  ancien compilateur et anciens déploiements
 └── docker-compose.yml       application, publication et login YouTube
 ```
 
@@ -84,15 +82,6 @@ long et se valide séparément à cause du coût Blender.
 Le workflow manuel **Cloud render capability** construit réellement les sept obstacles 3D,
 chronomètre des images natives 1080×1920/128 samples et génère les quatre candidats 2D en qualité
 publication si la 3D dépasse le budget du runner. Il ne contient aucun secret et ne publie rien.
-
-## Documentation
-
-- [Générateur et variantes](docs/GAME-GENERATOR.md)
-- [Automatisation quotidienne](docs/AUTOMATION.md)
-- [Connexion YouTube par session](docs/YOUTUBE-UPLOAD.md)
-- [Machine recommandée et installation Linux](docs/HARDWARE.md)
-- [Test 3D et candidats 2D sur GitHub Actions](docs/GITHUB-ACTIONS.md)
-- [Ancien pipeline archivé](legacy/compiler/README.md)
 
 Les sessions de navigateur, cookies, rendus, secrets et états de publication sont exclus de Git.
 Ne jamais exposer directement le port 3000 sur Internet sans authentification.

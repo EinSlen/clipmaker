@@ -37,10 +37,4 @@ npm run publisher:doctor -- --config config/publisher.json
 npm run publisher:status -- --config config/publisher.json
 ```
 
-Voir la documentation racine :
-
-- [Architecture et démarrage](../README.md)
-- [Publication quotidienne](../docs/AUTOMATION.md)
-- [Connexion YouTube](../docs/YOUTUBE-UPLOAD.md)
-- [Moteurs de jeu](../docs/GAME-GENERATOR.md)
-- [Machine Linux recommandée](../docs/HARDWARE.md)
+Voir le [README racine](../README.md) pour l'architecture et le démarrage Docker.
