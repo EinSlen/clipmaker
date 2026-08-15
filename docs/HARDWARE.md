@@ -1,6 +1,6 @@
 # Machine recommandée et installation Linux
 
-## Choix recommandé : 50 à 100 €
+## Choix recommandé : 40 à 100 €
 
 Le meilleur choix pour ClipMaker est un **mini-PC professionnel x86-64 d'occasion**, pas une
 machine gaming neuve. Chercher en priorité l'une de ces trois familles :
@@ -13,13 +13,28 @@ Configuration cible : **Core i5-6400T/6500T ou meilleur, 8 Go de RAM et SSD 256 
 incluse. Un modèle SFF plus volumineux avec un i5-6500 non-T convient aussi et rendra un peu plus
 vite.
 
+### Prix plancher
+
+Le moins cher trouvé au 15 août 2026 est un **Lenovo ThinkCentre M710q, Celeron G3900T et 8 Go de
+RAM à 39,99 € chez Cash Express**. Il est commandable en ligne, annoncé en bon état et garanti deux
+ans :
+<https://www.cashexpress.fr/p-52767/lenovo-pc-fixe-intel-celeron-g3900t-think-center-m710q-8go-ddr4-intel-hd-graphics>.
+
+La fiche ne précise ni stockage ni alimentation. Appeler le magasin de Flers avant de payer. Si le
+SSD manque, ajouter un SSD SATA 256 Go économique ; le total devrait rester inférieur à l'offre i5.
+Ce Celeron à deux cœurs peut exécuter le dépôt, mais il est destiné en priorité à la planification et
+aux uploads. Les rendus 2D seront très lents et Soft Body peut prendre plusieurs semaines.
+
+### Meilleur rapport capacité/prix
+
 Offre professionnelle vérifiée au 15 août 2026 : **Lenovo ThinkCentre M710q, Core i5-6400T, 8 Go,
 SSD 512 Go à 99,99 € chez Cash Express**. La fiche indique un produit testé, une garantie de deux
 ans, le paiement sécurisé, la livraison ou le retrait en magasin :
 <https://www.cashexpress.fr/micro-lenovo-i5-6400t-thinkcentre-m710q-8go-512go-intel-hd-occasion%2C4817947.html>.
 Le stock étant unitaire, confirmer avant paiement que le bloc d'alimentation est inclus.
 
-Éviter les versions Celeron/Pentium, 4 Go de RAM, disque dur mécanique ou vendues sans alimentation.
+En dehors de l'option minimale documentée ci-dessus, éviter les Celeron/Pentium, 4 Go de RAM, disque
+dur mécanique ou machines vendues sans alimentation.
 Ne pas payer plus de 100 € pour un i5 de sixième génération. Si cette offre disparaît, chercher les
 mêmes références chez Cash Express, Easy Cash ou un reconditionneur professionnel avec au moins un
 an de garantie. Si deux offres sont au même prix,
