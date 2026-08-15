@@ -135,90 +135,115 @@ async function main() {
     GAME_VIDEO_CRF: process.env.CI_2D_CRF || '15',
   };
   const expectedOutputFps = Number(renderEnvironment.GAME_RENDER_FPS);
+  const failures = [];
 
   for (const [index, candidate] of candidates.entries()) {
     const output = resolve(outputDirectory, `${candidate.game}-production.mp4`);
     process.stdout.write(
       `\n[2D ${index + 1}/${candidates.length}] ${candidate.label} — native production render\n`,
     );
-    const { stdout } = await run(python, [
-      resolve(scriptDirectory, 'render-ball-escape.py'),
-      '--output', output,
-      '--game', candidate.game,
-      '--duration', String(candidate.duration),
-      '--difficulty', String(candidate.difficulty),
-      '--seed', String(candidate.seed),
-      '--theme', candidate.theme,
-      '--sound-pack', candidate.soundPack,
-      '--music-mode', candidate.musicMode,
-      '--title', 'CAN IT ESCAPE?',
-    ], { env: renderEnvironment });
-    const metadata = lastJsonLine(stdout);
-    const probe = await probeVideo(output);
-    const audioMetrics = await probeAudio(output);
-    const video = probe.streams.find((stream) => stream.codec_type === 'video');
-    const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
+    try {
+      const { stdout } = await run(python, [
+        resolve(scriptDirectory, 'render-ball-escape.py'),
+        '--output', output,
+        '--game', candidate.game,
+        '--duration', String(candidate.duration),
+        '--difficulty', String(candidate.difficulty),
+        '--seed', String(candidate.seed),
+        '--theme', candidate.theme,
+        '--sound-pack', candidate.soundPack,
+        '--music-mode', candidate.musicMode,
+        '--title', 'CAN IT ESCAPE?',
+      ], { env: renderEnvironment });
+      const metadata = lastJsonLine(stdout);
+      const probe = await probeVideo(output);
+      const audioMetrics = await probeAudio(output);
+      const video = probe.streams.find((stream) => stream.codec_type === 'video');
+      const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
 
-    assert.equal(metadata.ok, true);
-    assert.equal(metadata.game, candidate.game);
-    assert.equal(metadata.outcome, candidate.expectedOutcome);
-    assert.ok(metadata.events > 0);
-    assert.ok(metadata.music_hits > 0);
-    assert.equal(video.codec_name, 'h264');
-    assert.equal(video.width, 1080);
-    assert.equal(video.height, 1920);
-    assert.equal(video.pix_fmt, 'yuv420p');
-    assert.ok(fraction(video.avg_frame_rate) >= expectedOutputFps - 0.1);
-    assert.equal(audio.codec_name, 'aac');
-    assert.equal(audio.sample_rate, '48000');
-    assert.ok(audioMetrics.integratedLufs >= -18 && audioMetrics.integratedLufs <= -12);
-    assert.ok(audioMetrics.truePeakDb <= -1.0);
-    assert.ok(audioMetrics.longestSilenceSeconds < 3.0);
+      assert.equal(metadata.ok, true);
+      assert.equal(metadata.game, candidate.game);
+      assert.equal(metadata.outcome, candidate.expectedOutcome);
+      assert.ok(metadata.events > 0);
+      assert.ok(metadata.music_hits > 0);
+      assert.equal(video.codec_name, 'h264');
+      assert.equal(video.width, 1080);
+      assert.equal(video.height, 1920);
+      assert.equal(video.pix_fmt, 'yuv420p');
+      assert.ok(fraction(video.avg_frame_rate) >= expectedOutputFps - 0.1);
+      assert.equal(audio.codec_name, 'aac');
+      assert.equal(audio.sample_rate, '48000');
+      assert.ok(audioMetrics.integratedLufs >= -18 && audioMetrics.integratedLufs <= -12);
+      assert.ok(audioMetrics.truePeakDb <= -1.0);
+      assert.ok(audioMetrics.longestSilenceSeconds < 3.0);
 
-    results.push({
-      ...candidate,
-      output: output.split(/[\\/]/).at(-1),
-      actualDuration: Number(probe.format.duration),
-      sizeBytes: Number(probe.format.size),
-      videoBitrate: Number(probe.format.bit_rate),
-      events: metadata.events,
-      musicHits: metadata.music_hits,
-      outcome: metadata.outcome,
-      completedAt: metadata.completed_at,
-      ...audioMetrics,
-    });
+      results.push({
+        ...candidate,
+        qa: 'PASS',
+        output: output.split(/[\\/]/).at(-1),
+        actualDuration: Number(probe.format.duration),
+        sizeBytes: Number(probe.format.size),
+        videoBitrate: Number(probe.format.bit_rate),
+        events: metadata.events,
+        musicHits: metadata.music_hits,
+        outcome: metadata.outcome,
+        completedAt: metadata.completed_at,
+        ...audioMetrics,
+      });
+    } catch (error) {
+      const message = String(error?.message || error).slice(0, 2_000);
+      failures.push({ game: candidate.game, error: message });
+      results.push({
+        ...candidate,
+        qa: 'FAIL',
+        output: output.split(/[\\/]/).at(-1),
+        error: message,
+      });
+      process.stderr.write(`[2D ${candidate.label}] QA FAILED: ${message}\n`);
+    }
   }
 
-  const recommendation = [...results]
+  const recommendation = results.filter((item) => item.qa === 'PASS')
     .sort((first, second) => first.editorialPriority - second.editorialPriority)[0];
   const payload = {
-    ok: true,
+    ok: failures.length === 0,
     quality: 'production',
-    recommendation: recommendation.game,
+    recommendation: recommendation?.game ?? null,
     note: 'Technical readiness is verified; audience performance still requires real private/public A/B posts.',
+    failures,
     games: results,
   };
   writeFileSync(resolve(outputDirectory, 'results.json'), JSON.stringify(payload, null, 2));
-  const rows = results.map((item) => (
-    `| ${item.label} | ${item.outcome} | ${item.events} | ${item.integratedLufs.toFixed(1)} LUFS | `
-    + `${item.longestSilenceSeconds.toFixed(2)} s | ${(item.sizeBytes / 1_000_000).toFixed(1)} Mo | PASS |`
-  )).join('\n');
+  const rows = results.map((item) => {
+    if (item.qa === 'FAIL') {
+      const error = item.error.replace(/[|\r\n]+/g, ' ').slice(0, 180);
+      return `| ${item.label} | — | — | — | — | ${item.output} | FAIL: ${error} |`;
+    }
+    return `| ${item.label} | ${item.outcome} | ${item.events} | ${item.integratedLufs.toFixed(1)} LUFS | `
+      + `${item.longestSilenceSeconds.toFixed(2)} s | ${(item.sizeBytes / 1_000_000).toFixed(1)} Mo | PASS |`;
+  }).join('\n');
+  const recommendationLine = recommendation
+    ? `**Candidat prioritaire : ${recommendation.label}.** Il possède la boucle la plus
+immédiatement lisible pour le premier test de compte. Organic Escape est le
+second candidat.`
+    : '**Aucun candidat n’a passé la QA de publication.**';
   const report = `# Candidats 2D en qualité publication
 
 | Jeu | Issue physique | Événements | Son | Silence max | Fichier | QA |
 |---|---:|---:|---:|---:|---:|---:|
 ${rows}
 
-**Candidat prioritaire : ${recommendation.label}.** Il possède la boucle la plus
-immédiatement lisible pour le premier test de compte. Organic Escape est le
-second candidat. Cette priorité est éditoriale ; seul un A/B test de vraies
+${recommendationLine} Cette priorité est éditoriale ; seul un A/B test de vraies
 publications permettra de mesurer les vues, la rétention et les abonnements.
 
-Les quatre fichiers sont de vrais exports 1080×1920 à 60 fps avec H.264, audio
-AAC 48 kHz, issue physique et safe zones vérifiées par la suite de tests.
+Chaque fichier marqué PASS est un vrai export 1080×1920 à 60 fps avec H.264,
+audio AAC 48 kHz, issue physique et safe zones vérifiées par la suite de tests.
 `;
   writeFileSync(resolve(outputDirectory, 'report.md'), report);
   process.stdout.write(`\n${JSON.stringify(payload, null, 2)}\n`);
+  if (failures.length) {
+    throw new Error(`${failures.length} production candidate(s) failed QA`);
+  }
 }
 
 main().catch((error) => {
