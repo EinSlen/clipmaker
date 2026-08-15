@@ -27,6 +27,7 @@ const authProfileDir = process.platform === 'win32' && fs.existsSync(legacyAuthP
 const profilePlatformFile = path.join(authProfileDir, '.clipmaker-platform.json');
 const cookieDir = path.join(dataDir, 'yt-auth');
 const cookieFile = path.join(cookieDir, 'cookies-profile-local_invalid.json');
+const invalidSessionFile = path.join(dataDir, '.session-invalid.json');
 const uploadUrl = 'https://www.youtube.com/upload?persist_gl=1&gl=US&persist_hl=1&hl=en';
 const profileCredentials = { email: 'profile@local.invalid', pass: '' };
 const require = createRequire(import.meta.url);
@@ -67,6 +68,14 @@ function readCookies() {
 }
 
 function hasYouTubeSession() {
+  try {
+    if (fs.existsSync(invalidSessionFile)
+      && fs.statSync(invalidSessionFile).mtimeMs >= fs.statSync(cookieFile).mtimeMs) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
   const now = Date.now() / 1000;
   const sessionNames = new Set([
     'LOGIN_INFO', 'SID', 'HSID', 'SSID', 'APISID', 'SAPISID',
@@ -81,17 +90,6 @@ function hasYouTubeSession() {
 
 function isDryRun() {
   return process.env.YOUTUBE_BROWSER_DRY_RUN !== 'false';
-}
-
-function canReuseAuthProfile() {
-  if (!fs.existsSync(authProfileDir)) return false;
-  try {
-    const marker = JSON.parse(fs.readFileSync(profilePlatformFile, 'utf8'));
-    return marker?.platform === process.platform;
-  } catch {
-    // Profiles created by earlier Windows versions of this integration had no marker.
-    return process.platform === 'win32';
-  }
 }
 
 function doctor() {
@@ -171,6 +169,7 @@ async function authenticate() {
     const unique = [...new Map(cookies.map((cookie) => [`${cookie.name}|${cookie.domain}|${cookie.path}`, cookie])).values()];
     fs.writeFileSync(cookieFile, JSON.stringify(unique, null, 2), { mode: 0o600 });
     fs.writeFileSync(profilePlatformFile, JSON.stringify({ platform: process.platform }), { mode: 0o600 });
+    fs.rmSync(invalidSessionFile, { force: true });
     if (!hasYouTubeSession()) throw new Error('La fenêtre est ouverte, mais aucune session YouTube valide n’a été détectée.');
     console.log(`Session enregistrée localement dans ${cookieFile}`);
   } finally {
@@ -231,7 +230,8 @@ async function uploadShort(args) {
       }],
       {
         executablePath,
-        ...(canReuseAuthProfile() ? { userDataDir: authProfileDir } : {}),
+        // The uploader's cookie store is the portable session source. Passing
+        // userDataDir disables it and a fresh Linux profile asks for login.
         headless: process.env.YOUTUBE_BROWSER_HEADLESS !== 'false',
         args: launchArgs()
       },
@@ -248,6 +248,12 @@ async function uploadShort(args) {
         raw: { privacy }
       }
     };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/session is expired|authenticate again|input\[type=["']?email/i.test(message)) {
+      fs.writeFileSync(invalidSessionFile, JSON.stringify({ invalidatedAt: new Date().toISOString() }), { mode: 0o600 });
+    }
+    throw error;
   } finally {
     console.log = originalLog;
   }

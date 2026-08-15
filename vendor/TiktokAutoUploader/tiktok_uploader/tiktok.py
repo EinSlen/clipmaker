@@ -111,9 +111,18 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 	if not assert_success(project_url, r):
 		return False
 
-	# get project_id
-	print(r.json())
-	project_id = r.json()["project"]["project_id"]
+	# TikTok often returns HTTP 200 for an expired session. Treat the missing
+	# project as an authentication failure instead of raising an opaque KeyError.
+	try:
+		project_payload = r.json()
+	except ValueError:
+		eprint("[-] TikTok returned an invalid project response; refresh this account session.")
+		return False
+	project_id = project_payload.get("project", {}).get("project_id")
+	if not project_id:
+		status_message = project_payload.get("status_msg") or project_payload.get("message") or "session rejected"
+		eprint(f"[-] TikTok session is expired or invalid ({status_message}); log in again for '{session_user}'.")
+		return False
 	video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth = upload_to_tiktok(video, session)
 
 	url = f"https://{upload_host}/{store_uri}?uploadID={upload_id}&phase=finish&uploadmode=part"
