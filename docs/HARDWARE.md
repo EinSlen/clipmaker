@@ -9,16 +9,20 @@ machine gaming neuve. Chercher en priorité l'une de ces trois familles :
 - **Dell OptiPlex 3040/3050 Micro** ;
 - **Lenovo ThinkCentre M710q Tiny**.
 
-Configuration cible : **Core i5-6500T ou meilleur, 8 Go de RAM et SSD 256 Go**, alimentation
+Configuration cible : **Core i5-6400T/6500T ou meilleur, 8 Go de RAM et SSD 256 Go**, alimentation
 incluse. Un modèle SFF plus volumineux avec un i5-6500 non-T convient aussi et rendra un peu plus
-vite. Les annonces d'occasion françaises placent régulièrement ces machines entre 50 et 100 € :
+vite.
 
-- <https://www.leboncoin.fr/ck/ordinateurs/elitedesk-800-g2>
-- <https://www.leboncoin.fr/ck/ordinateurs/6500t>
-- <https://www.leboncoin.fr/ck/ordinateurs/lenovo-thinkcentre-m710q-tiny>
+Offre professionnelle vérifiée au 15 août 2026 : **Lenovo ThinkCentre M710q, Core i5-6400T, 8 Go,
+SSD 512 Go à 99,99 € chez Cash Express**. La fiche indique un produit testé, une garantie de deux
+ans, le paiement sécurisé, la livraison ou le retrait en magasin :
+<https://www.cashexpress.fr/micro-lenovo-i5-6400t-thinkcentre-m710q-8go-512go-intel-hd-occasion%2C4817947.html>.
+Le stock étant unitaire, confirmer avant paiement que le bloc d'alimentation est inclus.
 
 Éviter les versions Celeron/Pentium, 4 Go de RAM, disque dur mécanique ou vendues sans alimentation.
-Ne pas payer plus de 100 € pour un i5 de sixième génération. Si deux offres sont au même prix,
+Ne pas payer plus de 100 € pour un i5 de sixième génération. Si cette offre disparaît, chercher les
+mêmes références chez Cash Express, Easy Cash ou un reconditionneur professionnel avec au moins un
+an de garantie. Si deux offres sont au même prix,
 prendre celle avec 16 Go de RAM ; sinon 8 Go suffisent pour démarrer et la mémoire pourra être
 augmentée plus tard.
 
