@@ -1,58 +1,69 @@
 # Machine recommandée et installation Linux
 
-## Choix recommandé
+## Choix recommandé : 50 à 100 €
 
-Pour faire tourner **toute** la chaîne sur une seule petite machine, y compris Soft Body 3D, le
-meilleur compromis compact est actuellement un **MINISFORUM AtomMan G7 Ti, Core i9-14900HX,
-GeForce RTX 4070 Laptop, 32 Go de RAM et SSD NVMe 1 To**. La page constructeur annonce un GPU
-jusqu'à 140 W, jusqu'à 96 Go de RAM et affiche 1 279 USD au 15 août 2026 ; le prix et le stock
-français peuvent différer : <https://www.minisforum.com/fr/products/atomman-g7-ti-g7-ti-se>.
+Le meilleur choix pour ClipMaker est un **mini-PC professionnel x86-64 d'occasion**, pas une
+machine gaming neuve. Chercher en priorité l'une de ces trois familles :
 
-Prendre l'adaptateur UE/FR et la version 32 Go + 1 To. Si ce modèle dépasse environ 1 600–1 700 €,
-un petit PC tour avec une RTX 5070 de bureau, 32 Go de RAM et 1 To de SSD offre généralement un
-meilleur rapport performance/prix et sera plus facile à réparer.
+- **HP EliteDesk 800 G2 Mini** ;
+- **Dell OptiPlex 3040/3050 Micro** ;
+- **Lenovo ThinkCentre M710q Tiny**.
 
-Alternative plus récente et plus chère : **ASUS NUC 15 Performance, RTX 5060 ou 5070, 32 Go,
-1 To**. ASUS le destine explicitement à la création et au rendu 3D dans un boîtier de 3 litres :
-<https://www.asus.com/fr/displays-desktops/nucs/nuc-kits/asus-nuc-15-performance/>.
+Configuration cible : **Core i5-6500T ou meilleur, 8 Go de RAM et SSD 256 Go**, alimentation
+incluse. Un modèle SFF plus volumineux avec un i5-6500 non-T convient aussi et rendra un peu plus
+vite. Les annonces d'occasion françaises placent régulièrement ces machines entre 50 et 100 € :
+
+- <https://www.leboncoin.fr/ck/ordinateurs/elitedesk-800-g2>
+- <https://www.leboncoin.fr/ck/ordinateurs/6500t>
+- <https://www.leboncoin.fr/ck/ordinateurs/lenovo-thinkcentre-m710q-tiny>
+
+Éviter les versions Celeron/Pentium, 4 Go de RAM, disque dur mécanique ou vendues sans alimentation.
+Ne pas payer plus de 100 € pour un i5 de sixième génération. Si deux offres sont au même prix,
+prendre celle avec 16 Go de RAM ; sinon 8 Go suffisent pour démarrer et la mémoire pourra être
+augmentée plus tard.
+
+## Temps de rendu à accepter
+
+Ce matériel est suffisant pour Docker, l'interface, les quatre moteurs 2D et les uploaders. Il peut
+rester allumé en permanence et finir les rendus 2D sans intervention. En revanche, un Soft Body 3D
+natif de 30 secondes peut occuper le CPU pendant plusieurs jours. L'orchestrateur relancera un job
+interrompu, mais le rendu en cours peut recommencer ; une seule machine à moins de 100 € ne peut donc
+pas garantir un nouveau Soft Body chaque jour si un rendu dépasse 24 heures.
+
+Pour publier Soft Body quotidiennement sans réduire la qualité, préparer une réserve de vidéos sur
+le PC principal puis les transférer sur le mini-PC pour publication. Avec l'automatisation actuelle,
+le mini-PC peut assurer seul la chaîne complète des comptes Ball Escape, Organic Escape, Laser Dodge
+et Boss Battle ; Soft Body doit être rendu en avance si son temps de calcul dépasse une journée.
 
 ## Pourquoi pas un Raspberry Pi 5
 
 Le Raspberry Pi 5 est excellent pour un petit serveur, mais sa puce est un Cortex-A76 Arm à quatre
-cœurs avec un GPU VideoCore VII et au maximum 16 Go de RAM. Il peut héberger un planificateur ou
-envoyer des fichiers, mais le rendu Blender natif 1080×1920/30 i/s de Soft Body serait beaucoup trop
-lent et le chemin TikTok/Chromium Arm n'est pas couvert par nos tests. Caractéristiques officielles :
+cœurs avec un GPU VideoCore VII. La carte, l'alimentation, le refroidissement et le stockage dépassent
+souvent le budget d'un mini-PC professionnel complet. Il peut héberger un planificateur ou envoyer
+des fichiers, mais le rendu Blender natif 1080×1920/30 i/s de Soft Body serait beaucoup trop lent et
+le chemin TikTok/Chromium Arm n'est pas couvert par nos tests. Caractéristiques officielles :
 <https://www.raspberrypi.com/products/raspberry-pi-5/>.
 
-Un Raspberry Pi peut servir plus tard de contrôleur basse consommation si les rendus sont produits
-sur une autre machine. Pour le déploiement tout-en-un demandé ici, choisir un mini-PC x86 avec NVIDIA.
+Un Raspberry Pi peut servir de contrôleur basse consommation si les rendus sont produits ailleurs.
+À prix égal, le mini-PC x86 d'occasion est plus simple et plus compatible avec le dépôt actuel.
 
 ## Installation recommandée
 
 Installer **Ubuntu Server 24.04 LTS** sur le mini-PC, avec OpenSSH, puis connecter la machine en
 Ethernet. Dans les commandes suivantes, le dépôt est installé dans `/opt/clipmaker`.
 
-### 1. Pilote, Docker et GPU
+### 1. Système et Docker
 
 ```bash
 sudo apt update
 sudo apt full-upgrade -y
-sudo apt install -y git curl ca-certificates ubuntu-drivers-common
-sudo ubuntu-drivers install
+sudo apt install -y git curl ca-certificates
 sudo reboot
 ```
 
-Après le redémarrage, `nvidia-smi` doit afficher la carte. Installer ensuite Docker Engine depuis
-<https://docs.docker.com/engine/install/ubuntu/>, puis le NVIDIA Container Toolkit en suivant
-<https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>.
-
-Configuration du runtime NVIDIA :
-
-```bash
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-sudo docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu24.04 nvidia-smi
-```
+Installer ensuite Docker Engine et le plugin Compose depuis
+<https://docs.docker.com/engine/install/ubuntu/>. Aucun pilote NVIDIA ni runtime GPU n'est nécessaire
+pour la configuration à moins de 100 €.
 
 ### 2. Installer ClipMaker
 
@@ -80,11 +91,11 @@ YOUTUBE_ALLOW_PUBLIC_UPLOAD=false
 PUBLISHER_DRY_RUN=true
 ```
 
-Construire et démarrer avec l'accès GPU :
+Construire et démarrer en rendu CPU :
 
 ```bash
-docker compose -f docker-compose.yml -f infra/docker/compose.gpu.yml build clipmaker
-docker compose -f docker-compose.yml -f infra/docker/compose.gpu.yml up -d clipmaker
+docker compose build clipmaker
+docker compose up -d clipmaker
 docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs doctor \
   --config /repo/web/config/publisher.json
 ```
@@ -126,8 +137,7 @@ après vérification, activer les cibles de `publisher.json`, passer les variabl
 puis démarrer :
 
 ```bash
-docker compose -f docker-compose.yml -f infra/docker/compose.gpu.yml \
-  --profile publisher up -d
+docker compose --profile publisher up -d
 ```
 
 ## Exploitation 24/7
@@ -136,6 +146,7 @@ docker compose -f docker-compose.yml -f infra/docker/compose.gpu.yml \
 - Ajouter un petit onduleur si les coupures sont fréquentes.
 - Sauvegarder `.youtube-browser/`, `vendor/TiktokAutoUploader/CookiesDir/` et
   `web/data/publisher/` sur un support chiffré.
-- Garder au moins 150 Go libres : les images intermédiaires Blender peuvent être volumineuses.
+- Choisir au minimum un SSD de 256 Go et surveiller l'espace : les images intermédiaires Blender
+  peuvent être volumineuses. Ajouter plus tard un SSD USB si une grande réserve de vidéos est gardée.
 - Vérifier chaque semaine les journaux et les publications ; une automatisation ne garantit ni la
   viralité ni l'absence de changement dans les interfaces TikTok/YouTube.
