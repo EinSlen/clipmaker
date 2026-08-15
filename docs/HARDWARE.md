@@ -1,6 +1,6 @@
 # Machine recommandée et installation Linux
 
-## Choix recommandé : 70 à 100 €
+## Choix recommandé : livrable sous 100 €
 
 Le meilleur choix pour ClipMaker est un **mini-PC professionnel x86-64 d'occasion**, pas une
 machine gaming neuve. Chercher en priorité l'une de ces trois familles :
@@ -9,34 +9,41 @@ machine gaming neuve. Chercher en priorité l'une de ces trois familles :
 - **Dell OptiPlex 3040/3050 Micro** ;
 - **Lenovo ThinkCentre M710q Tiny**.
 
-Configuration cible : **Core i5-6400T/6500T ou meilleur, 8 Go de RAM et SSD 256 Go**, alimentation
-incluse. Un modèle SFF plus volumineux avec un i5-6500 non-T convient aussi et rendra un peu plus
-vite.
+Configuration idéale : **Core i5-6400T/6500T ou meilleur, 8 Go de RAM et SSD 256 Go**, alimentation
+incluse. Sous 100 € avec livraison, cette configuration est rare ; un Celeron J4105 à quatre cœurs
+reste suffisant si le temps de rendu n'est pas prioritaire.
 
-### Choix validé
+### Choix livrable validé
 
-Le meilleur vrai mini-PC trouvé au 15 août 2026 est un **Dell OptiPlex 3050 Micro, Core i5-7500T,
-8 Go de RAM et SSD 256 Go à 79,99 € chez Cash Express**. La fiche l'identifie explicitement comme
-modèle Micro, avec Wi-Fi, Windows 10 et une garantie de deux ans :
+L'option disponible avec expédition trouvée au 15 août 2026 est un **Dell Wyse 5070, Celeron J4105,
+8 Go de RAM et SSD M.2 128 Go à 75 €**, vendu d'occasion et testé par le professionnel polonais
+tyrs_it Media. Le bloc d'alimentation et son câble sont inclus. L'annonce expédie en Europe et la
+France n'est pas exclue ; les frais observés sont d'environ 14 €, soit un total indicatif de
+**89 € livré**. Vérifier le montant exact pour le code postal au panier :
+<https://www.ebay.fr/itm/196301730666>.
+
+Le Wyse est un mini-PC x86-64 compact et silencieux, compatible Ubuntu Linux et Docker. Son J4105
+quadricœur consomme peu mais rendra sensiblement moins vite qu'un Core i5-7500T. Le SSD de 128 Go
+suffit pour l'orchestrateur si les vidéos publiées et les images Blender intermédiaires sont purgées
+automatiquement ou transférées vers un stockage externe.
+
+### Offres locales non retenues
+
+Le **Dell OptiPlex 3050 Micro i5-7500T à 79,99 €** de Cash Express serait beaucoup plus rapide, mais
+la fiche indique seulement une disponibilité dans le magasin de Dorlisheim. Il n'est donc pas retenu
+tant qu'une livraison à domicile n'est pas proposée :
 <https://www.cashexpress.fr/p-213401/608816/dell-micro-ordinateur-i5-7500t-optiplex-3050-micro-8go-ram-2-70ghz-256go>.
 
-Le châssis Micro mesure environ **18,2 × 3,6 × 17,8 cm** et pèse environ 1,18 kg. Le stock est
-unitaire : confirmer auprès du magasin de Dorlisheim que l'expédition et le bloc d'alimentation 65 W
-sont inclus avant de payer.
-
-### Plancher raisonnable
-
-Pour économiser seulement 10 €, un **Dell OptiPlex 3040 Micro, Pentium G4400, 8 Go et SSD 256 Go à
-69,99 €** est aussi explicitement vendu comme mini-PC :
+Le **Dell OptiPlex 3040 Micro Pentium G4400 à 69,99 €** pose le même problème de disponibilité et
+est moins intéressant que l'i5 :
 <https://www.cashexpress.fr/p-196352/dell-mini-pc-optiplex-3040-pentium-g4400-3-3ghz-8-256go>.
-Il est toutefois nettement moins intéressant pour le rendu que l'i5-7500T à 79,99 €.
 
 Écarter la fiche Lenovo à 39,99 € qui mélange l'appellation M710q avec une photo de tour : le format
-réel n'est pas assez fiable pour la recommander. Éviter également les Celeron/Pentium, 4 Go de RAM,
-disques durs mécaniques ou machines vendues sans alimentation.
+réel n'est pas assez fiable pour la recommander. Éviter également les machines avec 4 Go de RAM,
+les disques durs mécaniques ou les machines vendues sans alimentation.
 Ne pas payer plus de 100 € pour un i5 de sixième génération. Si cette offre disparaît, chercher les
-mêmes références chez Cash Express, Easy Cash ou un reconditionneur professionnel avec au moins un
-an de garantie. Si deux offres sont au même prix,
+références indiquées chez un reconditionneur professionnel qui livre à domicile. Si deux offres sont
+au même prix,
 prendre celle avec 16 Go de RAM ; sinon 8 Go suffisent pour démarrer et la mémoire pourra être
 augmentée plus tard.
 
@@ -164,7 +171,7 @@ docker compose --profile publisher up -d
 - Ajouter un petit onduleur si les coupures sont fréquentes.
 - Sauvegarder `.youtube-browser/`, `vendor/TiktokAutoUploader/CookiesDir/` et
   `web/data/publisher/` sur un support chiffré.
-- Choisir au minimum un SSD de 256 Go et surveiller l'espace : les images intermédiaires Blender
-  peuvent être volumineuses. Ajouter plus tard un SSD USB si une grande réserve de vidéos est gardée.
+- Avec le Wyse 128 Go, activer la purge des images intermédiaires et surveiller l'espace. Ajouter un
+  SSD USB si une grande réserve de vidéos est conservée ; 256 Go ou plus reste préférable.
 - Vérifier chaque semaine les journaux et les publications ; une automatisation ne garantit ni la
   viralité ni l'absence de changement dans les interfaces TikTok/YouTube.
