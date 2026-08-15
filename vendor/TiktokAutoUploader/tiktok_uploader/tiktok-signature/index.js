@@ -79,17 +79,17 @@ class Signer {
         : route.continue();
     });
 
-    await this.page.goto(this.default_url, {
-      waitUntil: "networkidle",
-    });
+    // Signature generation is fully local. Navigating to TikTok here made the
+    // cron depend on an unrelated page reaching a browser load milestone and
+    // could hang forever behind bot protection.
+    await this.page.setContent("<!doctype html><html><body></body></html>");
 
     let LOAD_SCRIPTS = ["signer.js", "webmssdk.js", "xbogus.js"];
-    LOAD_SCRIPTS.forEach(async (script) => {
+    for (const script of LOAD_SCRIPTS) {
       await this.page.addScriptTag({
         path: `${__dirname}/javascript/${script}`,
       });
-      // console.log("[+] " + script + " loaded");
-    });
+    }
 
     await this.page.evaluate(() => {
       window.generateSignature = function generateSignature(url) {
@@ -99,12 +99,9 @@ class Signer {
         return window.byted_acrawler.sign({ url: url });
       };
 
-      window.generateBogus = function generateBogus(params) {
-        if (typeof window.generateBogus !== "function") {
-          throw "No X-Bogus function found";
-        }
-        return window.generateBogus(params);
-      };
+      if (typeof window.generateBogus !== "function") {
+        throw "No X-Bogus function found";
+      }
       return this;
     });
   }

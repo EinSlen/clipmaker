@@ -69,7 +69,9 @@ export async function doctorEndpoints(config, channel) {
     results.app = { ok: true };
     const tiktokConfigured = !channel.tiktok.enabled
       || (Array.isArray(accounts.accounts)
-        && accounts.accounts.some((account) => account.username === channel.tiktok.username));
+        && accounts.accounts.some((account) => (
+          account.username === channel.tiktok.username && account.ready === true
+        )));
     results.tiktok = {
       ok: config.dryRun || tiktokConfigured,
       enabled: channel.tiktok.enabled,

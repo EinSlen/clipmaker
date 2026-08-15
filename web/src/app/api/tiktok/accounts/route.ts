@@ -17,16 +17,63 @@ function extractUsername(filename: string): string | null {
   return candidate;
 }
 
+type TikTokAccountStatus = {
+  username: string;
+  cookieFile: string;
+  ready: boolean;
+  expired: boolean;
+  sessionPresent: boolean;
+  datacenterPresent: boolean;
+  expiresAt: number | null;
+  error?: string;
+};
+
+function inspectAccounts(): Promise<TikTokAccountStatus[]> {
+  return new Promise((resolve, reject) => {
+    const py = process.env.PYTHON_BIN || 'python';
+    const script = path.join(process.cwd(), 'scripts', 'tiktok-account-status.py');
+    const proc = spawn(py, [script, TIKTOK_COOKIES_DIR], { windowsHide: true });
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (data) => (out += data.toString()));
+    proc.stderr.on('data', (data) => (err += data.toString()));
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(err.trim() || `Cookie inspection exited with code ${code}.`));
+      try {
+        const payload = JSON.parse(out) as { accounts?: TikTokAccountStatus[] };
+        resolve(Array.isArray(payload.accounts) ? payload.accounts : []);
+      } catch {
+        reject(new Error('Cookie inspection returned invalid JSON.'));
+      }
+    });
+    proc.on('error', reject);
+  });
+}
+
 export async function GET() {
   try {
-    const entries = await fs.readdir(TIKTOK_COOKIES_DIR);
-    const accounts = entries
-      .map((f) => ({ file: f, username: extractUsername(f) }))
-      .filter((a) => a.username)
-      .map((a) => ({ username: a.username as string, cookieFile: a.file }));
+    const accounts = await inspectAccounts();
     return NextResponse.json({ accounts });
   } catch (err) {
-    return NextResponse.json({ accounts: [], note: 'Dossier des sessions TikTok introuvable. Lance `python cli.py login -n <username>` une fois pour ajouter un compte.' });
+    // Preserve account discovery if Python is unavailable, but never claim
+    // those unverified files are ready for unattended publishing.
+    const entries = await fs.readdir(TIKTOK_COOKIES_DIR).catch(() => [] as string[]);
+    const accounts = entries
+      .map((file) => ({ file, username: extractUsername(file) }))
+      .filter((account) => account.username)
+      .map((account) => ({
+        username: account.username as string,
+        cookieFile: account.file,
+        ready: false,
+        expired: false,
+        sessionPresent: false,
+        datacenterPresent: false,
+        expiresAt: null,
+      }));
+    return NextResponse.json({
+      accounts,
+      note: err instanceof Error ? err.message : 'Impossible de vérifier les sessions TikTok.',
+    });
   }
 }
 

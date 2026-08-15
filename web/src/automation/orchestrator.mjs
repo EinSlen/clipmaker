@@ -319,9 +319,11 @@ export async function doctor(config) {
   }
   return {
     ok: channels.every((channel) => (
-      channel.endpoints.app?.ok !== false
-      && channel.endpoints.youtube?.ok !== false
-      && channel.endpoints.tiktok?.ok !== false
+      !channel.enabled || (
+        channel.endpoints.app?.ok !== false
+        && channel.endpoints.youtube?.ok !== false
+        && channel.endpoints.tiktok?.ok !== false
+      )
     )),
     dryRun: config.dryRun,
     baseUrl: config.baseUrl,
