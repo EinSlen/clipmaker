@@ -838,6 +838,26 @@ class BossBattleRegressionTests(unittest.TestCase):
 
 
 class BallEscapeRegressionTests(unittest.TestCase):
+    def test_outcome_is_independent_from_render_resolution(self):
+        states = []
+        for width in (270, 360, 540, 1080):
+            height = round(width * 16 / 9)
+            game = BallEscape(width, height, 60, 15.0, 14, 9, "neon", "WILL IT ESCAPE?")
+            game.update(15.0)
+            states.append({
+                "active": game.active,
+                "completed_at": game.completed_at,
+                "failed_at": game.failed_at,
+                "event_kinds": tuple(event[3] for event in game.events),
+                "position": tuple(round(value / width, 9) for value in game.position),
+                "velocity": tuple(round(value / width, 9) for value in game.velocity),
+            })
+
+        self.assertTrue(all(state == states[0] for state in states[1:]))
+        self.assertEqual(states[0]["active"], 14)
+        self.assertIsNotNone(states[0]["completed_at"])
+        self.assertIsNone(states[0]["failed_at"])
+
     def test_fixed_timestep_is_independent_from_render_fps(self):
         states = []
         for fps in (12, 15, 24, 30, 60):

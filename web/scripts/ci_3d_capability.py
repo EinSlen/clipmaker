@@ -181,11 +181,18 @@ def main() -> None:
                     ),
                     args.smoke_timeout_minutes,
                 )
-                blend = frames / "soft-body-25.blend"
+                blend_candidates = tuple(frames.glob("soft-body-*.blend"))
                 payload = json.loads(events.read_text(encoding="utf-8"))
-                if not blend.is_file() or not isinstance(payload.get("events"), list):
+                if len(blend_candidates) != 1 or not isinstance(payload.get("events"), list):
                     raise RuntimeError("Blender scene or collision telemetry is missing")
-                obstacle_smokes.append({"obstacle": obstacle, "ok": True, "seconds": elapsed})
+                obstacle_smokes.append(
+                    {
+                        "obstacle": obstacle,
+                        "ok": True,
+                        "seconds": elapsed,
+                        "scene": blend_candidates[0].name,
+                    }
+                )
             except (
                 OSError,
                 RuntimeError,

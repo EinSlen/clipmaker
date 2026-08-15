@@ -449,6 +449,10 @@ class BallEscape:
         self.rng = random.Random(seed)
         self.cx = width / 2
         self.cy = height * 0.505
+        # Physics is authored against a 360 px-wide reference canvas. Every
+        # pixel-space impulse and contact offset must scale with the canvas or
+        # the same seed changes outcome between a preview and a 1080p export.
+        self.physics_scale = width / 360.0
         # The 5.7M-view reference fills the vertical canvas with a dense rainbow
         # vortex. Each logical gate is one thick, collidable rainbow ribbon;
         # the narrow coloured lines below are surface stripes, not extra gates.
@@ -482,7 +486,7 @@ class BallEscape:
         self.active = 0
         self.level = 1
         self.completed_at: float | None = None
-        self.position = [self.cx + 4, self.cy + 4]
+        self.position = [self.cx + 4 * self.physics_scale, self.cy + 4 * self.physics_scale]
         # Always launch upward first so gravity visibly bends the trajectory
         # into an arc instead of looking like random linear movement.
         launch_sector = (210, 246) if self.rng.random() < 0.5 else (294, 330)
@@ -730,14 +734,15 @@ class BallEscape:
                                 (time_sec + 0.32, 1318.51, 0.70, "victory"),
                             ])
                 else:
-                    self.position[0] = self.cx + nx * (radius - self.ball_radius - 1)
-                    self.position[1] = self.cy + ny * (radius - self.ball_radius - 1)
+                    contact_inset = self.physics_scale
+                    self.position[0] = self.cx + nx * (radius - self.ball_radius - contact_inset)
+                    self.position[1] = self.cy + ny * (radius - self.ball_radius - contact_inset)
                     self.velocity[0] -= 2 * outward_speed * nx
                     self.velocity[1] -= 2 * outward_speed * ny
                     bounce_boost = 1.008 + time_progress * 0.008
                     self.velocity[0] *= bounce_boost
                     self.velocity[1] *= bounce_boost
-                    tangent_push = self.rng.uniform(-18, 18)
+                    tangent_push = self.rng.uniform(-18, 18) * self.physics_scale
                     self.velocity[0] += -ny * tangent_push
                     self.velocity[1] += nx * tangent_push
                     if time_sec - self.last_collision > 0.055:
