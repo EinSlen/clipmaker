@@ -1,20 +1,53 @@
 # ClipMaker
 
-Studio auto-hébergé pour générer des vidéos verticales originales, les contrôler, puis publier
-quotidiennement sur TikTok et YouTube Shorts. L'interface web est en français ; les accroches et les
-métadonnées envoyées aux plateformes restent en anglais.
+[![Publication quotidienne](https://github.com/EinSlen/clipmaker/actions/workflows/daily-publisher.yml/badge.svg?branch=main)](https://github.com/EinSlen/clipmaker/actions/workflows/daily-publisher.yml)
+[![Rendu 3D](https://github.com/EinSlen/clipmaker/actions/workflows/soft-body-artifact.yml/badge.svg?branch=main)](https://github.com/EinSlen/clipmaker/actions/workflows/soft-body-artifact.yml)
+[![Interface Cloud](https://github.com/EinSlen/clipmaker/actions/workflows/cloud-dashboard.yml/badge.svg?branch=main)](https://github.com/EinSlen/clipmaker/actions/workflows/cloud-dashboard.yml)
+
+**[Tableau de bord Cloud](https://einslen.github.io/clipmaker/)** ·
+**[Ouvrir le studio privé](https://codespaces.new/EinSlen/clipmaker?quickstart=1)** ·
+**[Suivre les publications](https://github.com/EinSlen/clipmaker/issues/36)** ·
+**[Voir les workflows](https://github.com/EinSlen/clipmaker/actions)**
+
+ClipMaker est un studio automatisé pour générer des vidéos verticales originales, affecter un jeu à
+chaque compte, puis publier quotidiennement sur TikTok et YouTube Shorts. L'interface web est en
+français ; les accroches et les métadonnées envoyées aux plateformes restent en anglais.
+
+## À quoi sert ce dépôt ?
+
+Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
+
+- création de vidéos de jeux en 1080×1920 avec physique déterministe, musique et Foley synchronisé ;
+- configuration **un compte = un jeu**, avec cadence, seed et plateformes indépendantes ;
+- génération automatique quotidienne et publication programmée à 18 h 07, heure de Paris ;
+- envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts ;
+- conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
+- notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
 
 Le projet contient cinq moteurs : Ball Escape, Organic Escape, Laser Dodge, Boss Battle et Soft
 Body 3D. Les quatre premiers rendent en 1080×1920 à 60 i/s. Soft Body utilise Blender et propose
 plusieurs familles d'obstacles avec cinq niveaux de souplesse.
+
+## Utilisation dans le Cloud
+
+| Service GitHub | Rôle |
+| --- | --- |
+| [GitHub Pages](https://einslen.github.io/clipmaker/) | Tableau de bord permanent : état, commandes manuelles et lancement des rendus 3D. |
+| [GitHub Actions](https://github.com/EinSlen/clipmaker/actions) | Cron, génération, rendu, publication et notification. |
+| [GitHub Codespaces](https://codespaces.new/EinSlen/clipmaker?quickstart=1) | Studio complet et privé pour connecter les comptes et modifier la configuration. |
+| GitHub Secrets | Sessions, cookies et configuration chiffrée ; aucune donnée privée n'est incluse dans Pages. |
+
+Le tableau de bord public fonctionne en lecture seule. Les commandes nécessitent un jeton GitHub
+finement limité à ce dépôt avec la permission `Actions: write`. Le jeton reste dans la session de
+l'onglet et n'est pas enregistré dans le dépôt.
 
 ## Démarrage local
 
 Prérequis : Docker Engine avec le plugin Compose.
 
 ```bash
-git clone https://github.com/EinSlen/clipMaker.git
-cd clipMaker
+git clone https://github.com/EinSlen/clipmaker.git
+cd clipmaker
 cp web/.env.example web/.env.local
 docker compose up -d --build clipmaker
 ```
