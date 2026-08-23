@@ -7,6 +7,7 @@ import test from 'node:test';
 import { readPublisherConfig } from './config.mjs';
 import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
 import { loadState, saveState, withStateLock } from './state.mjs';
+import { buildPublisherSummary } from './summary.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 
 async function temporaryDirectory(t) {
@@ -118,6 +119,34 @@ test('configuration enforces one game and one assignment per platform account', 
   await fs.writeFile(configPath, JSON.stringify(base));
   const disabledDuplicate = await readPublisherConfig(configPath, {});
   assert.equal(disabledDuplicate.channels.length, 2);
+});
+
+test('workflow summary reports the requested operation and active configuration, not a stale job', () => {
+  const active = sampleChannel();
+  active.id = 'softbody-dvlad';
+  active.game = { game: 'soft-body-slide' };
+  active.generateTime = '00:07';
+  active.publishTime = '18:00';
+  active.youtube = { enabled: true, account: 'default', privacy: 'private', confirmPublic: false };
+  active.tiktok = { enabled: true, username: 'dvlad', visibility: 'private', confirmPublic: false };
+  const summary = buildPublisherSummary({
+    operation: 'doctor',
+    config: { channels: [active] },
+    doctor: {
+      ok: true,
+      channels: [{
+        id: active.id,
+        endpoints: { youtube: { ok: true }, tiktok: { ok: true } },
+      }],
+    },
+    status: { jobs: [{ channelId: 'ball-old', date: '2026-08-22', status: 'published' }] },
+  });
+  assert.match(summary, /Operation: `doctor`/u);
+  assert.match(summary, /Channel: `softbody-dvlad`/u);
+  assert.match(summary, /`soft-body-slide` · génération `00:07` · publication `18:00`/u);
+  assert.match(summary, /YouTube default \(private, prêt\)/u);
+  assert.match(summary, /TikTok @dvlad \(private, prêt\)/u);
+  assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old`/u);
 });
 
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
