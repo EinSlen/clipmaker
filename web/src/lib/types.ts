@@ -55,6 +55,11 @@ export type YoutubeSuggestion = {
 export type TiktokAccount = {
   username: string;
   cookieFile: string;
+  ready?: boolean;
+  expired?: boolean;
+  sessionPresent?: boolean;
+  datacenterPresent?: boolean;
+  expiresAt?: number | null;
   lastUsedAt?: number;
 };
 

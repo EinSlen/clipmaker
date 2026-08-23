@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { readPublisherConfig } from '../src/automation/config.mjs';
@@ -19,6 +20,23 @@ function output(value) {
 
 async function sleep(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function writeHeartbeat(config, state, error = null) {
+  try {
+    await fs.mkdir(config.stateDir, { recursive: true });
+    const target = path.join(config.stateDir, 'daemon-heartbeat.json');
+    const temporary = `${target}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, `${JSON.stringify({
+      at: new Date().toISOString(),
+      state,
+      pid: process.pid,
+      ...(error ? { error } : {}),
+    })}\n`);
+    await fs.rename(temporary, target);
+  } catch {
+    // A heartbeat must never stop rendering or publishing.
+  }
 }
 
 async function main() {
@@ -43,18 +61,25 @@ async function main() {
   if (command === 'due') return output(await runDue(config, { channelId, dryRun: forcedDryRun }));
   if (command === 'daemon') {
     let stopping = false;
+    let current = config;
     process.on('SIGINT', () => { stopping = true; });
     process.on('SIGTERM', () => { stopping = true; });
     while (!stopping) {
       try {
-        const current = await read();
-        output({ at: new Date().toISOString(), results: await runDue(current, { channelId, dryRun: forcedDryRun }) });
+        current = await read();
+        await writeHeartbeat(current, 'running');
+        const results = await runDue(current, { channelId, dryRun: forcedDryRun });
+        output({ at: new Date().toISOString(), results });
+        await writeHeartbeat(current, 'running');
         for (let elapsed = 0; elapsed < current.pollSeconds && !stopping; elapsed += 1) await sleep(1000);
       } catch (error) {
-        output({ at: new Date().toISOString(), ok: false, error: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof Error ? error.message : String(error);
+        output({ at: new Date().toISOString(), ok: false, error: message });
+        await writeHeartbeat(current, 'error', message);
         await sleep(60_000);
       }
     }
+    await writeHeartbeat(current, 'stopped');
     return;
   }
   throw new Error(`Unknown command: ${command}`);

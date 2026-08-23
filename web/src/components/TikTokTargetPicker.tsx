@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, Loader2, Plus, Users } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Plus, Users } from "lucide-react";
 import { Button } from "./Button";
 import type { TiktokAccount } from "@/lib/types";
 
@@ -28,7 +28,7 @@ export function TikTokTargetPicker({
       setNote(data.note || null);
       onChange(
         selection.filter((username) =>
-          next.some((account) => account.username === username)
+          next.some((account) => account.username === username && account.ready !== false)
         )
       );
     } finally {
@@ -50,6 +50,7 @@ export function TikTokTargetPicker({
   }, []);
 
   function toggle(username: string) {
+    if (accounts.find((account) => account.username === username)?.ready === false) return;
     onChange(
       value.includes(username)
         ? value.filter((item) => item !== username)
@@ -96,14 +97,14 @@ export function TikTokTargetPicker({
             type="button"
             onClick={() =>
               onChange(
-                value.length === accounts.length
+                value.length === accounts.filter((account) => account.ready !== false).length
                   ? []
-                  : accounts.map((account) => account.username)
+                  : accounts.filter((account) => account.ready !== false).map((account) => account.username)
               )
             }
             className="text-[11px] text-cyan-300 hover:text-cyan-200"
           >
-            {value.length === accounts.length
+            {value.length === accounts.filter((account) => account.ready !== false).length
               ? "Tout désélectionner"
               : "Tout sélectionner"}
           </button>
@@ -127,15 +128,20 @@ export function TikTokTargetPicker({
                 key={account.username}
                 type="button"
                 onClick={() => toggle(account.username)}
+                disabled={account.ready === false}
                 aria-pressed={selected}
                 className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
                   selected
                     ? "border-accent bg-accent text-white"
-                    : "border-white/15 text-ink-200 hover:bg-white/5"
+                    : account.ready === false
+                      ? "cursor-not-allowed border-amber-400/20 text-amber-200/70"
+                      : "border-white/15 text-ink-200 hover:bg-white/5"
                 }`}
               >
                 {selected && <Check className="size-3.5" aria-hidden="true" />}{" "}
+                {account.ready === false && <AlertTriangle className="size-3.5" aria-hidden="true" />}{" "}
                 @{account.username}
+                {account.expired ? " · expirée" : account.ready === false ? " · reconnexion" : ""}
               </button>
             );
           })}

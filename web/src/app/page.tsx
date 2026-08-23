@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
+  CalendarClock,
   Film,
   Gamepad2,
   Library,
@@ -17,11 +18,12 @@ import { TopBar } from "@/components/TopBar";
 import { Dropzone } from "@/components/Dropzone";
 import { YoutubePanel } from "@/components/YoutubePanel";
 import { GameStudio } from "@/components/GameStudio";
+import { AutomationPanel } from "@/components/AutomationPanel";
 import { Button } from "@/components/Button";
 import { listVideos, putVideo, deleteVideo, probeVideo } from "@/lib/db";
 import type { LibraryVideo } from "@/lib/types";
 
-type Tab = "game" | "upload" | "library" | "youtube";
+type Tab = "game" | "automation" | "upload" | "library" | "youtube";
 
 const tabs = [
   {
@@ -30,6 +32,13 @@ const tabs = [
     longLabel: "Jeux automatiques",
     description: "Créer un format original",
     Icon: Gamepad2,
+  },
+  {
+    id: "automation",
+    label: "Planning",
+    longLabel: "Planning automatique",
+    description: "Un jeu par compte",
+    Icon: CalendarClock,
   },
   {
     id: "upload",
@@ -59,6 +68,19 @@ export default function Home() {
   const [tab, setTab] = React.useState<Tab>("game");
   const [items, setItems] = React.useState<LibraryVideo[]>([]);
   const [uploading, setUploading] = React.useState(false);
+
+  React.useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (tabs.some((item) => item.id === requested)) setTab(requested as Tab);
+  }, []);
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "game") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 
   React.useEffect(() => {
     listVideos().then(setItems);
@@ -164,7 +186,7 @@ export default function Home() {
                   key={id}
                   type="button"
                   aria-current={tab === id ? "page" : undefined}
-                  onClick={() => setTab(id)}
+                  onClick={() => selectTab(id)}
                   className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
                     tab === id
                       ? "border-white/15 bg-white/[0.08] text-white shadow-lg shadow-black/10"
@@ -204,7 +226,7 @@ export default function Home() {
 
         <main className="min-w-0 space-y-6">
           <nav
-            className="sticky top-16 z-30 -mx-4 grid grid-cols-4 gap-1 border-b border-white/5 bg-ink-950/90 px-3 py-2 backdrop-blur-xl sm:-mx-6 sm:px-5 lg:hidden"
+            className="sticky top-16 z-30 -mx-4 grid grid-cols-5 gap-1 border-b border-white/5 bg-ink-950/90 px-2 py-2 backdrop-blur-xl sm:-mx-6 sm:px-5 lg:hidden"
             aria-label="Navigation principale"
           >
             {tabs.map(({ id, label, Icon }) => (
@@ -212,7 +234,7 @@ export default function Home() {
                 key={id}
                 type="button"
                 aria-current={tab === id ? "page" : undefined}
-                onClick={() => setTab(id)}
+                onClick={() => selectTab(id)}
                 className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 text-[10px] font-semibold transition ${
                   tab === id
                     ? "border-accent/60 bg-accent/15 text-white"
@@ -245,7 +267,7 @@ export default function Home() {
                   <dt className="text-[10px] uppercase tracking-wider text-ink-500">
                     Moteurs
                   </dt>
-                  <dd className="mt-1 text-lg font-semibold">3</dd>
+                  <dd className="mt-1 text-lg font-semibold">5</dd>
                 </div>
                 <div className="rounded-2xl border border-white/[0.08] bg-black/15 p-3">
                   <dt className="text-[10px] uppercase tracking-wider text-ink-500">
@@ -265,6 +287,10 @@ export default function Home() {
 
           <section className={tab === "game" ? "block" : "hidden"}>
             <GameStudio />
+          </section>
+
+          <section className={tab === "automation" ? "block" : "hidden"}>
+            <AutomationPanel />
           </section>
 
           <section className={tab === "upload" ? "block" : "hidden"}>
@@ -310,7 +336,7 @@ export default function Home() {
                   <Button
                     className="mt-5"
                     size="sm"
-                    onClick={() => setTab("upload")}
+                    onClick={() => selectTab("upload")}
                   >
                     <Upload className="size-4" /> Importer une vidéo
                   </Button>
