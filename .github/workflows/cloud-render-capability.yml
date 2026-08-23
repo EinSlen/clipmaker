@@ -46,7 +46,7 @@ jobs:
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build the reproducible rendering image
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:capability .
@@ -89,7 +89,7 @@ jobs:
 
       - name: Upload native 3D evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: 3d-native-capability-${{ inputs.obstacle }}-${{ inputs.seed }}
           path: artifacts/3d
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload 2D production candidates
         if: ${{ always() && steps.render2d.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: 2d-production-candidates
           path: artifacts/2d
