@@ -35,13 +35,13 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 | [GitHub Pages](https://einslen.github.io/clipmaker/) | Tableau de bord permanent : état, commandes manuelles et lancement des rendus 3D. |
 | [GitHub Actions](https://github.com/EinSlen/clipmaker/actions) | Cron, génération, rendu, publication et notification. |
 | [GitHub Codespaces](https://codespaces.new/EinSlen/clipmaker?quickstart=1) | Studio complet et privé pour connecter les comptes et modifier la configuration. |
+| [Cloudflare Worker](https://clipmaker-cloud-control.einslen.workers.dev) | Authentification GitHub privée et relais strictement limité aux workflows ClipMaker. |
 | GitHub Secrets | Sessions, cookies et configuration chiffrée ; aucune donnée privée n'est incluse dans Pages. |
 
-Le tableau de bord public fonctionne en lecture seule. Les commandes nécessitent un jeton GitHub
-finement limité à ce dépôt avec la permission `Actions: write`. Après la première connexion, le
-jeton est mémorisé dans le stockage local de ce navigateur, jamais dans le dépôt. Utiliser cette
-fonction uniquement sur un appareil personnel ; le bouton **Déconnecter** efface immédiatement le
-jeton de l'appareil.
+Le tableau de bord public fonctionne en lecture seule. Les commandes utilisent une GitHub App
+privée, limitée à la permission `Actions: write` sur ce dépôt. La connexion se fait avec GitHub :
+aucun PAT n'est copié dans le navigateur. Un jeton de session ClipMaker chiffré et révocable est
+mémorisé sur l'appareil jusqu'à la déconnexion.
 
 ## Démarrage local
 
@@ -89,6 +89,7 @@ activé par défaut afin d'éviter toute publication accidentelle.
 
 ```text
 clipMaker/
+├── cloud-dashboard/         interface statique publiée sur GitHub Pages
 ├── web/
 │   ├── src/app/             pages Next.js et routes API
 │   ├── src/components/      interface du studio
@@ -96,6 +97,7 @@ clipMaker/
 │   ├── src/automation/      planification, état et idempotence
 │   ├── scripts/             moteurs Python et CLI de publication
 │   └── config/              affectations fixes compte → jeu
+├── infra/cloud-control-worker/ authentification GitHub App et commandes Pages
 ├── infra/systemd/           timer Linux optionnel
 ├── vendor/                  fork TikTok Auto Uploader
 └── docker-compose.yml       application, publication et login YouTube

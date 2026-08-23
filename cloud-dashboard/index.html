@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0c12">
   <meta name="description" content="Panneau de contrôle cloud de ClipMaker">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://clipmaker-cloud-control.einslen.workers.dev; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <title>ClipMaker Cloud</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -41,13 +41,12 @@
           <h1>Centre de contrôle</h1>
         </div>
         <div class="token-box">
-          <label for="github-token">Jeton GitHub <span>à saisir une seule fois</span></label>
-          <div class="token-row">
-            <input id="github-token" type="password" autocomplete="off" placeholder="github_pat_…">
-            <button id="connect-token" class="button button-secondary">Connecter</button>
-            <button id="disconnect-token" class="button button-secondary" type="button" hidden>Déconnecter</button>
+          <label>Compte GitHub <span>authentification privée</span></label>
+          <div class="auth-row">
+            <button id="connect-github" class="button button-secondary" type="button">Se connecter avec GitHub</button>
+            <button id="disconnect-github" class="button button-secondary" type="button" hidden>Déconnecter</button>
           </div>
-          <small id="token-state">Lecture publique · commandes verrouillées</small>
+          <small id="auth-state">Lecture publique · connexion GitHub requise pour commander</small>
         </div>
       </header>
 
@@ -90,7 +89,7 @@
             <div><p class="eyebrow">PILOTAGE</p><h3>Commandes cloud</h3></div>
             <span class="secure-badge">Actions write</span>
           </div>
-          <p class="panel-intro">Ces commandes parlent directement à GitHub Actions. Après la première connexion, le jeton reste mémorisé uniquement sur cet appareil.</p>
+          <p class="panel-intro">Ces commandes passent par la GitHub App privée de ClipMaker. Aucun PAT n’est copié, affiché ou stocké dans cette page.</p>
           <div class="command-grid">
             <button class="command-card requires-token" data-command="doctor">
               <span class="command-icon">⌁</span>
