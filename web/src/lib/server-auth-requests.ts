@@ -23,5 +23,9 @@ export async function requestInteractiveAuth(platform: AuthPlatform, account: st
 export function interactiveAuthUrl(request: Request, platform: AuthPlatform): string {
   const requestUrl = new URL(request.url);
   const port = platform === "youtube" ? 6080 : 6081;
+  if (requestUrl.hostname.endsWith(".app.github.dev")) {
+    const codespaceHost = requestUrl.hostname.replace(/-3000(?=\.app\.github\.dev$)/, `-${port}`);
+    return `https://${codespaceHost}/vnc.html?autoconnect=true&resize=scale`;
+  }
   return `http://${requestUrl.hostname}:${port}/vnc.html?autoconnect=true&resize=scale`;
 }
