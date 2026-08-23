@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+
 function timeoutSignal(timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs} ms.`)), timeoutMs);
@@ -5,11 +8,38 @@ function timeoutSignal(timeoutMs) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
+function requestText(url, options, signal) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const transport = target.protocol === 'https:' ? https : http;
+    const request = transport.request(target, {
+      method: options.method || 'GET',
+      headers: options.headers,
+      signal,
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        ok: response.statusCode >= 200 && response.statusCode < 300,
+        status: response.statusCode || 0,
+        text: Buffer.concat(chunks).toString('utf8'),
+      }));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    if (options.body !== undefined) request.write(options.body);
+    request.end();
+  });
+}
+
 async function request(baseUrl, pathname, options = {}, timeoutMs = 60_000) {
   const timeout = timeoutSignal(timeoutMs);
   try {
-    const response = await fetch(`${baseUrl}${pathname}`, { ...options, signal: timeout.signal });
-    const text = await response.text();
+    // Node's built-in fetch has a fixed five-minute Undici headers timeout.
+    // Native HTTP keeps the explicit per-operation timeout authoritative for
+    // long CPU/Blender renders that legitimately take longer than five minutes.
+    const response = await requestText(`${baseUrl}${pathname}`, options, timeout.signal);
+    const text = response.text;
     let payload;
     try {
       payload = text ? JSON.parse(text) : {};
