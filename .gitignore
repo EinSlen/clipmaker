@@ -26,6 +26,7 @@ web/uploads/
 web/renders/
 web/config/publisher.json
 web/data/publisher/
+web/data/auth/
 web/public/music/*/
 web/public/music/*.mp3
 web/public/music/*.m4a
