@@ -158,6 +158,7 @@ jobs:
           lines.extend(f"- `{channel['channel_id']}` · `{channel['obstacle']}` · seed `{channel['seed']}`" for channel in channels)
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
+          cat "$GITHUB_STEP_SUMMARY"
 
   prepare:
     name: Simulate ${{ matrix.channel_id }}
