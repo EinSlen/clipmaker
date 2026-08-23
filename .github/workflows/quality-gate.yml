@@ -1,0 +1,72 @@
+name: Quality gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Web, engines, publisher and Worker
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            infra/cloud-control-worker/package-lock.json
+      - name: Install the web application
+        run: npm ci --prefix web
+      - name: Test and build the web application
+        run: |
+          npm --prefix web test
+          npm --prefix web run build
+      - name: Install and test the Cloudflare Worker
+        run: |
+          npm ci --prefix infra/cloud-control-worker
+          npm --prefix infra/cloud-control-worker run check
+          npm --prefix infra/cloud-control-worker test
+
+  infrastructure:
+    name: Workflows, Python and Docker configuration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Validate workflow YAML
+        run: |
+          python -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
+          python - <<'PY'
+          import glob
+          import yaml
+
+          paths = glob.glob('.github/workflows/*.yml') + glob.glob('.github/workflows/*.yaml')
+          if not paths:
+              raise SystemExit('No GitHub workflows found.')
+          for path in paths:
+              with open(path, encoding='utf-8') as handle:
+                  yaml.safe_load(handle)
+              print(f'YAML OK: {path}')
+          PY
+      - name: Compile the Python renderers
+        run: python -m compileall -q web/scripts
+      - name: Validate Docker Compose
+        run: |
+          cp web/.env.example web/.env.local
+          docker compose config --quiet
