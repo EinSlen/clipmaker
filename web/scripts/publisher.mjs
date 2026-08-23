@@ -68,7 +68,16 @@ async function main() {
       try {
         current = await read();
         await writeHeartbeat(current, 'running');
-        const results = await runDue(current, { channelId, dryRun: forcedDryRun });
+        const heartbeatTimer = setInterval(() => {
+          void writeHeartbeat(current, 'running');
+        }, 30_000);
+        heartbeatTimer.unref?.();
+        let results;
+        try {
+          results = await runDue(current, { channelId, dryRun: forcedDryRun });
+        } finally {
+          clearInterval(heartbeatTimer);
+        }
         output({ at: new Date().toISOString(), results });
         await writeHeartbeat(current, 'running');
         for (let elapsed = 0; elapsed < current.pollSeconds && !stopping; elapsed += 1) await sleep(1000);
