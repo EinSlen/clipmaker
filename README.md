@@ -19,7 +19,7 @@ Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
 
 - création de vidéos de jeux en 1080×1920 avec physique déterministe, musique et Foley synchronisé ;
 - configuration **un compte = un jeu**, avec cadence, seed et plateformes indépendantes ;
-- génération automatique quotidienne et publication programmée à 18 h 07, heure de Paris ;
+- rendu 3D matriciel à 00 h 07, génération 2D à 00 h 37 et publication programmée à 18 h 07, heure de Paris ;
 - envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts ;
 - conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
 - notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
@@ -32,16 +32,16 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 
 | Service GitHub | Rôle |
 | --- | --- |
-| [GitHub Pages](https://einslen.github.io/clipmaker/) | Tableau de bord permanent : état, commandes manuelles et lancement des rendus 3D. |
+| [GitHub Pages](https://einslen.github.io/clipmaker/) | Tableau de bord permanent : état, affectation compte → jeu, planning, commandes et rendu 3D. |
 | [GitHub Actions](https://github.com/EinSlen/clipmaker/actions) | Cron, génération, rendu, publication et notification. |
 | [GitHub Codespaces](https://codespaces.new/EinSlen/clipmaker?quickstart=1) | Studio complet et privé pour connecter les comptes et modifier la configuration. |
-| [Cloudflare Worker](https://clipmaker-cloud-control.einslen.workers.dev) | Authentification GitHub privée et relais strictement limité aux workflows ClipMaker. |
-| GitHub Secrets | Sessions, cookies et configuration chiffrée ; aucune donnée privée n'est incluse dans Pages. |
+| [Cloudflare Worker](https://clipmaker-cloud-control.einslen.workers.dev) | Authentification GitHub privée, configuration en KV et relais limité aux workflows ClipMaker. |
+| GitHub Secrets | Jetons du runner et clé de chiffrement de l'état ; aucune valeur n'est incluse dans Pages. |
 
-Le tableau de bord public fonctionne en lecture seule. Les commandes utilisent une GitHub App
-privée, limitée à la permission `Actions: write` sur ce dépôt. La connexion se fait avec GitHub :
-aucun PAT n'est copié dans le navigateur. Un jeton de session ClipMaker chiffré et révocable est
-mémorisé sur l'appareil jusqu'à la déconnexion.
+Le tableau de bord est public en lecture seule. Après connexion avec la GitHub App privée, il permet
+de modifier le jeu, l'obstacle, l'heure et les destinations de chaque compte. Aucun PAT n'est copié
+dans le navigateur. Les sessions TikTok/Google sont créées dans le Studio privé, puis synchronisées
+vers le Worker par le serveur ClipMaker sans transiter en clair dans Pages.
 
 ## Démarrage local
 
@@ -76,11 +76,15 @@ docker compose exec -T clipmaker node /repo/web/scripts/publisher.mjs due \
   --config /repo/web/config/publisher.json --dry-run
 ```
 
-Après avoir connecté les comptes et validé un upload privé, le daemon peut être démarré avec :
+Après avoir connecté les comptes et validé un upload privé, le daemon local peut être utilisé à la
+place de GitHub Actions avec :
 
 ```bash
 docker compose --profile publisher up -d --build
 ```
+
+Ne lance jamais le daemon local et le cron GitHub en même temps : ils utilisent deux états distincts
+et pourraient envoyer le même contenu deux fois.
 
 Les affectations compte → jeu sont définies dans `web/config/publisher.json`. Le dry-run reste
 activé par défaut afin d'éviter toute publication accidentelle.
@@ -116,9 +120,10 @@ docker compose config --quiet
 Le smoke de rendu encode de vrais MP4. Le rendu Soft Body final est volontairement beaucoup plus
 long et se valide séparément à cause du coût Blender.
 
-Le workflow manuel **Cloud render capability** construit réellement les sept obstacles 3D,
-chronomètre des images natives 1080×1920/128 samples et génère les quatre candidats 2D en qualité
-publication si la 3D dépasse le budget du runner. Il ne contient aucun secret et ne publie rien.
+Le workflow **Soft Body 3D artifact** s'exécute automatiquement pendant la nuit. Il simule chaque
+canal 3D, répartit ses 900 images natives 1080×1920 entre les runners, assemble le MP4 et produit un
+manifeste importé par le workflow de publication. Le workflow manuel **Cloud render capability** reste
+un benchmark sans publication.
 
 Les sessions de navigateur, cookies, rendus, secrets et états de publication sont exclus de Git.
 Ne jamais exposer directement le port 3000 sur Internet sans authentification.

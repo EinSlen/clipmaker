@@ -3,8 +3,14 @@
   "name": "clipmaker-cloud-control",
   "main": "src/index.js",
   "compatibility_date": "2026-08-23",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  },
   "vars": {
     "ALLOWED_LOGIN": "EinSlen",
     "DASHBOARD_ORIGIN": "https://einslen.github.io",

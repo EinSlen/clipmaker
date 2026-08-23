@@ -1,8 +1,14 @@
+import { normalizePublisherConfig, publicPublisherConfig } from './publisher-config.js';
+
 const API_VERSION = '2026-03-10';
 const APP_CONFIG_KEY = 'github-app-config';
 const INSTALLATION_KEY = 'github-app-installation';
+const PUBLISHER_CONFIG_KEY = 'publisher-config-v1';
+const PUBLISHER_SESSIONS_KEY = 'publisher-sessions-v1';
+const PUBLISHER_ACCOUNTS_KEY = 'publisher-accounts-v1';
 const SESSION_LIFETIME_MS = 150 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 12_000;
+const MAX_SYNC_BODY_BYTES = 96_000;
 const SOFT_BODY_OBSTACLES = new Set([
   'peg-grid',
   'moving-slide',
@@ -72,13 +78,19 @@ export async function openSession(value, env) {
   }
 }
 
-function safeEqual(left, right) {
-  const a = new TextEncoder().encode(String(left || ''));
-  const b = new TextEncoder().encode(String(right || ''));
-  if (a.byteLength !== b.byteLength || a.byteLength === 0) return false;
+async function safeEqual(left, right) {
+  const encoder = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', encoder.encode(String(left || ''))),
+    crypto.subtle.digest('SHA-256', encoder.encode(String(right || ''))),
+  ]);
+  const leftBytes = new Uint8Array(a);
+  const rightBytes = new Uint8Array(b);
   let difference = 0;
-  for (let index = 0; index < a.byteLength; index += 1) difference |= a[index] ^ b[index];
-  return difference === 0;
+  for (let index = 0; index < leftBytes.byteLength; index += 1) {
+    difference |= leftBytes[index] ^ rightBytes[index];
+  }
+  return difference === 0 && Boolean(String(left || '')) && Boolean(String(right || ''));
 }
 
 function escapeAttribute(value) {
@@ -127,7 +139,7 @@ function corsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': env.DASHBOARD_ORIGIN,
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
     'Access-Control-Max-Age': '600',
     Vary: 'Origin',
   };
@@ -230,6 +242,20 @@ async function authenticatedSession(request, env) {
   return { ...refreshed, config };
 }
 
+async function workflowRequest(request, env) {
+  const expected = env.WORKFLOW_CONFIG_TOKEN || '';
+  const provided = parseBearer(request);
+  if (!await safeEqual(provided, expected)) throw new HttpError(401, 'Jeton du runner GitHub invalide.');
+}
+
+async function boundedJson(request, maximum = MAX_BODY_BYTES) {
+  const length = Number(request.headers.get('Content-Length') || 0);
+  if (length > maximum) throw new HttpError(413, 'Requête trop volumineuse.');
+  return request.json().catch(() => {
+    throw new HttpError(400, 'Corps JSON invalide.');
+  });
+}
+
 export function validateDispatch(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new HttpError(400, 'Commande invalide.');
   const workflow = String(payload.workflow || '');
@@ -270,7 +296,7 @@ export function validateDispatch(payload) {
 
 async function setupStart(request, env) {
   const url = new URL(request.url);
-  if (!safeEqual(url.searchParams.get('key'), env.SETUP_SECRET)) throw new HttpError(404, 'Configuration introuvable.');
+  if (!await safeEqual(url.searchParams.get('key'), env.SETUP_SECRET)) throw new HttpError(404, 'Configuration introuvable.');
   if (await env.CONFIG.get(APP_CONFIG_KEY)) return redirect(dashboardRedirect(env, '?setup=ready'));
 
   const state = randomToken();
@@ -302,7 +328,7 @@ async function setupCallback(request, env) {
   const url = new URL(request.url);
   const state = url.searchParams.get('state') || '';
   const expected = cookie(request, 'clipmaker_setup_state');
-  if (!safeEqual(state, expected)) throw new HttpError(403, 'État de configuration GitHub invalide.');
+  if (!await safeEqual(state, expected)) throw new HttpError(403, 'État de configuration GitHub invalide.');
   const code = url.searchParams.get('code');
   if (!code) throw new HttpError(400, 'Code de configuration GitHub absent.');
   const { response, payload } = await github(`/app-manifests/${encodeURIComponent(code)}/conversions`, { method: 'POST' });
@@ -348,7 +374,7 @@ async function authCallback(request, env) {
   const url = new URL(request.url);
   const state = url.searchParams.get('state') || '';
   const expected = cookie(request, 'clipmaker_oauth_state');
-  if (!safeEqual(state, expected)) throw new HttpError(403, 'État OAuth GitHub invalide.');
+  if (!await safeEqual(state, expected)) throw new HttpError(403, 'État OAuth GitHub invalide.');
   if (url.searchParams.get('error')) throw new HttpError(401, 'Connexion GitHub annulée.');
   const code = url.searchParams.get('code');
   if (!code) throw new HttpError(400, 'Code OAuth GitHub absent.');
@@ -382,10 +408,8 @@ async function apiSession(request, env) {
 }
 
 async function apiDispatch(request, env) {
-  const length = Number(request.headers.get('Content-Length') || 0);
-  if (length > MAX_BODY_BYTES) throw new HttpError(413, 'Commande trop volumineuse.');
   const authenticated = await authenticatedSession(request, env);
-  const command = validateDispatch(await request.json().catch(() => null));
+  const command = validateDispatch(await boundedJson(request));
   const { response, payload } = await github(
     `/repos/${encodeURIComponent(env.REPOSITORY_OWNER)}/${encodeURIComponent(env.REPOSITORY_NAME)}/actions/workflows/${encodeURIComponent(command.workflow)}/dispatches`,
     {
@@ -400,6 +424,76 @@ async function apiDispatch(request, env) {
   if (!response.ok) throw new HttpError(response.status === 403 ? 403 : 502, payload?.message || 'GitHub a refusé le lancement du workflow.');
   const renewed = authenticated.changed ? await sealSession(authenticated.session, env) : null;
   return json({ ok: true, workflow: command.workflow, session: renewed }, 202, request, env);
+}
+
+function normalizeAccounts(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const tiktok = Array.isArray(source.tiktok) ? source.tiktok.slice(0, 16).map((item) => ({
+    username: String(item?.username || '').trim().slice(0, 32),
+    ready: Boolean(item?.ready),
+  })).filter((item) => /^[A-Za-z0-9._]{2,32}$/u.test(item.username)) : [];
+  const youtube = Array.isArray(source.youtube) ? source.youtube.slice(0, 16).map((item) => ({
+    id: String(item?.id || '').trim().slice(0, 64),
+    label: String(item?.label || item?.id || '').trim().slice(0, 80),
+    ready: Boolean(item?.ready),
+  })).filter((item) => item.id) : [];
+  return { tiktok, youtube };
+}
+
+async function apiPublisherConfig(request, env) {
+  const authenticated = await authenticatedSession(request, env);
+  if (request.method === 'PUT') {
+    let normalized;
+    try {
+      normalized = normalizePublisherConfig(await boundedJson(request, 48_000));
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : 'Configuration invalide.');
+    }
+    await env.CONFIG.put(PUBLISHER_CONFIG_KEY, JSON.stringify(normalized));
+  }
+  const stored = await env.CONFIG.get(PUBLISHER_CONFIG_KEY, 'json');
+  if (!stored) throw new HttpError(404, 'Aucune configuration cloud n’a encore été synchronisée.');
+  const renewed = authenticated.changed ? await sealSession(authenticated.session, env) : null;
+  return json({ ok: true, config: publicPublisherConfig(stored), session: renewed }, 200, request, env);
+}
+
+async function apiPublisherAccounts(request, env) {
+  const authenticated = await authenticatedSession(request, env);
+  const accounts = await env.CONFIG.get(PUBLISHER_ACCOUNTS_KEY, 'json') || { tiktok: [], youtube: [] };
+  const sessionsSynced = Boolean(await env.CONFIG.get(PUBLISHER_SESSIONS_KEY));
+  const renewed = authenticated.changed ? await sealSession(authenticated.session, env) : null;
+  return json({ ok: true, accounts, sessionsSynced, session: renewed }, 200, request, env);
+}
+
+async function apiWorkflowBootstrap(request, env) {
+  await workflowRequest(request, env);
+  if (request.method === 'POST') {
+    const body = await boundedJson(request, MAX_SYNC_BODY_BYTES);
+    let config;
+    try {
+      config = normalizePublisherConfig(body?.config);
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : 'Configuration invalide.');
+    }
+    const sessionsBundle = String(body?.sessionsBundle || '');
+    if (!/^[A-Za-z0-9+/=]+$/u.test(sessionsBundle) || sessionsBundle.length > 64_000) {
+      throw new HttpError(400, 'Bundle de sessions invalide.');
+    }
+    const accounts = normalizeAccounts(body?.accounts);
+    const syncedAt = new Date().toISOString();
+    await Promise.all([
+      env.CONFIG.put(PUBLISHER_CONFIG_KEY, JSON.stringify(config)),
+      env.CONFIG.put(PUBLISHER_SESSIONS_KEY, sessionsBundle),
+      env.CONFIG.put(PUBLISHER_ACCOUNTS_KEY, JSON.stringify({ ...accounts, syncedAt })),
+    ]);
+  }
+  const [config, sessionsBundle, accounts] = await Promise.all([
+    env.CONFIG.get(PUBLISHER_CONFIG_KEY, 'json'),
+    env.CONFIG.get(PUBLISHER_SESSIONS_KEY),
+    env.CONFIG.get(PUBLISHER_ACCOUNTS_KEY, 'json'),
+  ]);
+  if (!config || !sessionsBundle) throw new HttpError(503, 'La configuration et les sessions cloud ne sont pas encore prêtes.');
+  return json({ ok: true, config, sessionsBundle, accounts: accounts || { tiktok: [], youtube: [] } }, 200, request, env);
 }
 
 async function apiLogout(request, env) {
@@ -433,6 +527,9 @@ async function route(request, env) {
   if (request.method === 'GET' && url.pathname === '/auth/start') return authStart(request, env);
   if (request.method === 'GET' && url.pathname === '/auth/callback') return authCallback(request, env);
   if (request.method === 'GET' && url.pathname === '/api/session') return apiSession(request, env);
+  if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/config') return apiPublisherConfig(request, env);
+  if (request.method === 'GET' && url.pathname === '/api/accounts') return apiPublisherAccounts(request, env);
+  if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/api/workflow/bootstrap') return apiWorkflowBootstrap(request, env);
   if (request.method === 'POST' && url.pathname === '/api/dispatch') return apiDispatch(request, env);
   if (request.method === 'POST' && url.pathname === '/api/logout') return apiLogout(request, env);
   if (request.method === 'POST' && url.pathname === '/webhook') return new Response(null, { status: 204 });
@@ -447,6 +544,9 @@ export default {
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
       const message = error instanceof HttpError ? error.message : 'Erreur interne du contrôle Cloud.';
+      if (!(error instanceof HttpError)) {
+        console.error(JSON.stringify({ message: 'cloud-control request failed', error: error instanceof Error ? error.message : String(error), path: new URL(request.url).pathname }));
+      }
       return json({ error: message }, status, request, env);
     }
   },

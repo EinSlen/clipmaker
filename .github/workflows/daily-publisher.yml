@@ -43,19 +43,26 @@ jobs:
       SESSION_BUNDLE: ${{ secrets.PUBLISHER_SESSIONS_GZIP_B64 }}
       PUBLISHER_STATE_KEY: ${{ secrets.PUBLISHER_STATE_KEY }}
       CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
+      CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Require the encrypted cloud configuration
+      - name: Require the private runner credentials
         run: |
-          test -n "$CONFIG_BUNDLE" || { echo "Synchronise d'abord l'interface ClipMaker avec GitHub." >&2; exit 1; }
-          test -n "$SESSION_BUNDLE" || { echo "Les sessions TikTok/YouTube ne sont pas synchronisées." >&2; exit 1; }
           test -n "$PUBLISHER_STATE_KEY" || { echo "La clé d'état chiffré manque." >&2; exit 1; }
           test -n "$CLIPMAKER_UPLOAD_TOKEN" || { echo "Le jeton interne ClipMaker manque." >&2; exit 1; }
 
-      - name: Restore configuration and browser sessions from GitHub Secrets
+      - name: Restore configuration and browser sessions from Cloudflare
         run: |
+          if curl --fail --silent --show-error \
+            --header "Authorization: Bearer $CLIPMAKER_UPLOAD_TOKEN" \
+            "$CLOUD_CONTROL_API/api/workflow/bootstrap" > /tmp/cloud-bootstrap.json; then
+            export CLOUD_BOOTSTRAP=/tmp/cloud-bootstrap.json
+          else
+            test -n "$CONFIG_BUNDLE" || { echo "Synchronise d'abord le Studio ClipMaker avec le cloud." >&2; exit 1; }
+            test -n "$SESSION_BUNDLE" || { echo "Les sessions TikTok/YouTube ne sont pas synchronisées." >&2; exit 1; }
+          fi
           python3 - <<'PY'
           import base64
           import gzip
@@ -64,12 +71,19 @@ jobs:
           from pathlib import Path
 
           root = Path.cwd().resolve()
-          config = gzip.decompress(base64.b64decode(os.environ["CONFIG_BUNDLE"]))
           target = root / "web" / "config" / "publisher.json"
           target.parent.mkdir(parents=True, exist_ok=True)
-          target.write_bytes(config)
+          cloud = os.environ.get("CLOUD_BOOTSTRAP")
+          if cloud:
+              payload = json.loads(Path(cloud).read_text(encoding="utf-8"))
+              target.write_text(json.dumps(payload["config"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+              session_bundle = payload["sessionsBundle"]
+          else:
+              config = gzip.decompress(base64.b64decode(os.environ["CONFIG_BUNDLE"]))
+              target.write_bytes(config)
+              session_bundle = os.environ["SESSION_BUNDLE"]
 
-          bundle = json.loads(gzip.decompress(base64.b64decode(os.environ["SESSION_BUNDLE"])))
+          bundle = json.loads(gzip.decompress(base64.b64decode(session_bundle)))
           for relative, encoded in bundle.get("files", {}).items():
               destination = (root / relative).resolve()
               if root not in destination.parents:
@@ -91,20 +105,6 @@ jobs:
               -out /tmp/publisher-runtime.tar.gz
             tar -xzf /tmp/publisher-runtime.tar.gz -C "$PWD"
           fi
-
-      - name: Reject unsupported scheduled 3D channels
-        if: ${{ github.event_name == 'schedule' }}
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          config = json.loads(Path("web/config/publisher.json").read_text(encoding="utf-8"))
-          blocked = [channel.get("id") for channel in config.get("channels", [])
-                     if channel.get("enabled", True) and channel.get("game", {}).get("id") == "soft-body-slide"]
-          if blocked:
-              raise SystemExit("Le cron 3D attend la validation du rendu matriciel : " + ", ".join(blocked))
-          PY
 
       - name: Build the cloud publisher image
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:publisher .
@@ -146,6 +146,47 @@ jobs:
           fi
           echo "command=$command" >> "$GITHUB_OUTPUT"
 
+      - name: Import today's completed 3D renders
+        if: ${{ steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run' }}
+        run: |
+          expected="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("web/config/publisher.json").read_text(encoding="utf-8"))
+          print(sum(1 for channel in config.get("channels", [])
+                    if channel.get("enabled", True) and channel.get("game", {}).get("id") == "soft-body-slide"))
+          PY
+          )"
+          if [ "$expected" -eq 0 ]; then exit 0; fi
+          today="$(TZ=Europe/Paris date +%F)"
+          mkdir -p artifacts/soft-body-imports
+          for run_id in $(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/soft-body-artifact.yml/runs?event=schedule&status=success&per_page=5" \
+            --jq '.workflow_runs[].id'); do
+            while IFS=$'\t' read -r artifact_id artifact_name; do
+              [ -n "$artifact_id" ] || continue
+              target="artifacts/soft-body-imports/${run_id}-${artifact_name}"
+              mkdir -p "$target"
+              gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/soft-body-artifact.zip
+              unzip -oq /tmp/soft-body-artifact.zip -d "$target"
+            done < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq ".artifacts[] | select(.name | startswith(\"soft-body-daily-${today}-\")) | [.id,.name] | @tsv")
+          done
+          imported=0
+          declare -A imported_channels=()
+          while IFS= read -r manifest; do
+            channel_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["channelId"])' "$manifest")"
+            if [ -n "${imported_channels[$channel_id]:-}" ]; then continue; fi
+            docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs import-3d \
+              --config /repo/web/config/publisher.json --manifest "/repo/$manifest" > "${manifest%.json}-result.json"
+            imported_channels[$channel_id]=1
+            imported=$((imported + 1))
+          done < <(find artifacts/soft-body-imports -name publisher-import.json -type f | sort -u)
+          test "$imported" -eq "$expected" || {
+            echo "Rendus 3D prêts : $imported/$expected. La publication est arrêtée pour ne pas envoyer une mauvaise vidéo." >&2
+            exit 1
+          }
+
       - name: Check connected accounts
         run: |
           docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs doctor \
@@ -176,6 +217,9 @@ jobs:
           extra=()
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
             extra+=(--dry-run)
+          fi
+          if [ "$COMMAND" = "generate" ] || [ "$COMMAND" = "run" ]; then
+            extra+=(--skip-game soft-body-slide)
           fi
           docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs "$COMMAND" \
             --config /repo/web/config/publisher.json "${extra[@]}" > artifacts/result.json

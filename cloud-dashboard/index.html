@@ -23,9 +23,9 @@
       <nav aria-label="Navigation principale">
         <a class="nav-link active" href="#overview"><span>◈</span> Vue d’ensemble</a>
         <a class="nav-link" href="#commands"><span>▷</span> Commandes</a>
+        <a class="nav-link" href="#configuration"><span>⚙</span> Comptes et jeux</a>
         <a class="nav-link" href="#three-d"><span>◇</span> Test 3D</a>
         <a class="nav-link" href="#runs"><span>≡</span> Exécutions</a>
-        <a class="nav-link" href="#studio"><span>↗</span> Studio complet</a>
       </nav>
       <div class="sidebar-card">
         <span class="live-dot"></span>
@@ -119,6 +119,35 @@
         </aside>
       </section>
 
+      <section id="configuration" class="panel configuration-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">AUTOMATISATION</p><h3>Un compte, un jeu</h3></div>
+          <span id="config-state" class="secure-badge">Connexion requise</span>
+        </div>
+        <p class="panel-intro">Choisis le jeu, l’obstacle, l’heure et les destinations de chaque compte. Les changements sont utilisés par le prochain cron GitHub, sans PAT.</p>
+        <div class="config-toolbar">
+          <label class="compact-field">Mode
+            <select id="global-mode"><option value="live">Production</option><option value="test">Test uniquement</option></select>
+          </label>
+          <span id="sessions-state" class="session-state">Sessions non vérifiées</span>
+          <button id="reload-config" class="button button-secondary requires-token" type="button">Recharger</button>
+        </div>
+        <div id="channel-list" class="channel-list" aria-live="polite">
+          <div class="channel-empty">Connecte-toi avec GitHub pour charger les comptes et les jeux.</div>
+        </div>
+        <div class="config-actions">
+          <button id="add-channel" class="button button-secondary requires-token" type="button">+ Ajouter un compte et son jeu</button>
+          <button id="save-config" class="button button-primary requires-token" type="button">Sauvegarder le planning</button>
+        </div>
+        <div class="account-help">
+          <div><strong>Connecter ou créer un nouveau compte</strong><small>La connexion TikTok/Google doit être faite dans un navigateur privé ClipMaker. Après connexion, utilise « Synchroniser avec le cloud » dans le Studio.</small></div>
+          <div class="account-links">
+            <a class="button button-secondary" href="http://localhost:3000/?tab=automation">Studio sur ce PC</a>
+            <a class="button button-secondary" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Ouvrir un Codespace ↗</a>
+          </div>
+        </div>
+      </section>
+
       <section id="three-d" class="panel three-d-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">BLENDER CLOUD</p><h3>Test Souplesse 3D</h3></div>
@@ -165,14 +194,14 @@
 
       <section id="studio" class="studio-panel">
         <div>
-          <p class="eyebrow">CONFIGURATION PRIVÉE</p>
+          <p class="eyebrow">CONNEXION AUX PLATEFORMES</p>
           <h3>Besoin de connecter un compte<br>ou changer son jeu ?</h3>
           <p>Ouvre le studio complet dans un Codespace privé. Les ports du studio et des navigateurs TikTok/YouTube sont protégés par ton compte GitHub.</p>
         </div>
         <a class="button button-light" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Ouvrir le studio complet <span>↗</span></a>
       </section>
 
-      <footer><span>ClipMaker Cloud</span><span>Interface statique · calcul GitHub Actions · sessions GitHub Secrets</span></footer>
+      <footer><span>ClipMaker Cloud</span><span>Interface GitHub Pages · contrôle Cloudflare privé · calcul GitHub Actions</span></footer>
     </main>
   </div>
 

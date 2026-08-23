@@ -136,7 +136,6 @@ export function AutomationPanel() {
   const [newYouTubeAccount, setNewYouTubeAccount] = React.useState("");
   const [authBusy, setAuthBusy] = React.useState<"tiktok" | "youtube" | "refresh" | null>(null);
   const [githubRepository, setGithubRepository] = React.useState("EinSlen/clipmaker");
-  const [githubToken, setGithubToken] = React.useState("");
   const [cloudBusy, setCloudBusy] = React.useState(false);
 
   const refreshRuntime = React.useCallback(async () => {
@@ -295,10 +294,6 @@ export function AutomationPanel() {
 
   async function syncGitHub() {
     if (!config) return;
-    if (!githubToken.trim()) {
-      setError("Saisis un jeton GitHub autorisé à modifier les Secrets de ce dépôt.");
-      return;
-    }
     setCloudBusy(true);
     setError(null);
     setMessage(null);
@@ -318,12 +313,11 @@ export function AutomationPanel() {
       const response = await fetch("/api/publisher/github-sync", {
         method: "POST",
         headers,
-        body: JSON.stringify({ repository: githubRepository, githubToken }),
+        body: JSON.stringify({ repository: githubRepository }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Synchronisation GitHub impossible.");
-      setGithubToken("");
-      setMessage(`GitHub synchronisé : ${payload.channels} canal(aux), ${payload.sessionFiles} session(s).${payload.warnings?.length ? ` ${payload.warnings.join(" · ")}` : ""}`);
+      setMessage(`Cloud synchronisé sans PAT : ${payload.channels} canal(aux), ${payload.sessionFiles} session(s).${payload.warnings?.length ? ` ${payload.warnings.join(" · ")}` : ""}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -388,19 +382,18 @@ export function AutomationPanel() {
           <div>
             <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-accent-soft"><Cloud className="size-4" /> Exécution GitHub</p>
             <h2 id="github-cloud-title" className="mt-2 text-lg font-semibold">Cron cloud TikTok + YouTube</h2>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-400">GitHub génère à 00 h 37 puis publie à 18 h 07, heure de Paris. Les réglages, cookies et l’état sont envoyés dans des Secrets chiffrés ; le jeton saisi ci-dessous n’est pas conservé.</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-400">GitHub génère pendant la nuit puis publie à 18 h 07, heure de Paris. La configuration et les sessions sont synchronisées par le contrôle Cloudflare privé, sans PAT à copier.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <a className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm text-ink-200 hover:bg-white/5" href={`https://github.com/${githubRepository}/issues?q=is%3Aissue+label%3Aclipmaker-status`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Notifications</a>
             <a className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm text-ink-200 hover:bg-white/5" href={`https://github.com/${githubRepository}/actions/workflows/daily-publisher.yml`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Ouvrir GitHub Actions</a>
           </div>
         </div>
-        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
           <label className="space-y-1.5 text-xs text-ink-400"><span>Dépôt</span><input className="field-control h-11" value={githubRepository} onChange={(event) => setGithubRepository(event.target.value)} placeholder="propriétaire/dépôt" /></label>
-          <label className="space-y-1.5 text-xs text-ink-400"><span>Jeton GitHub avec accès aux Secrets</span><input type="password" className="field-control h-11" value={githubToken} onChange={(event) => setGithubToken(event.target.value)} autoComplete="off" placeholder="github_pat_…" /></label>
-          <Button className="self-end" onClick={() => void syncGitHub()} disabled={cloudBusy}>{cloudBusy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />} Sauvegarder dans GitHub</Button>
+          <Button className="self-end" onClick={() => void syncGitHub()} disabled={cloudBusy}>{cloudBusy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />} Synchroniser avec le cloud</Button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-ink-500">Le dépôt GitHub n’héberge pas le serveur web : cette interface reste locale ou accessible par ton tunnel. GitHub fournit le cron, les logs, le bouton de test manuel et une notification après chaque exécution.</p>
+        <p className="mt-3 text-xs leading-5 text-ink-500">Cette action envoie uniquement les réglages et les sessions des comptes sélectionnés au backend privé. Le tableau de bord GitHub Pages permet ensuite de changer les jeux et le planning depuis n’importe quel appareil.</p>
       </section>
 
       <section className="panel p-5 sm:p-7" aria-labelledby="accounts-title">

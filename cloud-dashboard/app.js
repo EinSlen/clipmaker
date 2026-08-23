@@ -19,7 +19,30 @@
     runs: document.querySelector('#runs-list'),
     toast: document.querySelector('#toast'),
     form3d: document.querySelector('#three-d-form'),
+    configState: document.querySelector('#config-state'),
+    sessionsState: document.querySelector('#sessions-state'),
+    globalMode: document.querySelector('#global-mode'),
+    channelList: document.querySelector('#channel-list'),
+    addChannel: document.querySelector('#add-channel'),
+    saveConfig: document.querySelector('#save-config'),
+    reloadConfig: document.querySelector('#reload-config'),
   };
+
+  const GAMES = [
+    { id: 'ball-escape', name: 'Ball Escape', difficulty: 14, duration: 15, title: 'CAN IT ESCAPE?', musicMode: 'hit-reveal' },
+    { id: 'shape-tunnel', name: 'Organic Escape', difficulty: 200, duration: 15, title: 'HOW MANY LAYERS?', musicMode: 'continuous' },
+    { id: 'laser-dodge', name: 'Laser Dodge', difficulty: 24, duration: 15, title: 'CAN IT DODGE THEM ALL?', musicMode: 'hit-reveal' },
+    { id: 'boss-battle', name: 'Boss Battle', difficulty: 300, duration: 15, title: 'WHO WILL WIN?', musicMode: 'hit-reveal' },
+    { id: 'soft-body-slide', name: 'Souplesse 3D', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
+  ];
+  const OBSTACLES = [
+    ['auto', 'Automatique (change chaque jour)'], ['moving-slide', 'Rampe mobile'],
+    ['stair-cascade', 'Cascade d’escaliers'], ['v-stairs', 'Barres en V'],
+    ['pipe-bend', 'Tube courbé'], ['peg-grid', 'Grille de barres'],
+    ['twin-gears', 'Double engrenage'], ['compression-ring', 'Anneau de compression'],
+  ];
+  let publisherConfig = null;
+  let accountCatalog = { tiktok: [], youtube: [] };
 
   function readStoredSession() {
     try {
@@ -114,6 +137,226 @@
     elements.disconnect.hidden = !session;
   }
 
+  function optionNode(value, label, selected) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.selected = value === selected;
+    return option;
+  }
+
+  function selectNode(entries, selected, onChange) {
+    const select = document.createElement('select');
+    select.replaceChildren(...entries.map(([value, label]) => optionNode(value, label, selected)));
+    select.addEventListener('change', () => onChange(select.value));
+    return select;
+  }
+
+  function inputNode(value, type, onChange) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value ?? '';
+    input.addEventListener('input', () => onChange(type === 'number' ? Number(input.value) : input.value));
+    return input;
+  }
+
+  function field(label, control, className = '') {
+    const wrapper = document.createElement('label');
+    if (className) wrapper.className = className;
+    const caption = document.createElement('span');
+    caption.textContent = label;
+    wrapper.append(caption, control);
+    return wrapper;
+  }
+
+  function platformReady(platform, account) {
+    if (!account) return false;
+    const entries = accountCatalog[platform] || [];
+    return entries.some((item) => String(item.username || item.id).toLowerCase() === String(account).toLowerCase() && item.ready);
+  }
+
+  function accountEntries(platform, current) {
+    const source = accountCatalog[platform] || [];
+    const values = source.map((item) => platform === 'tiktok'
+      ? [item.username, `@${item.username}${item.ready ? ' · prête' : ' · à reconnecter'}`]
+      : [item.id, `${item.label || item.id}${item.ready ? ' · prête' : ' · à reconnecter'}`]);
+    if (current && !values.some(([value]) => value === current)) values.unshift([current, `${current} · session inconnue`]);
+    return [['', 'Choisir un compte'], ...values];
+  }
+
+  function renderPlatform(channel, platform) {
+    const settings = channel[platform];
+    const isTiktok = platform === 'tiktok';
+    const accountKey = isTiktok ? 'username' : 'account';
+    const privacyKey = isTiktok ? 'visibility' : 'privacy';
+    const box = document.createElement('div');
+    box.className = 'platform-box';
+    const title = document.createElement('div');
+    title.className = 'platform-title';
+    const toggle = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = settings.enabled;
+    checkbox.addEventListener('change', () => { settings.enabled = checkbox.checked; renderChannels(); });
+    const name = document.createElement('span');
+    name.textContent = isTiktok ? 'TikTok' : 'YouTube Shorts';
+    toggle.append(checkbox, name);
+    const ready = document.createElement('span');
+    const isReady = platformReady(platform, settings[accountKey]);
+    ready.className = `platform-ready${isReady ? ' ready' : ''}`;
+    ready.textContent = isReady ? 'Session prête' : 'Session requise';
+    title.append(toggle, ready);
+    box.append(title);
+
+    const account = selectNode(accountEntries(platform, settings[accountKey]), settings[accountKey] || '', (value) => {
+      settings[accountKey] = value || (isTiktok ? null : 'default');
+      renderChannels();
+    });
+    account.disabled = !settings.enabled;
+    box.append(field(isTiktok ? 'Compte TikTok' : 'Chaîne YouTube', account));
+    const privacyValues = isTiktok
+      ? [['private', 'Privée'], ['public', 'Publique']]
+      : [['private', 'Privée'], ['unlisted', 'Non répertoriée'], ['public', 'Publique']];
+    const privacy = selectNode(privacyValues, settings[privacyKey], (value) => {
+      settings[privacyKey] = value;
+      settings.confirmPublic = false;
+      renderChannels();
+    });
+    privacy.disabled = !settings.enabled;
+    box.append(field('Visibilité', privacy));
+    if (settings.enabled && settings[privacyKey] === 'public') {
+      const confirmation = document.createElement('label');
+      confirmation.className = 'public-confirm';
+      const confirm = document.createElement('input');
+      confirm.type = 'checkbox';
+      confirm.checked = Boolean(settings.confirmPublic);
+      confirm.addEventListener('change', () => { settings.confirmPublic = confirm.checked; });
+      const copy = document.createElement('span');
+      copy.textContent = `Je confirme la publication ${isTiktok ? 'TikTok' : 'YouTube'} publique`;
+      confirmation.append(confirm, copy);
+      box.append(confirmation);
+    }
+    return box;
+  }
+
+  function renderChannel(channel, index) {
+    const card = document.createElement('article');
+    card.className = 'channel-card';
+    const head = document.createElement('div');
+    head.className = 'channel-head';
+    const title = document.createElement('div');
+    title.className = 'channel-title';
+    const enabled = document.createElement('input');
+    enabled.type = 'checkbox';
+    enabled.checked = channel.enabled;
+    enabled.setAttribute('aria-label', `Activer ${channel.id}`);
+    enabled.addEventListener('change', () => { channel.enabled = enabled.checked; renderChannels(); });
+    const titleCopy = document.createElement('span');
+    const game = GAMES.find((item) => item.id === channel.game.id) || GAMES[0];
+    const strong = document.createElement('strong');
+    strong.textContent = channel.id;
+    const small = document.createElement('small');
+    small.textContent = `${game.name} · publication ${channel.publishTime}`;
+    titleCopy.append(strong, small);
+    title.append(enabled, titleCopy);
+    const remove = document.createElement('button');
+    remove.className = 'remove-channel';
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `Supprimer ${channel.id}`);
+    remove.disabled = publisherConfig.channels.length === 1;
+    remove.addEventListener('click', () => {
+      if (publisherConfig.channels.length > 1 && window.confirm(`Supprimer le canal ${channel.id} ?`)) {
+        publisherConfig.channels.splice(index, 1);
+        renderChannels();
+      }
+    });
+    head.append(title, remove);
+    card.append(head);
+
+    const fields = document.createElement('div');
+    fields.className = 'channel-fields';
+    fields.append(field('Identifiant', inputNode(channel.id, 'text', (value) => { channel.id = String(value).toLowerCase(); })));
+    fields.append(field('Jeu de ce compte', selectNode(GAMES.map((item) => [item.id, item.name]), channel.game.id, (value) => {
+      const definition = GAMES.find((item) => item.id === value) || GAMES[0];
+      channel.game = { ...channel.game, id: definition.id, difficulty: definition.difficulty, duration: definition.duration, title: definition.title, musicMode: definition.musicMode };
+      if (definition.id === 'soft-body-slide') channel.game.obstacle = 'auto';
+      else delete channel.game.obstacle;
+      renderChannels();
+    })));
+    fields.append(field('Génération', inputNode(channel.generateTime, 'time', (value) => { channel.generateTime = value; })));
+    fields.append(field('Publication', inputNode(channel.publishTime, 'time', (value) => { channel.publishTime = value; })));
+    fields.append(field('Accroche vidéo (anglais)', inputNode(channel.game.title, 'text', (value) => { channel.game.title = value; }), 'field-span-2'));
+    if (channel.game.id === 'soft-body-slide') {
+      fields.append(field('Obstacle 3D', selectNode(OBSTACLES, channel.game.obstacle || 'auto', (value) => { channel.game.obstacle = value; }), 'field-span-2'));
+    } else {
+      fields.append(field('Durée', selectNode([['15', '15 secondes'], ['30', '30 secondes'], ['45', '45 secondes'], ['60', '60 secondes']], String(channel.game.duration), (value) => { channel.game.duration = Number(value); })));
+      fields.append(field('Niveau', inputNode(channel.game.difficulty, 'number', (value) => { channel.game.difficulty = value; })));
+    }
+    const platforms = document.createElement('div');
+    platforms.className = 'platforms-grid';
+    platforms.append(renderPlatform(channel, 'tiktok'), renderPlatform(channel, 'youtube'));
+    fields.append(platforms);
+    card.append(fields);
+    return card;
+  }
+
+  function renderChannels() {
+    if (!publisherConfig) {
+      elements.channelList.replaceChildren();
+      const empty = document.createElement('div');
+      empty.className = 'channel-empty';
+      empty.textContent = 'Connecte-toi avec GitHub pour charger les comptes et les jeux.';
+      elements.channelList.append(empty);
+      return;
+    }
+    elements.globalMode.value = publisherConfig.dryRun ? 'test' : 'live';
+    elements.channelList.replaceChildren(...publisherConfig.channels.map(renderChannel));
+  }
+
+  function newChannel() {
+    const game = GAMES[publisherConfig.channels.length % GAMES.length];
+    return {
+      id: `canal-${Date.now().toString(36).slice(-6)}`,
+      enabled: false,
+      generateTime: '00:30', publishTime: '18:00',
+      game: { id: game.id, difficulty: game.difficulty, duration: game.duration, theme: 'neon', soundPack: 'auto', musicMode: game.musicMode, musicVolume: 0.55, title: game.title, ...(game.id === 'soft-body-slide' ? { obstacle: 'auto' } : {}) },
+      tiktok: { enabled: false, username: null, musicId: null, visibility: 'private', confirmPublic: false },
+      youtube: { enabled: false, account: 'default', privacy: 'private', confirmPublic: false },
+    };
+  }
+
+  async function loadConfig() {
+    if (!session) return;
+    elements.configState.textContent = 'Chargement…';
+    const [configPayload, accountPayload] = await Promise.all([control('/api/config'), control('/api/accounts')]);
+    publisherConfig = structuredClone(configPayload.config);
+    accountCatalog = accountPayload.accounts || { tiktok: [], youtube: [] };
+    elements.configState.textContent = `${publisherConfig.channels.filter((item) => item.enabled).length} canal(aux) actif(s)`;
+    elements.sessionsState.textContent = accountPayload.sessionsSynced ? `Sessions synchronisées · ${accountCatalog.syncedAt ? formatDate(accountCatalog.syncedAt) : 'prêtes'}` : 'Sessions à synchroniser depuis le Studio';
+    elements.sessionsState.classList.toggle('ready', Boolean(accountPayload.sessionsSynced));
+    renderChannels();
+  }
+
+  async function saveConfig() {
+    if (!publisherConfig) return;
+    elements.saveConfig.disabled = true;
+    try {
+      publisherConfig.dryRun = elements.globalMode.value === 'test';
+      const payload = await control('/api/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(publisherConfig),
+      });
+      publisherConfig = structuredClone(payload.config);
+      renderChannels();
+      notify('Planning cloud sauvegardé. Il sera utilisé par le prochain cron GitHub.');
+      elements.configState.textContent = `${publisherConfig.channels.filter((item) => item.enabled).length} canal(aux) actif(s)`;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), true);
+    } finally {
+      elements.saveConfig.disabled = false;
+    }
+  }
+
   function connectGithub() {
     elements.connect.disabled = true;
     elements.connect.textContent = 'Redirection…';
@@ -132,7 +375,7 @@
       elements.authState.style.color = '#58e6a9';
       lockCommands();
       if (window.location.hash) window.history.replaceState({}, document.title, window.location.pathname);
-      await refreshAll();
+      await Promise.all([refreshAll(), loadConfig()]);
     } catch (error) {
       session = '';
       forgetSession();
@@ -146,12 +389,18 @@
   async function disconnectGithub() {
     if (session) await control('/api/logout', { method: 'POST' }).catch(() => null);
     session = '';
+    publisherConfig = null;
+    accountCatalog = { tiktok: [], youtube: [] };
     forgetSession();
     elements.authState.textContent = 'Lecture publique · connexion GitHub requise pour commander';
     elements.authState.style.color = '';
     lockCommands();
     elements.connect.disabled = false;
     elements.connect.textContent = 'Se connecter avec GitHub';
+    elements.configState.textContent = 'Connexion requise';
+    elements.sessionsState.textContent = 'Sessions non vérifiées';
+    elements.sessionsState.classList.remove('ready');
+    renderChannels();
     notify('Session ClipMaker fermée et autorisation GitHub révoquée.');
   }
 
@@ -298,6 +547,17 @@
 
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', command));
   elements.form3d.addEventListener('submit', run3d);
+  elements.addChannel.addEventListener('click', () => {
+    if (!publisherConfig) return;
+    if (publisherConfig.channels.length >= 8) return notify('Maximum : 8 comptes par dépôt.', true);
+    publisherConfig.channels.push(newChannel());
+    renderChannels();
+  });
+  elements.saveConfig.addEventListener('click', () => void saveConfig());
+  elements.reloadConfig.addEventListener('click', () => void loadConfig().catch((error) => notify(error instanceof Error ? error.message : String(error), true)));
+  elements.globalMode.addEventListener('change', () => {
+    if (publisherConfig) publisherConfig.dryRun = elements.globalMode.value === 'test';
+  });
   elements.connect.addEventListener('click', connectGithub);
   elements.disconnect.addEventListener('click', disconnectGithub);
   elements.refresh.addEventListener('click', refreshAll);
@@ -311,6 +571,7 @@
   } else {
     forgetSession();
     lockCommands();
+    renderChannels();
   }
   void refreshAll();
 })();
