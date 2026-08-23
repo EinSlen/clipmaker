@@ -127,7 +127,12 @@ function doctor() {
 }
 
 function launchArgs() {
-  const args = ['--disable-dev-shm-usage', '--lang=en-US'];
+  const args = [
+    '--disable-dev-shm-usage',
+    '--lang=en-US',
+    '--window-size=1365,768',
+    '--start-maximized'
+  ];
   const runningAsRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   if (process.env.YOUTUBE_BROWSER_NO_SANDBOX === 'true' || runningAsRoot) {
     args.push('--no-sandbox', '--disable-setuid-sandbox');
@@ -163,7 +168,10 @@ async function authenticate() {
     const page = pages[0] || await browser.newPage();
     console.log('Connecte-toi à YouTube dans la fenêtre ouverte. Aucun mot de passe ne sera lu ni enregistré par ClipMaker.');
     await page.goto(uploadUrl, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await page.waitForFunction(() => window.location.hostname === 'studio.youtube.com', { timeout: 10 * 60 * 1000 });
+    // Interactive authentication can legitimately take a while (2FA, channel
+    // creation, consent screens). Keeping the visible browser alive for thirty
+    // minutes prevents noVNC from falling back to a confusing black desktop.
+    await page.waitForFunction(() => window.location.hostname === 'studio.youtube.com', { timeout: 30 * 60 * 1000 });
     await page.goto(uploadUrl, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     const cookies = await page.cookies('https://www.youtube.com', 'https://studio.youtube.com', 'https://accounts.google.com');
     const unique = [...new Map(cookies.map((cookie) => [`${cookie.name}|${cookie.domain}|${cookie.path}`, cookie])).values()];
