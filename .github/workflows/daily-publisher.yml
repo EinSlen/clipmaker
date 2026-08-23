@@ -147,7 +147,7 @@ jobs:
           echo "command=$command" >> "$GITHUB_OUTPUT"
 
       - name: Import today's completed 3D renders
-        if: ${{ steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run' }}
+        if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         run: |
           expected="$(python3 - <<'PY'
           import json

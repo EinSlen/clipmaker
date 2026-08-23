@@ -149,6 +149,16 @@ test('workflow summary reports the requested operation and active configuration,
   assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old`/u);
 });
 
+test('a manual dry-run can validate publication without requiring the nightly 3D artifact', async () => {
+  const workflowPath = new URL('../../../.github/workflows/daily-publisher.yml', import.meta.url);
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(
+    workflow,
+    /Import today's completed 3D renders[\s\S]*github\.event_name == 'workflow_dispatch' && inputs\.dry_run/u,
+  );
+  assert.match(workflow, /extra\+=\(--dry-run\)/u);
+});
+
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const source = await fs.readFile(routePath, 'utf8');
