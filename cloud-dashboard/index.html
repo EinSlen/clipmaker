@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0c12">
   <meta name="description" content="Panneau de contrôle cloud de ClipMaker">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://clipmaker-cloud-control.einslen.workers.dev; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://clipmaker-cloud-control.einslen.workers.dev; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <title>ClipMaker Cloud</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -21,11 +21,11 @@
         <span><strong>ClipMaker</strong><small>Cloud control</small></span>
       </a>
       <nav aria-label="Navigation principale">
-        <a class="nav-link active" href="#overview"><span>◈</span> Vue d’ensemble</a>
-        <a class="nav-link" href="#commands"><span>▷</span> Commandes</a>
-        <a class="nav-link" href="#configuration"><span>⚙</span> Comptes et jeux</a>
-        <a class="nav-link" href="#three-d"><span>◇</span> Test 3D</a>
-        <a class="nav-link" href="#runs"><span>≡</span> Exécutions</a>
+        <a class="nav-link active" href="#overview" data-mobile-label="Accueil"><span>◈</span> Vue d’ensemble</a>
+        <a class="nav-link" href="#commands" data-mobile-label="Actions"><span>▷</span> Commandes</a>
+        <a class="nav-link" href="#configuration" data-mobile-label="Comptes"><span>⚙</span> Comptes et jeux</a>
+        <a class="nav-link" href="#three-d" data-mobile-label="Test 3D"><span>◇</span> Test 3D</a>
+        <a class="nav-link" href="#runs" data-mobile-label="Historique"><span>≡</span> Exécutions</a>
       </nav>
       <div class="sidebar-card">
         <span class="live-dot"></span>
@@ -63,7 +63,7 @@
         <div class="schedule-orbit" aria-label="Planning quotidien">
           <div class="orbit-ring"></div>
           <div class="orbit-core"><strong>18:07</strong><span>PUBLICATION</span></div>
-          <div class="orbit-node node-one"><b>00:37</b><span>Génération</span></div>
+          <div class="orbit-node node-one"><b>00:07 · 00:37</b><span>3D · 2D</span></div>
           <div class="orbit-node node-two"><b>18:07</b><span>TikTok + YouTube</span></div>
         </div>
       </section>
@@ -112,7 +112,8 @@
         <aside class="panel schedule-panel">
           <div class="panel-heading"><div><p class="eyebrow">PLANNING</p><h3>Chaque jour</h3></div></div>
           <div class="timeline">
-            <div><time>00:37</time><span><b>Génération</b><small>Rendu + musique + chiffrement</small></span></div>
+            <div><time>00:07</time><span><b>Rendu 3D</b><small>Blender natif, 900 images</small></span></div>
+            <div><time>00:37</time><span><b>Rendus 2D</b><small>Jeu + musique + chiffrement</small></span></div>
             <div><time>18:07</time><span><b>Publication</b><small>TikTok et YouTube actifs</small></span></div>
             <div><time>18:08</time><span><b>Notification</b><small>Résultat dans le ticket GitHub</small></span></div>
           </div>
@@ -140,10 +141,12 @@
           <button id="save-config" class="button button-primary requires-token" type="button">Sauvegarder le planning</button>
         </div>
         <div class="account-help">
-          <div><strong>Connecter ou créer un nouveau compte</strong><small>La connexion TikTok/Google doit être faite dans un navigateur privé ClipMaker. Après connexion, utilise « Synchroniser avec le cloud » dans le Studio.</small></div>
+          <div><strong>Créer puis connecter un nouveau compte</strong><small>1. Crée le compte sur TikTok ou Google. 2. Ouvre le navigateur privé ClipMaker dans le Codespace. 3. Connecte-toi puis utilise « Synchroniser avec le cloud » dans le Studio.</small></div>
           <div class="account-links">
-            <a class="button button-secondary" href="http://localhost:3000/?tab=automation">Studio sur ce PC</a>
-            <a class="button button-secondary" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Ouvrir un Codespace ↗</a>
+            <a class="button button-secondary" href="https://www.tiktok.com/signup" target="_blank" rel="noreferrer">Créer TikTok ↗</a>
+            <a class="button button-secondary" href="https://accounts.google.com/signup" target="_blank" rel="noreferrer">Créer Google ↗</a>
+            <a class="button button-secondary" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Connecter dans Codespace ↗</a>
+            <a class="button button-secondary" href="http://localhost:3000/?tab=automation">Studio local (si démarré)</a>
           </div>
         </div>
       </section>

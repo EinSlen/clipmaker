@@ -44,6 +44,8 @@ jobs:
           npm ci --prefix infra/cloud-control-worker
           npm --prefix infra/cloud-control-worker run check
           npm --prefix infra/cloud-control-worker test
+      - name: Test the public cloud dashboard contract
+        run: node --test cloud-dashboard/*.test.mjs
 
   infrastructure:
     name: Workflows, Python and Docker configuration
