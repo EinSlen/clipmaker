@@ -149,6 +149,68 @@ function loadBrowserAutomation() {
   };
 }
 
+async function showAuthenticationSuccess(page) {
+  const configuredDelay = Number.parseInt(process.env.YOUTUBE_AUTH_SUCCESS_DELAY_MS || '8000', 10);
+  const delayMs = Math.max(5000, Number.isFinite(configuredDelay) ? configuredDelay : 8000);
+  await page.bringToFront();
+  await page.setContent(`<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connexion YouTube réussie</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        color: #f8fafc;
+        background: radial-gradient(circle at top, #183c35 0, #0b1519 48%, #070b0e 100%);
+      }
+      main {
+        width: min(620px, 100%);
+        padding: 52px 44px;
+        text-align: center;
+        border: 1px solid rgba(110, 231, 183, .3);
+        border-radius: 28px;
+        background: rgba(10, 24, 27, .88);
+        box-shadow: 0 30px 90px rgba(0, 0, 0, .42);
+      }
+      .check {
+        display: grid;
+        place-items: center;
+        width: 88px;
+        height: 88px;
+        margin: 0 auto 28px;
+        border-radius: 999px;
+        color: #06281e;
+        background: #6ee7b7;
+        font-size: 52px;
+        font-weight: 900;
+      }
+      h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 52px); line-height: 1.05; }
+      p { margin: 0; color: #cbd5e1; font-size: 20px; line-height: 1.55; }
+      strong { color: #a7f3d0; }
+      .close { margin-top: 24px; color: #94a3b8; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <main role="status" aria-live="polite">
+      <div class="check" aria-hidden="true">✓</div>
+      <h1>Connexion réussie</h1>
+      <p>La session YouTube du profil <strong>${requestedAccount}</strong> est enregistrée.</p>
+      <p class="close">Cette fenêtre va se fermer automatiquement.</p>
+    </main>
+  </body>
+</html>`, { waitUntil: 'domcontentloaded' });
+  console.log(`Connexion YouTube réussie. Confirmation affichée pendant ${Math.ceil(delayMs / 1000)} secondes.`);
+  await page.waitForTimeout(delayMs);
+}
+
 async function authenticate() {
   const executablePath = findBrowser();
   if (!executablePath) throw new Error('Chrome, Edge ou Chromium introuvable. Définis YOUTUBE_BROWSER_PATH.');
@@ -180,6 +242,7 @@ async function authenticate() {
     fs.rmSync(invalidSessionFile, { force: true });
     if (!hasYouTubeSession()) throw new Error('La fenêtre est ouverte, mais aucune session YouTube valide n’a été détectée.');
     console.log(`Session enregistrée localement dans ${cookieFile}`);
+    await showAuthenticationSuccess(page);
   } finally {
     await browser.close();
   }
