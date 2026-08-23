@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { TIKTOK_COOKIES_DIR, TIKTOK_UPLOADER_DIR } from '@/lib/server-paths';
+import { TIKTOK_COOKIES_DIR } from '@/lib/server-paths';
+import { hasPublisherWriteAccess } from '@/lib/server-publisher-config';
+import { interactiveAuthUrl, requestInteractiveAuth } from '@/lib/server-auth-requests';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,35 +80,20 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  // Trigger an interactive login (opens a browser on the SERVER). Only works locally.
+  if (!hasPublisherWriteAccess(req)) {
+    return NextResponse.json({ ok: false, error: 'Clé administrateur requise.' }, { status: 401 });
+  }
   const body = await req.json().catch(() => ({} as { username?: string }));
   const username = String(body?.username || '').trim();
   if (!/^[A-Za-z0-9._]{2,32}$/.test(username)) {
     return NextResponse.json({ ok: false, error: 'Nom d’utilisateur TikTok invalide.' }, { status: 400 });
   }
 
-  return new Promise<Response>((resolve) => {
-    const py = process.env.PYTHON_BIN || 'python';
-    const proc = spawn(py, ['cli.py', 'login', '-n', username], {
-      cwd: TIKTOK_UPLOADER_DIR,
-      windowsHide: false
-    });
-    let out = '';
-    let err = '';
-    proc.stdout.on('data', (d) => (out += d.toString()));
-    proc.stderr.on('data', (d) => (err += d.toString()));
-    proc.on('close', (code) => {
-      resolve(
-        NextResponse.json({
-          ok: code === 0 || /already saved|Unnecessary login/i.test(out),
-          stdout: out.slice(-2000),
-          stderr: err.slice(-2000),
-          code
-        })
-      );
-    });
-    proc.on('error', (e) => {
-      resolve(NextResponse.json({ ok: false, error: String(e) }, { status: 500 }));
-    });
+  await requestInteractiveAuth('tiktok', username);
+  return NextResponse.json({
+    ok: true,
+    username,
+    authUrl: interactiveAuthUrl(req, 'tiktok'),
+    message: 'Le navigateur TikTok est prêt. Connecte-toi ou crée ton compte, puis actualise les sessions.',
   });
 }
