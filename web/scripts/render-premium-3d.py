@@ -40,7 +40,12 @@ def repair_stage_cut_frames(
         source = frames / f"frame_{boundary + 1:04d}.png"
         target = frames / f"frame_{boundary:04d}.png"
         if source.is_file() and target.is_file():
-            shutil.copyfile(source, target)
+            temporary = target.with_name(f".{target.name}.repair.tmp")
+            try:
+                shutil.copyfile(source, temporary)
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
             repaired.append(boundary)
     return tuple(repaired)
 

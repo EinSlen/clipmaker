@@ -16,6 +16,11 @@ on:
         required: true
         default: false
         type: boolean
+      reuse_run_id:
+        description: Reassemble native frames from an earlier run without rendering again
+        required: false
+        default: ""
+        type: string
       obstacle:
         description: Obstacle rendered in the 3D comparison
         required: true
@@ -79,6 +84,7 @@ jobs:
       MANUAL_TITLE: ${{ inputs.title }}
       USE_CLOUD_CONFIG: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
       PLAN_ONLY: ${{ inputs.plan_only || false }}
+      REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
     steps:
       - name: Load the private cloud configuration for a scheduled run
         if: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
@@ -104,6 +110,7 @@ jobs:
           channels = []
           use_cloud_config = os.environ.get("USE_CLOUD_CONFIG", "false").lower() == "true"
           plan_only = os.environ.get("PLAN_ONLY", "false").lower() == "true"
+          reuse_run_id = os.environ.get("REUSE_RUN_ID", "").strip()
           if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch" and not use_cloud_config:
               channels.append({
                   "channel_id": "manual-3d", "key": "manual-3d", "date": today,
@@ -145,9 +152,9 @@ jobs:
               output.write("channels=" + compact(channels) + "\n")
               output.write("frames=" + compact(frames) + "\n")
               output.write("has_channels=" + ("true" if channels else "false") + "\n")
-              output.write("render_enabled=" + ("true" if channels and not plan_only else "false") + "\n")
+              output.write("render_enabled=" + ("true" if channels and not plan_only and not reuse_run_id else "false") + "\n")
           summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
-          lines = ["# Soft Body 3D plan", "", f"- Channels: `{len(channels)}`", f"- Native frames: `{len(frames)}`", f"- Plan only: `{'yes' if plan_only else 'no'}`", ""]
+          lines = ["# Soft Body 3D plan", "", f"- Channels: `{len(channels)}`", f"- Native frames: `{len(frames)}`", f"- Plan only: `{'yes' if plan_only else 'no'}`", f"- Reassemble run: `{reuse_run_id or 'no'}`", ""]
           lines.extend(f"- `{channel['channel_id']}` · `{channel['obstacle']}` · seed `{channel['seed']}`" for channel in channels)
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
@@ -290,6 +297,80 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: soft-body-daily-${{ matrix.date }}-${{ matrix.key }}
+          path: artifacts/final
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  reassemble:
+    name: Reassemble run ${{ inputs.reuse_run_id }}
+    needs: plan
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.reuse_run_id != '' && needs.plan.result == 'success' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
+      RECOVERY_SEED: ${{ inputs.seed }}
+      RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the previous native scene and all frame chunks
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "Run ID must be numeric." >&2; exit 1; }
+          mkdir -p artifacts/scene artifacts/frames artifacts/chunks
+          gh run download "$SOURCE_RUN_ID" --name soft-body-shared-scene --dir artifacts/scene
+          for index in $(seq 1 30); do
+            chunk="artifacts/chunks/$index"
+            mkdir -p "$chunk"
+            gh run download "$SOURCE_RUN_ID" --name "soft-body-frames-$index" --dir "$chunk"
+            find "$chunk" -maxdepth 1 -type f -name 'frame_*.png' -exec mv -t artifacts/frames {} +
+          done
+          test -s artifacts/scene/motion-events.json
+      - name: Require the complete recovered native sequence
+        run: test "$(find artifacts/frames -maxdepth 1 -name 'frame_*.png' | wc -l)" -eq "$FRAME_COUNT"
+      - name: Build the fixed reproducible renderer
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
+      - name: Encode from the immutable recovered frames
+        run: |
+          mkdir -p artifacts/final
+          docker run --rm --init --volume "$PWD/artifacts/frames:/frames:ro" --volume "$PWD/artifacts/scene:/scene:ro" \
+            --volume "$PWD/artifacts/final:/final" clipmaker-ci:3d python3 scripts/finalize-premium-3d.py \
+              --frames /frames --events /scene/motion-events.json \
+              --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
+              --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
+              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE"
+      - name: Verify and report the recovered production video
+        run: |
+          video="artifacts/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4"
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames \
+            -show_entries format=duration,size -of json "$video" > artifacts/final/ffprobe.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
+          stream = probe["streams"][0]
+          if (stream.get("codec_name"), stream.get("width"), stream.get("height"), stream.get("r_frame_rate")) != ("h264", 1080, 1920, "30/1"):
+              raise SystemExit(f"Unexpected production stream: {stream}")
+          report = (
+              "# Recovered Soft Body 3D production\n\n"
+              f"- Source run: `{os.environ['SOURCE_RUN_ID']}`\n"
+              f"- Obstacle: `{os.environ['RECOVERY_OBSTACLE']}`\n"
+              f"- Seed: `{os.environ['RECOVERY_SEED']}`\n"
+              f"- Native frames: `900`\n"
+              f"- Output: `1080x1920 @ 30 fps`\n"
+              f"- Duration: `{probe['format']['duration']} s`\n"
+          )
+          Path("artifacts/final/recovery-report.md").write_text(report, encoding="utf-8")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write(report)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soft-body-reassembled-${{ inputs.reuse_run_id }}
           path: artifacts/final
           if-no-files-found: error
           compression-level: 0

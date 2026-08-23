@@ -50,6 +50,13 @@ PREMIUM_RENDERER_SPEC = importlib.util.spec_from_file_location(
 assert PREMIUM_RENDERER_SPEC and PREMIUM_RENDERER_SPEC.loader
 PREMIUM_RENDERER = importlib.util.module_from_spec(PREMIUM_RENDERER_SPEC)
 PREMIUM_RENDERER_SPEC.loader.exec_module(PREMIUM_RENDERER)
+FINALIZER_PATH = Path(__file__).with_name("finalize-premium-3d.py")
+FINALIZER_SPEC = importlib.util.spec_from_file_location(
+    "finalize_premium_3d", FINALIZER_PATH
+)
+assert FINALIZER_SPEC and FINALIZER_SPEC.loader
+FINALIZER = importlib.util.module_from_spec(FINALIZER_SPEC)
+FINALIZER_SPEC.loader.exec_module(FINALIZER)
 
 
 def build(game_id: str, seed: int = 424242):
@@ -410,6 +417,31 @@ class SoftBodyAudioTests(unittest.TestCase):
                     str(boundary + 1).encode("ascii"),
                 )
             self.assertEqual((frames / "frame_0036.png").read_bytes(), b"36")
+
+    def test_cut_repairs_never_modify_the_immutable_source_sequence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            for frame in range(1, 181):
+                (source / f"frame_{frame:04d}.png").write_bytes(
+                    str(frame).encode("ascii")
+                )
+            staged = root / "staged"
+            FINALIZER.stage_frame_sequence(source, staged, 180)
+            repaired = PREMIUM_RENDERER.repair_stage_cut_frames(
+                staged, 180, 5, (70, 120)
+            )
+            self.assertEqual(repaired, (28, 51, 70, 94, 120, 140))
+            for boundary in repaired:
+                self.assertEqual(
+                    (source / f"frame_{boundary:04d}.png").read_bytes(),
+                    str(boundary).encode("ascii"),
+                )
+                self.assertEqual(
+                    (staged / f"frame_{boundary:04d}.png").read_bytes(),
+                    str(boundary + 1).encode("ascii"),
+                )
 
     def test_generated_bed_is_seeded_stereo_and_platform_ready(self):
         with tempfile.TemporaryDirectory() as directory:
