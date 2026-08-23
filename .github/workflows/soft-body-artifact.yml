@@ -169,7 +169,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.channels) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build the reproducible renderer
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
       - name: Simulate every softness level once
@@ -183,7 +183,7 @@ jobs:
               --obstacle "${{ matrix.obstacle }}" --events /scene/motion-events.json --build-only
           test -s artifacts/scene/frames/soft-body-comparison.blend
           test -s artifacts/scene/motion-events.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: soft-body-scene-${{ matrix.key }}
           path: artifacts/scene
@@ -202,8 +202,8 @@ jobs:
       max-parallel: 20
       matrix: ${{ fromJSON(needs.plan.outputs.frames) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: soft-body-scene-${{ matrix.key }}
           path: artifacts/scene
@@ -217,7 +217,7 @@ jobs:
               --render-output /output/frame_ --frame-start "${{ matrix.start }}" --frame-end "${{ matrix.end }}" --render-anim
           test -s "artifacts/chunk/frame_$(printf '%04d' '${{ matrix.start }}').png"
           test -s "artifacts/chunk/frame_$(printf '%04d' '${{ matrix.end }}').png"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: soft-body-frames-${{ matrix.key }}-${{ matrix.index }}
           path: artifacts/chunk
@@ -235,12 +235,12 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.channels) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: soft-body-scene-${{ matrix.key }}
           path: artifacts/scene
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: soft-body-frames-${{ matrix.key }}-*
           path: artifacts/frames
@@ -304,7 +304,7 @@ jobs:
           )
           PY
           cat artifacts/final/report.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: soft-body-daily-${{ matrix.date }}-${{ matrix.key }}
           path: artifacts/final
@@ -324,7 +324,7 @@ jobs:
       RECOVERY_SEED: ${{ inputs.seed }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download the previous native scene and all frame chunks
         run: |
           set -euo pipefail
@@ -383,7 +383,7 @@ jobs:
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
               summary.write(report)
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: soft-body-reassembled-${{ inputs.reuse_run_id }}
           path: artifacts/final

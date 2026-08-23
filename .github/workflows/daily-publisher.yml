@@ -46,7 +46,7 @@ jobs:
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Require the private runner credentials
         run: |
@@ -316,7 +316,7 @@ jobs:
 
       - name: Upload only the encrypted runtime
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: daily-publisher-runtime
           path: artifacts/runtime/publisher-runtime.enc
