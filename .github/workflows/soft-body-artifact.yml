@@ -53,6 +53,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 concurrency:
   group: soft-body-3d-${{ github.run_id }}
@@ -391,3 +392,53 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
+
+  notify:
+    name: Notify the owner about the scheduled 3D render
+    needs: [plan, prepare, render, assemble]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLAN_RESULT: ${{ needs.plan.result }}
+      PREPARE_RESULT: ${{ needs.prepare.result }}
+      RENDER_RESULT: ${{ needs.render.result }}
+      ASSEMBLE_RESULT: ${{ needs.assemble.result }}
+      HAS_CHANNELS: ${{ needs.plan.outputs.has_channels }}
+    steps:
+      - name: Comment the daily automation status
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          successful=false
+          if [[ "$HAS_CHANNELS" == "true" && "$PLAN_RESULT" == "success" && "$PREPARE_RESULT" == "success" && "$RENDER_RESULT" == "success" && "$ASSEMBLE_RESULT" == "success" ]]; then
+            successful=true
+          fi
+
+          if [[ "$successful" == "true" ]]; then
+            heading="✅ Rendu 3D quotidien terminé"
+            detail="L'artefact natif est prêt. La publication de 18 h l'importera automatiquement."
+          else
+            heading="❌ Échec du rendu 3D quotidien"
+            detail="Aucune publication 3D ne sera tentée avec un artefact incomplet. Ouvrez le run pour voir l'étape en erreur."
+          fi
+
+          body=$(cat <<EOF
+          ## ${heading}
+
+          - Plan : \`${PLAN_RESULT}\`
+          - Simulation : \`${PREPARE_RESULT}\`
+          - Images natives : \`${RENDER_RESULT}\`
+          - Assemblage : \`${ASSEMBLE_RESULT}\`
+          - Canaux 3D configurés : \`${HAS_CHANNELS}\`
+
+          ${detail}
+
+          [Ouvrir le workflow GitHub](${run_url})
+          EOF
+          )
+          gh issue comment 36 --repo "$GITHUB_REPOSITORY" --body "$body"
+          [[ "$successful" == "true" ]]
