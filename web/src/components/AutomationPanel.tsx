@@ -15,6 +15,7 @@ import {
   Save,
   ShieldCheck,
   Trash2,
+  UserPlus,
   Youtube,
 } from "lucide-react";
 import { Button } from "@/components/Button";
@@ -130,6 +131,9 @@ export function AutomationPanel() {
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [adminToken, setAdminToken] = React.useState("");
+  const [newTikTokName, setNewTikTokName] = React.useState("");
+  const [newYouTubeAccount, setNewYouTubeAccount] = React.useState("");
+  const [authBusy, setAuthBusy] = React.useState<"tiktok" | "youtube" | "refresh" | null>(null);
 
   const refreshRuntime = React.useCallback(async () => {
     const response = await fetch("/api/publisher/status", { cache: "no-store" });
@@ -196,6 +200,66 @@ export function AutomationPanel() {
         ...(id === "soft-body-slide" ? { obstacle: "auto" } : { obstacle: undefined }),
       },
     }));
+  }
+
+  async function refreshAccounts() {
+    setAuthBusy("refresh");
+    setError(null);
+    try {
+      const [tiktokResponse, youtubeResponse] = await Promise.all([
+        fetch("/api/tiktok/accounts", { cache: "no-store" }),
+        fetch("/api/youtube/accounts", { cache: "no-store" }),
+      ]);
+      const tiktokPayload = await tiktokResponse.json();
+      const youtubePayload = await youtubeResponse.json();
+      const accounts = (youtubePayload.accounts || []) as YoutubeAccount[];
+      setTiktokAccounts(tiktokPayload.accounts || []);
+      setYoutubeAccounts(accounts);
+      const statuses = await Promise.all(accounts.map(async (account) => {
+        const response = await fetch(`/api/youtube/status?account=${encodeURIComponent(account.id)}`, { cache: "no-store" });
+        return [account.id, await response.json()] as const;
+      }));
+      setYoutubeStatuses(Object.fromEntries(statuses));
+      setMessage("Sessions actualisées.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setAuthBusy(null);
+    }
+  }
+
+  async function startInteractiveAuth(platform: "tiktok" | "youtube", requestedValue: string) {
+    const value = requestedValue.trim().toLowerCase();
+    if (!value) {
+      setError(platform === "tiktok" ? "Saisis le nom d’utilisateur TikTok prévu." : "Saisis un nom pour ce profil YouTube.");
+      return;
+    }
+    const popup = window.open("about:blank", "_blank");
+    setAuthBusy(platform);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/${platform}/accounts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminToken ? { "x-clipmaker-upload-token": adminToken } : {}),
+        },
+        body: JSON.stringify(platform === "tiktok" ? { username: value } : { account: value }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Impossible de démarrer la connexion.");
+      if (popup) popup.location.href = payload.authUrl;
+      else window.open(payload.authUrl, "_blank", "noopener,noreferrer");
+      setMessage(platform === "tiktok"
+        ? `Navigateur ouvert pour @${value}. Connecte-toi ou crée le compte, puis actualise les sessions.`
+        : `Navigateur ouvert pour le profil ${value}. Connecte-toi ou crée le compte Google, puis actualise les sessions.`);
+    } catch (caught) {
+      popup?.close();
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setAuthBusy(null);
+    }
   }
 
   async function save() {
@@ -277,6 +341,36 @@ export function AutomationPanel() {
         </div>
       </section>
 
+      <section className="panel p-5 sm:p-7" aria-labelledby="accounts-title">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-accent-soft"><UserPlus className="size-4" /> Comptes de publication</p>
+            <h2 id="accounts-title" className="mt-2 text-lg font-semibold">Connecter ou créer un compte</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-400">Le navigateur officiel de la plateforme s’ouvre. Tu peux te connecter ou utiliser « Créer un compte ». ClipMaker ne voit jamais ton mot de passe.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void refreshAccounts()} disabled={authBusy !== null}>
+            {authBusy === "refresh" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Actualiser les sessions
+          </Button>
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <div className="subpanel space-y-4 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">TikTok</h3><Health ready={tiktokAccounts.some((account) => account.ready)}>{tiktokAccounts.filter((account) => account.ready).length} prête(s)</Health></div>
+            <label className="block space-y-1.5 text-xs text-ink-400"><span>Nom d’utilisateur prévu</span><div className="flex flex-col gap-2 sm:flex-row"><input className="field-control h-11 min-w-0 flex-1" placeholder="ex. ma_chaine_jeux" value={newTikTokName} onChange={(event) => setNewTikTokName(event.target.value)} /><Button type="button" onClick={() => void startInteractiveAuth("tiktok", newTikTokName)} disabled={authBusy !== null}>{authBusy === "tiktok" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />} Connecter ou créer</Button></div></label>
+            <div className="flex flex-wrap gap-2">{tiktokAccounts.map((account) => <span key={account.username} className={`rounded-full px-2.5 py-1 text-xs ${account.ready ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"}`}>@{account.username} · {account.ready ? "prêt" : account.expired ? "expiré" : "à reconnecter"}</span>)}</div>
+          </div>
+
+          <div className="subpanel space-y-4 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">YouTube</h3><Health ready={Object.values(youtubeStatuses).some((status) => status.readyForLiveUpload)}>{Object.values(youtubeStatuses).filter((status) => status.readyForLiveUpload).length} prête(s)</Health></div>
+            <label className="block space-y-1.5 text-xs text-ink-400"><span>Nom interne du profil</span><div className="flex flex-col gap-2 sm:flex-row"><input className="field-control h-11 min-w-0 flex-1" placeholder="ex. chaine_science" value={newYouTubeAccount} onChange={(event) => setNewYouTubeAccount(event.target.value)} /><Button type="button" onClick={() => void startInteractiveAuth("youtube", newYouTubeAccount)} disabled={authBusy !== null}>{authBusy === "youtube" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />} Connecter ou créer</Button></div></label>
+            <p className="text-xs leading-5 text-ink-500">Ce nom sert uniquement à séparer les sessions dans ClipMaker. Dans Google, sélectionne la chaîne YouTube réelle.</p>
+            <div className="flex flex-wrap gap-2">{youtubeAccounts.map((account) => <span key={account.id} className={`rounded-full px-2.5 py-1 text-xs ${youtubeStatuses[account.id]?.readyForLiveUpload ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"}`}>{account.label} · {youtubeStatuses[account.id]?.readyForLiveUpload ? "prête" : "à connecter"}</span>)}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-accent/20 bg-accent/5 p-3 text-sm text-ink-300"><strong className="text-white">Règle appliquée :</strong> un même compte TikTok ou YouTube ne peut être affecté qu’à un seul canal, donc à un seul jeu. La sauvegarde refuse automatiquement les doublons.</div>
+      </section>
+
       <div className="space-y-5">
         {config.channels.map((channel, index) => {
           const definition = getGameDefinition(channel.game.id);
@@ -330,7 +424,7 @@ export function AutomationPanel() {
                           <label className="space-y-1.5 text-xs text-ink-400"><span>Visibilité TikTok</span><select className="field-control h-11" value={channel.tiktok.visibility} onChange={(event) => updateChannel(index, (item) => ({ ...item, tiktok: { ...item.tiktok, visibility: event.target.value as "private" | "public", confirmPublic: false } }))}><option value="private">Privée</option><option value="public">Publique</option></select></label>
                         </div>
                         {channel.tiktok.visibility === "public" && <Toggle checked={channel.tiktok.confirmPublic} onChange={(confirmPublic) => updateChannel(index, (item) => ({ ...item, tiktok: { ...item.tiktok, confirmPublic } }))} label="Je confirme la publication TikTok publique" />}
-                        {channel.tiktok.username && !tiktok?.ready && <a className="inline-flex min-h-11 items-center gap-2 text-sm text-accent-soft hover:text-white" href={`http://${typeof window !== "undefined" ? window.location.hostname : "127.0.0.1"}:6081/vnc.html?autoconnect=true&resize=scale`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Reconnecter ce compte</a>}
+                        {channel.tiktok.username && !tiktok?.ready && <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-accent-soft hover:text-white" onClick={() => void startInteractiveAuth("tiktok", channel.tiktok.username || "")}><ExternalLink className="size-4" /> Reconnecter ce compte</button>}
                       </div>
 
                       <div className="space-y-3 border-t border-white/10 pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
@@ -340,7 +434,7 @@ export function AutomationPanel() {
                           <label className="space-y-1.5 text-xs text-ink-400"><span>Visibilité YouTube</span><select className="field-control h-11" value={channel.youtube.privacy} onChange={(event) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, privacy: event.target.value as "private" | "unlisted" | "public", confirmPublic: false } }))}><option value="private">Privée</option><option value="unlisted">Non répertoriée</option><option value="public" disabled={!youtube?.publicUploadAllowed}>Publique{youtube?.publicUploadAllowed ? "" : " — bloquée serveur"}</option></select></label>
                         </div>
                         {channel.youtube.privacy === "public" && <Toggle checked={channel.youtube.confirmPublic} onChange={(confirmPublic) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, confirmPublic } }))} label="Je confirme la publication YouTube publique" />}
-                        {!youtube?.readyForLiveUpload && <a className="inline-flex min-h-11 items-center gap-2 text-sm text-accent-soft hover:text-white" href={`http://${typeof window !== "undefined" ? window.location.hostname : "127.0.0.1"}:6080/vnc.html?autoconnect=true&resize=scale`} target="_blank" rel="noreferrer"><Youtube className="size-4" /> Connecter YouTube</a>}
+                        {!youtube?.readyForLiveUpload && <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-accent-soft hover:text-white" onClick={() => void startInteractiveAuth("youtube", channel.youtube.account)}><Youtube className="size-4" /> Connecter YouTube</button>}
                       </div>
                     </div>
                   </fieldset>

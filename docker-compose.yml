@@ -61,6 +61,7 @@ services:
       dockerfile: web/Dockerfile
       target: youtube-auth
     image: clipmaker-youtube-auth:latest
+    restart: unless-stopped
     profiles: ["youtube-auth"]
     ports:
       - "127.0.0.1:6080:6080"
@@ -69,6 +70,7 @@ services:
       YOUTUBE_BROWSER_PATH: /usr/bin/chromium
       YOUTUBE_BROWSER_DATA_DIR: /repo/.youtube-browser
       YOUTUBE_ACCOUNT: "${YOUTUBE_ACCOUNT:-default}"
+      AUTH_REQUEST_FILE: /repo/web/data/auth/youtube-request.txt
       DISPLAY: :99
     volumes:
       - ./:/repo
@@ -81,6 +83,7 @@ services:
       dockerfile: web/Dockerfile
       target: youtube-auth
     image: clipmaker-youtube-auth:latest
+    restart: unless-stopped
     profiles: ["tiktok-auth"]
     ports:
       - "127.0.0.1:6081:6080"
@@ -88,6 +91,7 @@ services:
       REPO_ROOT: /repo
       TIKTOK_USERNAME: "${TIKTOK_USERNAME:-}"
       AUTH_PUBLIC_PORT: "6081"
+      AUTH_REQUEST_FILE: /repo/web/data/auth/tiktok-request.txt
       DISPLAY: :99
     volumes:
       - ./:/repo

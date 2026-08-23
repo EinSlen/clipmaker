@@ -4,11 +4,7 @@ set -euo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 TIKTOK_USERNAME="${TIKTOK_USERNAME:-}"
 AUTH_PUBLIC_PORT="${AUTH_PUBLIC_PORT:-6081}"
-
-if [[ ! "$TIKTOK_USERNAME" =~ ^[A-Za-z0-9._]{2,32}$ ]]; then
-  echo "TIKTOK_USERNAME est obligatoire et doit contenir 2 à 32 caractères valides." >&2
-  exit 2
-fi
+AUTH_REQUEST_FILE="${AUTH_REQUEST_FILE:-/repo/web/data/auth/tiktok-request.txt}"
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
@@ -24,5 +20,27 @@ websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/clipmaker-websockify
 echo "Connexion TikTok prête via noVNC sur http://127.0.0.1:${AUTH_PUBLIC_PORT}/vnc.html?autoconnect=true&resize=scale"
 echo "Sur un serveur distant : ssh -L ${AUTH_PUBLIC_PORT}:127.0.0.1:${AUTH_PUBLIC_PORT} utilisateur@serveur"
 
-cd /repo/vendor/TiktokAutoUploader
-python3 cli.py login -n "$TIKTOK_USERNAME"
+mkdir -p "$(dirname "$AUTH_REQUEST_FILE")"
+initial_request=""
+if [[ "$TIKTOK_USERNAME" =~ ^[A-Za-z0-9._]{2,32}$ ]]; then
+  initial_request="startup|${TIKTOK_USERNAME}"
+fi
+last_request=""
+
+while true; do
+  request="$initial_request"
+  if [[ -s "$AUTH_REQUEST_FILE" ]]; then
+    request="$(head -n 1 "$AUTH_REQUEST_FILE" | tr -d '\r\n')"
+  fi
+  if [[ -n "$request" && "$request" != "$last_request" ]]; then
+    last_request="$request"
+    username="${request#*|}"
+    if [[ "$username" =~ ^[A-Za-z0-9._]{2,32}$ ]]; then
+      echo "Ouverture de la connexion TikTok pour @${username}."
+      (cd /repo/vendor/TiktokAutoUploader && python3 cli.py login -n "$username") \
+        || echo "Connexion TikTok interrompue pour @${username}; relance-la depuis ClipMaker." >&2
+    fi
+    initial_request=""
+  fi
+  sleep 2
+done
