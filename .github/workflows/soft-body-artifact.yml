@@ -6,6 +6,16 @@ on:
       timezone: Europe/Paris
   workflow_dispatch:
     inputs:
+      use_cloud_config:
+        description: Validate the configured 3D channels instead of a manual render
+        required: true
+        default: false
+        type: boolean
+      plan_only:
+        description: Validate the cloud matrix without starting the expensive render
+        required: true
+        default: false
+        type: boolean
       obstacle:
         description: Obstacle rendered in the 3D comparison
         required: true
@@ -59,6 +69,7 @@ jobs:
       channels: ${{ steps.matrix.outputs.channels }}
       frames: ${{ steps.matrix.outputs.frames }}
       has_channels: ${{ steps.matrix.outputs.has_channels }}
+      render_enabled: ${{ steps.matrix.outputs.render_enabled }}
     env:
       CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
       MANUAL_OBSTACLE: ${{ inputs.obstacle }}
@@ -66,9 +77,11 @@ jobs:
       MANUAL_SAMPLES: ${{ inputs.samples }}
       MANUAL_CHUNK_SIZE: ${{ inputs.chunk_size }}
       MANUAL_TITLE: ${{ inputs.title }}
+      USE_CLOUD_CONFIG: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
+      PLAN_ONLY: ${{ inputs.plan_only || false }}
     steps:
       - name: Load the private cloud configuration for a scheduled run
-        if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
         run: |
           test -n "$CLIPMAKER_UPLOAD_TOKEN" || { echo "Le jeton ClipMaker manque." >&2; exit 1; }
           curl --fail --silent --show-error \
@@ -89,7 +102,9 @@ jobs:
 
           today = datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
           channels = []
-          if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+          use_cloud_config = os.environ.get("USE_CLOUD_CONFIG", "false").lower() == "true"
+          plan_only = os.environ.get("PLAN_ONLY", "false").lower() == "true"
+          if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch" and not use_cloud_config:
               channels.append({
                   "channel_id": "manual-3d", "key": "manual-3d", "date": today,
                   "seed": int(os.environ.get("MANUAL_SEED") or "910104"),
@@ -130,12 +145,17 @@ jobs:
               output.write("channels=" + compact(channels) + "\n")
               output.write("frames=" + compact(frames) + "\n")
               output.write("has_channels=" + ("true" if channels else "false") + "\n")
+              output.write("render_enabled=" + ("true" if channels and not plan_only else "false") + "\n")
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          lines = ["# Soft Body 3D plan", "", f"- Channels: `{len(channels)}`", f"- Native frames: `{len(frames)}`", f"- Plan only: `{'yes' if plan_only else 'no'}`", ""]
+          lines.extend(f"- `{channel['channel_id']}` · `{channel['obstacle']}` · seed `{channel['seed']}`" for channel in channels)
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
   prepare:
     name: Simulate ${{ matrix.channel_id }}
     needs: plan
-    if: ${{ needs.plan.outputs.has_channels == 'true' }}
+    if: ${{ needs.plan.outputs.render_enabled == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     strategy:
@@ -167,7 +187,7 @@ jobs:
   render:
     name: ${{ matrix.channel_id }} · frames ${{ matrix.start }}-${{ matrix.end }}
     needs: [plan, prepare]
-    if: ${{ needs.plan.outputs.has_channels == 'true' }}
+    if: ${{ needs.plan.outputs.render_enabled == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 350
     strategy:
@@ -201,7 +221,7 @@ jobs:
   assemble:
     name: Assemble ${{ matrix.channel_id }}
     needs: [plan, prepare, render]
-    if: ${{ needs.plan.outputs.has_channels == 'true' }}
+    if: ${{ needs.plan.outputs.render_enabled == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     strategy:
