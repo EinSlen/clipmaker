@@ -267,13 +267,23 @@ jobs:
           DAILY_TITLE: ${{ matrix.title }}
         run: |
           video="artifacts/final/soft-body-${DAILY_OBSTACLE}-${DAILY_SEED}.mp4"
-          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate -of json "$video" > artifacts/final/ffprobe.json
+          docker run --rm --volume "$PWD/artifacts/final:/final:ro" clipmaker-ci:3d \
+            ffprobe -v error -select_streams v:0 \
+              -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames \
+              -show_entries format=duration,size -of json "/final/$(basename "$video")" \
+              > artifacts/final/ffprobe.json
           python3 - <<'PY'
           import json
           import os
           from pathlib import Path
 
           metadata = json.loads(Path("artifacts/final/metadata.json").read_text(encoding="utf-8"))
+          probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
+          stream = probe["streams"][0]
+          expected = ("h264", 1080, 1920, "30/1", "900")
+          actual = tuple(stream.get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
+          if actual != expected:
+              raise SystemExit(f"Unexpected production stream: {stream}")
           title = os.environ["DAILY_TITLE"]
           video = f"soft-body-{os.environ['DAILY_OBSTACLE']}-{os.environ['DAILY_SEED']}.mp4"
           manifest = {
@@ -344,8 +354,11 @@ jobs:
       - name: Verify and report the recovered production video
         run: |
           video="artifacts/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4"
-          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames \
-            -show_entries format=duration,size -of json "$video" > artifacts/final/ffprobe.json
+          docker run --rm --volume "$PWD/artifacts/final:/final:ro" clipmaker-ci:3d \
+            ffprobe -v error -select_streams v:0 \
+              -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames \
+              -show_entries format=duration,size -of json "/final/$(basename "$video")" \
+              > artifacts/final/ffprobe.json
           python3 - <<'PY'
           import json
           import os
@@ -353,7 +366,9 @@ jobs:
 
           probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
           stream = probe["streams"][0]
-          if (stream.get("codec_name"), stream.get("width"), stream.get("height"), stream.get("r_frame_rate")) != ("h264", 1080, 1920, "30/1"):
+          expected = ("h264", 1080, 1920, "30/1", "900")
+          actual = tuple(stream.get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
+          if actual != expected:
               raise SystemExit(f"Unexpected production stream: {stream}")
           report = (
               "# Recovered Soft Body 3D production\n\n"
