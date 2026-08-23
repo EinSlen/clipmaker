@@ -1,0 +1,266 @@
+name: Soft Body 3D artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      obstacle:
+        description: Obstacle rendered in the 3D comparison
+        required: true
+        default: peg-grid
+        type: choice
+        options:
+          - peg-grid
+          - moving-slide
+          - stair-cascade
+          - v-stairs
+          - pipe-bend
+          - twin-gears
+          - compression-ring
+      seed:
+        description: Deterministic simulation seed
+        required: true
+        default: "910104"
+        type: string
+      samples:
+        description: Eevee samples per native frame
+        required: true
+        default: "64"
+        type: choice
+        options:
+          - "32"
+          - "64"
+          - "128"
+      chunk_size:
+        description: Frames rendered by each parallel runner
+        required: true
+        default: "30"
+        type: choice
+        options:
+          - "15"
+          - "30"
+          - "45"
+      title:
+        description: Internal English hook stored in the scene
+        required: true
+        default: HOW SOFT CAN IT GET?
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soft-body-3d-${{ inputs.obstacle }}-${{ inputs.seed }}
+  cancel-in-progress: false
+
+env:
+  FRAME_COUNT: "900"
+  RENDER_FPS: "30"
+  RENDER_DURATION: "30"
+  RENDER_WIDTH: "1080"
+  RENDER_HEIGHT: "1920"
+
+jobs:
+  plan:
+    name: Plan native frame chunks
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        name: Build the chunk matrix
+        env:
+          CHUNK_SIZE: ${{ inputs.chunk_size }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          total = int(os.environ["FRAME_COUNT"])
+          size = int(os.environ["CHUNK_SIZE"])
+          chunks = []
+          for index, start in enumerate(range(1, total + 1, size), 1):
+              chunks.append({"index": index, "start": start, "end": min(total, start + size - 1)})
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("matrix=" + json.dumps({"include": chunks}, separators=(",", ":")) + "\n")
+          PY
+
+  prepare:
+    name: Simulate and build the shared Blender scene
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the reproducible renderer
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
+
+      - name: Simulate every softness level once
+        env:
+          CI_OBSTACLE: ${{ inputs.obstacle }}
+          CI_SEED: ${{ inputs.seed }}
+          CI_SAMPLES: ${{ inputs.samples }}
+          CI_TITLE: ${{ inputs.title }}
+        run: |
+          mkdir -p artifacts/scene/frames
+          docker run --rm --init \
+            --volume "$PWD/artifacts/scene:/scene" \
+            clipmaker-ci:3d \
+            blender --background --factory-startup --python scripts/blender-soft-body-slide.py -- \
+              --frames /scene/frames \
+              --duration "$RENDER_DURATION" \
+              --fps "$RENDER_FPS" \
+              --width "$RENDER_WIDTH" \
+              --height "$RENDER_HEIGHT" \
+              --samples "$CI_SAMPLES" \
+              --seed "$CI_SEED" \
+              --softness 100 \
+              --theme ice \
+              --title "$CI_TITLE" \
+              --obstacle "$CI_OBSTACLE" \
+              --events /scene/motion-events.json \
+              --build-only
+          test -s artifacts/scene/frames/soft-body-comparison.blend
+          test -s artifacts/scene/motion-events.json
+
+      - name: Upload the deterministic scene
+        uses: actions/upload-artifact@v4
+        with:
+          name: soft-body-shared-scene
+          path: artifacts/scene
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  render:
+    name: Render frames ${{ matrix.start }}-${{ matrix.end }}
+    needs: [plan, prepare]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the shared scene
+        uses: actions/download-artifact@v4
+        with:
+          name: soft-body-shared-scene
+          path: artifacts/scene
+
+      - name: Build the reproducible renderer
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
+
+      - name: Render this native frame range
+        env:
+          FRAME_START: ${{ matrix.start }}
+          FRAME_END: ${{ matrix.end }}
+        run: |
+          mkdir -p artifacts/chunk
+          docker run --rm --init \
+            --volume "$PWD/artifacts/scene:/scene:ro" \
+            --volume "$PWD/artifacts/chunk:/output" \
+            clipmaker-ci:3d \
+            blender --background /scene/frames/soft-body-comparison.blend \
+              --render-output /output/frame_ \
+              --render-start "$FRAME_START" \
+              --render-end "$FRAME_END" \
+              --render-anim
+          test -s "artifacts/chunk/frame_$(printf '%04d' "$FRAME_START").png"
+          test -s "artifacts/chunk/frame_$(printf '%04d' "$FRAME_END").png"
+
+      - name: Upload native frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: soft-body-frames-${{ matrix.index }}
+          path: artifacts/chunk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  assemble:
+    name: Assemble the production MP4
+    needs: [plan, prepare, render]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the shared scene data
+        uses: actions/download-artifact@v4
+        with:
+          name: soft-body-shared-scene
+          path: artifacts/scene
+
+      - name: Download and merge every native frame chunk
+        uses: actions/download-artifact@v4
+        with:
+          pattern: soft-body-frames-*
+          path: artifacts/frames
+          merge-multiple: true
+
+      - name: Require the complete native sequence
+        run: |
+          count="$(find artifacts/frames -maxdepth 1 -name 'frame_*.png' | wc -l)"
+          test "$count" -eq "$FRAME_COUNT"
+
+      - name: Build the reproducible renderer
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
+
+      - name: Encode video, generated music and collision Foley
+        env:
+          CI_OBSTACLE: ${{ inputs.obstacle }}
+          CI_SEED: ${{ inputs.seed }}
+        run: |
+          mkdir -p artifacts/final
+          docker run --rm --init \
+            --volume "$PWD/artifacts/frames:/frames:ro" \
+            --volume "$PWD/artifacts/scene:/scene:ro" \
+            --volume "$PWD/artifacts/final:/final" \
+            clipmaker-ci:3d \
+            python3 scripts/finalize-premium-3d.py \
+              --frames /frames \
+              --events /scene/motion-events.json \
+              --output "/final/soft-body-${CI_OBSTACLE}-${CI_SEED}.mp4" \
+              --metadata /final/metadata.json \
+              --duration "$RENDER_DURATION" \
+              --fps "$RENDER_FPS" \
+              --seed "$CI_SEED" \
+              --obstacle "$CI_OBSTACLE"
+
+      - name: Verify the downloadable artifact
+        env:
+          CI_OBSTACLE: ${{ inputs.obstacle }}
+          CI_SEED: ${{ inputs.seed }}
+          CI_SAMPLES: ${{ inputs.samples }}
+        run: |
+          video="artifacts/final/soft-body-${CI_OBSTACLE}-${CI_SEED}.mp4"
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate -of json "$video" > artifacts/final/ffprobe.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          meta = json.loads(Path("artifacts/final/metadata.json").read_text(encoding="utf-8"))
+          report = f"""# Soft Body 3D production artifact
+
+          - Obstacle: `{os.environ['CI_OBSTACLE']}`
+          - Seed: `{os.environ['CI_SEED']}`
+          - Native render: `1080x1920`, `30 fps`, `{os.environ['CI_SAMPLES']} samples`
+          - Frames: `{meta['frames']}`
+          - Physical events: `{meta['events']}`
+          - Outcome: `{meta['outcome']}`
+          """
+          Path("artifacts/final/report.md").write_text(report, encoding="utf-8")
+          PY
+          cat artifacts/final/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the final MP4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soft-body-3d-${{ inputs.obstacle }}-${{ inputs.seed }}
+          path: artifacts/final
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
