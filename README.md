@@ -38,8 +38,10 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 | GitHub Secrets | Sessions, cookies et configuration chiffrée ; aucune donnée privée n'est incluse dans Pages. |
 
 Le tableau de bord public fonctionne en lecture seule. Les commandes nécessitent un jeton GitHub
-finement limité à ce dépôt avec la permission `Actions: write`. Le jeton reste dans la session de
-l'onglet et n'est pas enregistré dans le dépôt.
+finement limité à ce dépôt avec la permission `Actions: write`. Après la première connexion, le
+jeton est mémorisé dans le stockage local de ce navigateur, jamais dans le dépôt. Utiliser cette
+fonction uniquement sur un appareil personnel ; le bouton **Déconnecter** efface immédiatement le
+jeton de l'appareil.
 
 ## Démarrage local
 

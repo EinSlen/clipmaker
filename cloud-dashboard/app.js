@@ -8,6 +8,7 @@
   const elements = {
     token: document.querySelector('#github-token'),
     connect: document.querySelector('#connect-token'),
+    disconnect: document.querySelector('#disconnect-token'),
     tokenState: document.querySelector('#token-state'),
     refresh: document.querySelector('#refresh-all'),
     latestStatus: document.querySelector('#latest-status'),
@@ -19,7 +20,33 @@
     form3d: document.querySelector('#three-d-form'),
   };
 
-  let token = sessionStorage.getItem(TOKEN_KEY) || '';
+  function readStoredToken() {
+    try {
+      return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || '';
+    } catch {
+      return sessionStorage.getItem(TOKEN_KEY) || '';
+    }
+  }
+
+  function saveToken(value) {
+    try {
+      localStorage.setItem(TOKEN_KEY, value);
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      sessionStorage.setItem(TOKEN_KEY, value);
+    }
+  }
+
+  function forgetToken() {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // A browser can block persistent storage while still allowing this tab.
+    }
+    sessionStorage.removeItem(TOKEN_KEY);
+  }
+
+  let token = readStoredToken();
   let toastTimer;
 
   function headers(authenticated = false) {
@@ -57,8 +84,11 @@
     });
     if (token) {
       elements.token.value = '';
-      elements.token.placeholder = 'Jeton actif pour cet onglet';
+      elements.token.placeholder = 'Jeton mémorisé sur cet appareil';
+    } else {
+      elements.token.placeholder = 'github_pat_…';
     }
+    elements.disconnect.hidden = !token;
   }
 
   async function connectToken() {
@@ -74,15 +104,15 @@
       const user = await fetch('https://api.github.com/user', { headers: headers(true) });
       const payload = await user.json();
       if (!user.ok) throw new Error(payload.message || 'Jeton refusé par GitHub.');
-      sessionStorage.setItem(TOKEN_KEY, token);
-      elements.tokenState.textContent = `Connecté en tant que ${payload.login} · jeton gardé dans cet onglet`;
+      saveToken(token);
+      elements.tokenState.textContent = `Connecté en tant que ${payload.login} · connexion mémorisée sur cet appareil`;
       elements.tokenState.style.color = '#58e6a9';
       lockCommands();
       notify(`Connexion GitHub réussie : ${payload.login}.`);
       await refreshAll();
     } catch (error) {
       token = '';
-      sessionStorage.removeItem(TOKEN_KEY);
+      forgetToken();
       lockCommands();
       elements.tokenState.textContent = 'Jeton refusé · vérifie la permission Actions: write';
       elements.tokenState.style.color = '#ff7088';
@@ -91,6 +121,16 @@
       elements.connect.disabled = false;
       elements.connect.textContent = 'Connecter';
     }
+  }
+
+  function disconnectToken() {
+    token = '';
+    forgetToken();
+    elements.token.value = '';
+    elements.tokenState.textContent = 'Lecture publique · commandes verrouillées';
+    elements.tokenState.style.color = '';
+    lockCommands();
+    notify('Jeton GitHub retiré de cet appareil.');
   }
 
   function formatDate(value) {
@@ -237,6 +277,7 @@
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', command));
   elements.form3d.addEventListener('submit', run3d);
   elements.connect.addEventListener('click', connectToken);
+  elements.disconnect.addEventListener('click', disconnectToken);
   elements.token.addEventListener('keydown', (event) => { if (event.key === 'Enter') void connectToken(); });
   elements.refresh.addEventListener('click', refreshAll);
   document.querySelectorAll('.nav-link').forEach((link) => link.addEventListener('click', () => {
@@ -244,7 +285,7 @@
   }));
 
   if (token) {
-    elements.tokenState.textContent = 'Jeton restauré pour cet onglet · vérification requise';
+    elements.tokenState.textContent = 'Connexion mémorisée · vérification GitHub en cours';
     void connectToken();
   } else {
     lockCommands();
