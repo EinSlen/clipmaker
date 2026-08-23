@@ -27,6 +27,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 concurrency:
   group: daily-tiktok-youtube-publisher
@@ -203,6 +204,52 @@ jobs:
           Path("artifacts/summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           cat artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify the owner through GitHub
+        if: always()
+        env:
+          OPERATION: ${{ steps.operation.outputs.command }}
+          RUN_STATUS: ${{ job.status }}
+          MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          gh label create clipmaker-status --repo "$GITHUB_REPOSITORY" \
+            --color 7c3aed --description "Notifications quotidiennes ClipMaker" --force
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --label clipmaker-status \
+            --state open --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -z "$issue" ]; then
+            issue_url="$(gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Notifications quotidiennes ClipMaker" \
+              --label clipmaker-status \
+              --body "Ce ticket reçoit les comptes rendus automatiques du cron ClipMaker. Garde-le ouvert et abonné.")"
+            issue="${issue_url##*/}"
+          fi
+          if [ "$RUN_STATUS" = "success" ]; then
+            icon="✅"
+            verdict="Terminé"
+          else
+            icon="❌"
+            verdict="Échec"
+          fi
+          mode="réel"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
+            mode="test sans rendu ni publication"
+          fi
+          operation="${OPERATION:-initialisation}"
+          summary="$(cat artifacts/summary.md 2>/dev/null || printf '%s\n' '- Aucun état disponible.')"
+          cat > artifacts/notification.md <<EOF
+          @$GITHUB_REPOSITORY_OWNER
+
+          ## $icon ClipMaker — $verdict
+
+          - Action : \`$operation\`
+          - Mode : $mode
+          - Heure : $(date -u '+%Y-%m-%d %H:%M UTC')
+          - Exécution : [$GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+
+          $summary
+          EOF
+          gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" \
+            --body-file artifacts/notification.md
 
       - name: Remove videos that were fully published
         if: ${{ success() && (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') }}

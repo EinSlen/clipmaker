@@ -390,14 +390,17 @@ export function AutomationPanel() {
             <h2 id="github-cloud-title" className="mt-2 text-lg font-semibold">Cron cloud TikTok + YouTube</h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-400">GitHub génère à 00 h 37 puis publie à 18 h 07, heure de Paris. Les réglages, cookies et l’état sont envoyés dans des Secrets chiffrés ; le jeton saisi ci-dessous n’est pas conservé.</p>
           </div>
-          <a className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm text-ink-200 hover:bg-white/5" href={`https://github.com/${githubRepository}/actions/workflows/daily-publisher.yml`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Ouvrir GitHub Actions</a>
+          <div className="flex flex-wrap gap-2">
+            <a className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm text-ink-200 hover:bg-white/5" href={`https://github.com/${githubRepository}/issues?q=is%3Aissue+label%3Aclipmaker-status`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Notifications</a>
+            <a className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm text-ink-200 hover:bg-white/5" href={`https://github.com/${githubRepository}/actions/workflows/daily-publisher.yml`} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /> Ouvrir GitHub Actions</a>
+          </div>
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
           <label className="space-y-1.5 text-xs text-ink-400"><span>Dépôt</span><input className="field-control h-11" value={githubRepository} onChange={(event) => setGithubRepository(event.target.value)} placeholder="propriétaire/dépôt" /></label>
           <label className="space-y-1.5 text-xs text-ink-400"><span>Jeton GitHub avec accès aux Secrets</span><input type="password" className="field-control h-11" value={githubToken} onChange={(event) => setGithubToken(event.target.value)} autoComplete="off" placeholder="github_pat_…" /></label>
           <Button className="self-end" onClick={() => void syncGitHub()} disabled={cloudBusy}>{cloudBusy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />} Sauvegarder dans GitHub</Button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-ink-500">Le dépôt GitHub n’héberge pas le serveur web : cette interface reste locale ou accessible par ton tunnel. GitHub fournit le cron, les logs et le bouton de test manuel.</p>
+        <p className="mt-3 text-xs leading-5 text-ink-500">Le dépôt GitHub n’héberge pas le serveur web : cette interface reste locale ou accessible par ton tunnel. GitHub fournit le cron, les logs, le bouton de test manuel et une notification après chaque exécution.</p>
       </section>
 
       <section className="panel p-5 sm:p-7" aria-labelledby="accounts-title">
