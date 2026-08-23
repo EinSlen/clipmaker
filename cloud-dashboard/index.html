@@ -41,10 +41,11 @@
           <h1>Centre de contrôle</h1>
         </div>
         <div class="token-box">
-          <label for="github-token">Jeton GitHub</label>
+          <label for="github-token">Jeton GitHub <span>à saisir une seule fois</span></label>
           <div class="token-row">
             <input id="github-token" type="password" autocomplete="off" placeholder="github_pat_…">
             <button id="connect-token" class="button button-secondary">Connecter</button>
+            <button id="disconnect-token" class="button button-secondary" type="button" hidden>Déconnecter</button>
           </div>
           <small id="token-state">Lecture publique · commandes verrouillées</small>
         </div>
@@ -89,7 +90,7 @@
             <div><p class="eyebrow">PILOTAGE</p><h3>Commandes cloud</h3></div>
             <span class="secure-badge">Actions write</span>
           </div>
-          <p class="panel-intro">Ces commandes parlent directement à GitHub Actions. Le jeton reste uniquement dans cet onglet.</p>
+          <p class="panel-intro">Ces commandes parlent directement à GitHub Actions. Après la première connexion, le jeton reste mémorisé uniquement sur cet appareil.</p>
           <div class="command-grid">
             <button class="command-card requires-token" data-command="doctor">
               <span class="command-icon">⌁</span>
