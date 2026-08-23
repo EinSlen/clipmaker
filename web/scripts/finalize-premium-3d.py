@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -42,6 +44,29 @@ def require_complete_sequence(frames: Path, frame_count: int) -> None:
         raise RuntimeError(f"Missing {len(missing)} native frame(s): {preview}{suffix}")
 
 
+def stage_frame_sequence(source: Path, destination: Path, frame_count: int) -> None:
+    """Expose an immutable frame sequence through a writable working directory.
+
+    Hard links are preferred on a shared filesystem, then symbolic links across
+    Docker bind mounts. Copying is the portable fallback. Cut repairs replace a
+    staged directory entry atomically, so the source sequence is never changed.
+    """
+    destination.mkdir(parents=True, exist_ok=False)
+    for index in range(1, frame_count + 1):
+        original = source / f"frame_{index:04d}.png"
+        staged = destination / original.name
+        try:
+            os.link(original, staged)
+            continue
+        except OSError:
+            pass
+        try:
+            staged.symlink_to(original)
+            continue
+        except OSError:
+            shutil.copyfile(original, staged)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frames", required=True)
@@ -71,12 +96,16 @@ def main() -> None:
     variant = renderer.variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
     events, attempt_cuts = read_motion_events(events_path)
-    repaired = renderer.repair_stage_cut_frames(frames, frame_count, len(stages), attempt_cuts)
     output.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-finalize-", dir=str(output.parent)) as temporary:
         root = Path(temporary)
+        staged_frames = root / "frames"
+        stage_frame_sequence(frames, staged_frames, frame_count)
+        repaired = renderer.repair_stage_cut_frames(
+            staged_frames, frame_count, len(stages), attempt_cuts
+        )
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
         music = root / "original-soft-body-bed.wav"
@@ -84,7 +113,7 @@ def main() -> None:
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-framerate", str(args.fps), "-i", str(frames / "frame_%04d.png"),
+                "-framerate", str(args.fps), "-i", str(staged_frames / "frame_%04d.png"),
                 "-vf", video_filter,
                 "-c:v", "libx264", "-preset", args.preset, "-crf", str(args.crf),
                 "-pix_fmt", "yuv420p", "-an", str(silent),
