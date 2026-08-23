@@ -164,8 +164,8 @@ jobs:
             clipmaker-ci:3d \
             blender --background /scene/frames/soft-body-comparison.blend \
               --render-output /output/frame_ \
-              --render-start "$FRAME_START" \
-              --render-end "$FRAME_END" \
+              --frame-start "$FRAME_START" \
+              --frame-end "$FRAME_END" \
               --render-anim
           test -s "artifacts/chunk/frame_$(printf '%04d' "$FRAME_START").png"
           test -s "artifacts/chunk/frame_$(printf '%04d' "$FRAME_END").png"
