@@ -226,27 +226,19 @@ jobs:
 
       - name: Save a safe status summary
         if: always()
+        env:
+          COMMAND: ${{ steps.operation.outputs.command }}
         run: |
           if docker ps --format '{{.Names}}' | grep -qx clipmaker-daily; then
             docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs status \
               --config /repo/web/config/publisher.json > artifacts/status.json || true
           fi
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          status_file = Path("artifacts/status.json")
-          jobs = json.loads(status_file.read_text(encoding="utf-8")).get("jobs", []) if status_file.exists() else []
-          latest = jobs[-1] if jobs else {}
-          lines = [
-              "# Daily publisher",
-              "",
-              f"- Operation: `{latest.get('status', 'no stored job')}`",
-              f"- Date: `{latest.get('date', '-')}`",
-              f"- Channel: `{latest.get('channelId', '-')}`",
-          ]
-          Path("artifacts/summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
+          node web/scripts/publisher-summary.mjs \
+            --config web/config/publisher.json \
+            --doctor artifacts/doctor.json \
+            --status artifacts/status.json \
+            --operation "${COMMAND:-unknown}" \
+            --output artifacts/summary.md
           cat artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify the owner through GitHub
