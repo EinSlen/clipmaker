@@ -212,7 +212,11 @@ jobs:
         if: always()
         run: |
           mkdir -p artifacts/runtime web/data/publisher web/renders
-          tar -czf /tmp/publisher-runtime.tar.gz web/data/publisher web/renders
+          # State files are intentionally mode 0600 inside the private API
+          # container. The hosted runner uses a different UID, so archive them
+          # through its passwordless sudo before encrypting the bundle.
+          sudo tar -czf /tmp/publisher-runtime.tar.gz web/data/publisher web/renders
+          sudo chown "$(id -u):$(id -g)" /tmp/publisher-runtime.tar.gz
           openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 \
             -pass env:PUBLISHER_STATE_KEY \
             -in /tmp/publisher-runtime.tar.gz \
