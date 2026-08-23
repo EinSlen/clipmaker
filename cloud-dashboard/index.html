@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0c12">
+  <meta name="description" content="Panneau de contrôle cloud de ClipMaker">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>ClipMaker Cloud</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="./" aria-label="ClipMaker Cloud">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span><strong>ClipMaker</strong><small>Cloud control</small></span>
+      </a>
+      <nav aria-label="Navigation principale">
+        <a class="nav-link active" href="#overview"><span>◈</span> Vue d’ensemble</a>
+        <a class="nav-link" href="#commands"><span>▷</span> Commandes</a>
+        <a class="nav-link" href="#three-d"><span>◇</span> Test 3D</a>
+        <a class="nav-link" href="#runs"><span>≡</span> Exécutions</a>
+        <a class="nav-link" href="#studio"><span>↗</span> Studio complet</a>
+      </nav>
+      <div class="sidebar-card">
+        <span class="live-dot"></span>
+        <div><strong>Automatisation active</strong><small>Paris · tous les jours</small></div>
+      </div>
+      <div class="sidebar-foot">Aucun cookie n’est envoyé à cette page.</div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">EINSLEN / CLIPMAKER</p>
+          <h1>Centre de contrôle</h1>
+        </div>
+        <div class="token-box">
+          <label for="github-token">Jeton GitHub</label>
+          <div class="token-row">
+            <input id="github-token" type="password" autocomplete="off" placeholder="github_pat_…">
+            <button id="connect-token" class="button button-secondary">Connecter</button>
+          </div>
+          <small id="token-state">Lecture publique · commandes verrouillées</small>
+        </div>
+      </header>
+
+      <section id="overview" class="hero">
+        <div>
+          <span class="pill"><span class="live-dot"></span> GitHub Actions opérationnel</span>
+          <h2>Une vidéo prête<br><span>chaque jour à 18 h.</span></h2>
+          <p>Surveille le cron, déclenche un rendu et ouvre le studio complet depuis n’importe quel appareil.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/EinSlen/clipmaker/issues/36" target="_blank" rel="noreferrer">Voir les notifications <span>↗</span></a>
+            <button id="refresh-all" class="button button-secondary">Actualiser</button>
+          </div>
+        </div>
+        <div class="schedule-orbit" aria-label="Planning quotidien">
+          <div class="orbit-ring"></div>
+          <div class="orbit-core"><strong>18:07</strong><span>PUBLICATION</span></div>
+          <div class="orbit-node node-one"><b>00:37</b><span>Génération</span></div>
+          <div class="orbit-node node-two"><b>18:07</b><span>TikTok + YouTube</span></div>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="État du service">
+        <article class="metric-card">
+          <div class="metric-icon violet">⌁</div>
+          <div><span>Dernier cron</span><strong id="latest-status">Chargement…</strong><small id="latest-time">—</small></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-icon cyan">◉</div>
+          <div><span>Canal du jour</span><strong id="latest-channel">—</strong><small id="latest-operation">En attente du statut</small></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-icon green">✓</div>
+          <div><span>Notifications</span><strong>Abonné</strong><small>@EinSlen mentionné à chaque run</small></div>
+        </article>
+      </section>
+
+      <section id="commands" class="section-grid">
+        <div class="panel panel-wide">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PILOTAGE</p><h3>Commandes cloud</h3></div>
+            <span class="secure-badge">Actions write</span>
+          </div>
+          <p class="panel-intro">Ces commandes parlent directement à GitHub Actions. Le jeton reste uniquement dans cet onglet.</p>
+          <div class="command-grid">
+            <button class="command-card requires-token" data-command="doctor">
+              <span class="command-icon">⌁</span>
+              <span><strong>Vérifier les comptes</strong><small>Diagnostic sans rendu ni publication</small></span>
+              <b>→</b>
+            </button>
+            <button class="command-card requires-token" data-command="generate">
+              <span class="command-icon">✦</span>
+              <span><strong>Générer maintenant</strong><small>Prépare et chiffre la vidéo du jour</small></span>
+              <b>→</b>
+            </button>
+            <button class="command-card danger requires-token" data-command="publish">
+              <span class="command-icon">↗</span>
+              <span><strong>Publier maintenant</strong><small>Envoie la vidéo déjà prête aux comptes actifs</small></span>
+              <b>→</b>
+            </button>
+          </div>
+        </div>
+
+        <aside class="panel schedule-panel">
+          <div class="panel-heading"><div><p class="eyebrow">PLANNING</p><h3>Chaque jour</h3></div></div>
+          <div class="timeline">
+            <div><time>00:37</time><span><b>Génération</b><small>Rendu + musique + chiffrement</small></span></div>
+            <div><time>18:07</time><span><b>Publication</b><small>TikTok et YouTube actifs</small></span></div>
+            <div><time>18:08</time><span><b>Notification</b><small>Résultat dans le ticket GitHub</small></span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="three-d" class="panel three-d-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">BLENDER CLOUD</p><h3>Test Souplesse 3D</h3></div>
+          <a href="https://github.com/EinSlen/clipmaker/actions/workflows/soft-body-artifact.yml" target="_blank" rel="noreferrer">Ouvrir le workflow ↗</a>
+        </div>
+        <div class="three-d-layout">
+          <div class="three-d-visual">
+            <div class="soft-object"></div>
+            <div class="peg peg-1"></div><div class="peg peg-2"></div><div class="peg peg-3"></div>
+            <div class="peg peg-4"></div><div class="peg peg-5"></div><div class="peg peg-6"></div>
+            <span>0 → 100% SOFT</span>
+          </div>
+          <form id="three-d-form" class="form-grid">
+            <label>Obstacle
+              <select id="obstacle">
+                <option value="peg-grid">Grille de barres</option>
+                <option value="moving-slide">Rampe mobile</option>
+                <option value="stair-cascade">Cascade d’escaliers</option>
+                <option value="v-stairs">Escaliers en V</option>
+                <option value="pipe-bend">Tube courbé</option>
+                <option value="twin-gears">Double engrenage</option>
+                <option value="compression-ring">Anneau de compression</option>
+              </select>
+            </label>
+            <label>Seed<input id="seed" value="910104" inputmode="numeric"></label>
+            <label>Qualité
+              <select id="samples"><option value="32">32 samples</option><option value="64" selected>64 samples</option><option value="128">128 samples</option></select>
+            </label>
+            <label>Lots
+              <select id="chunk-size"><option value="15">15 images</option><option value="30" selected>30 images</option><option value="45">45 images</option></select>
+            </label>
+            <button class="button button-primary requires-token" type="submit">Lancer les 900 images <span>↗</span></button>
+          </form>
+        </div>
+      </section>
+
+      <section id="runs" class="panel runs-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">HISTORIQUE</p><h3>Exécutions récentes</h3></div>
+          <a href="https://github.com/EinSlen/clipmaker/actions" target="_blank" rel="noreferrer">Tout afficher ↗</a>
+        </div>
+        <div id="runs-list" class="runs-list" aria-live="polite"><div class="run-row skeleton"></div><div class="run-row skeleton"></div></div>
+      </section>
+
+      <section id="studio" class="studio-panel">
+        <div>
+          <p class="eyebrow">CONFIGURATION PRIVÉE</p>
+          <h3>Besoin de connecter un compte<br>ou changer son jeu ?</h3>
+          <p>Ouvre le studio complet dans un Codespace privé. Les ports du studio et des navigateurs TikTok/YouTube sont protégés par ton compte GitHub.</p>
+        </div>
+        <a class="button button-light" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Ouvrir le studio complet <span>↗</span></a>
+      </section>
+
+      <footer><span>ClipMaker Cloud</span><span>Interface statique · calcul GitHub Actions · sessions GitHub Secrets</span></footer>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
