@@ -159,6 +159,16 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
 });
 
+test('every scheduled 3D render reports success or failure with a direct run link', async () => {
+  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(workflow, /issues: write/u);
+  assert.match(workflow, /always\(\) && github\.event_name == 'schedule'/u);
+  assert.match(workflow, /gh issue comment 36/u);
+  assert.match(workflow, /Échec du rendu 3D quotidien/u);
+  assert.match(workflow, /actions\/runs\/\$\{GITHUB_RUN_ID\}/u);
+});
+
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const source = await fs.readFile(routePath, 'utf8');
