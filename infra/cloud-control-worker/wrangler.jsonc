@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clipmaker-cloud-control",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-23",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "ALLOWED_LOGIN": "EinSlen",
+    "DASHBOARD_ORIGIN": "https://einslen.github.io",
+    "REPOSITORY_OWNER": "EinSlen",
+    "REPOSITORY_NAME": "clipmaker",
+    "REPOSITORY_ID": "1105628006"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CONFIG",
+      "id": "ab98fff19c424b46b92596ebe98fd333"
+    }
+  ]
+}

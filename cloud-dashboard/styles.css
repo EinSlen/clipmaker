@@ -64,10 +64,10 @@ main { width: min(1280px, calc(100vw - 244px)); margin: 0 auto; padding: 30px cl
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 28px; margin-bottom: 30px; }
 .topbar h1 { margin: 4px 0 0; font-size: 23px; letter-spacing: -.03em; }
 .eyebrow { margin: 0; color: #85899d; font-size: 9px; line-height: 1; letter-spacing: .2em; font-weight: 800; }
-.token-box { width: min(540px, 55vw); }
+.token-box { width: min(420px, 48vw); }
 .token-box label { display: block; color: #a2a5b5; font-size: 10px; font-weight: 700; margin: 0 0 7px 2px; }
 .token-box label span { color: #6f7387; font-size: 9px; font-weight: 600; }
-.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.auth-row { display: flex; justify-content: flex-end; gap: 8px; }
 input, select { min-height: 44px; width: 100%; border: 1px solid var(--line); border-radius: 11px; color: white; outline: none; background: rgba(255,255,255,.035); padding: 0 13px; font-size: 12px; transition: .2s; }
 input:focus, select:focus { border-color: rgba(143,107,255,.72); box-shadow: 0 0 0 3px rgba(143,107,255,.11); }
 .token-box small { display: block; color: #707487; margin: 6px 0 0 2px; font-size: 9px; }

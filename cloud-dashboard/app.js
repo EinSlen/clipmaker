@@ -4,12 +4,13 @@
   const OWNER = 'EinSlen';
   const REPO = 'clipmaker';
   const API = `https://api.github.com/repos/${OWNER}/${REPO}`;
-  const TOKEN_KEY = 'clipmaker-github-token';
+  const CONTROL_API = 'https://clipmaker-cloud-control.einslen.workers.dev';
+  const SESSION_KEY = 'clipmaker-cloud-session';
+  const LEGACY_TOKEN_KEY = 'clipmaker-github-token';
   const elements = {
-    token: document.querySelector('#github-token'),
-    connect: document.querySelector('#connect-token'),
-    disconnect: document.querySelector('#disconnect-token'),
-    tokenState: document.querySelector('#token-state'),
+    connect: document.querySelector('#connect-github'),
+    disconnect: document.querySelector('#disconnect-github'),
+    authState: document.querySelector('#auth-state'),
     refresh: document.querySelector('#refresh-all'),
     latestStatus: document.querySelector('#latest-status'),
     latestTime: document.querySelector('#latest-time'),
@@ -20,42 +21,50 @@
     form3d: document.querySelector('#three-d-form'),
   };
 
-  function readStoredToken() {
+  function readStoredSession() {
     try {
-      return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || '';
+      return localStorage.getItem(SESSION_KEY) || '';
     } catch {
-      return sessionStorage.getItem(TOKEN_KEY) || '';
+      return '';
     }
   }
 
-  function saveToken(value) {
+  function saveSession(value) {
     try {
-      localStorage.setItem(TOKEN_KEY, value);
-      sessionStorage.removeItem(TOKEN_KEY);
+      localStorage.setItem(SESSION_KEY, value);
     } catch {
-      sessionStorage.setItem(TOKEN_KEY, value);
+      throw new Error('Le navigateur bloque le stockage de la connexion GitHub.');
     }
   }
 
-  function forgetToken() {
+  function forgetSession() {
     try {
-      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
     } catch {
-      // A browser can block persistent storage while still allowing this tab.
+      // The in-memory session is still cleared below.
     }
-    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_TOKEN_KEY);
   }
 
-  let token = readStoredToken();
+  function acceptOAuthCallback() {
+    const parameters = new URLSearchParams(window.location.hash.slice(1));
+    const received = parameters.get('github-session') || '';
+    if (!received) return '';
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+    if (!/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(received)) return '';
+    saveSession(received);
+    return received;
+  }
+
+  let session = acceptOAuthCallback() || readStoredSession();
   let toastTimer;
 
-  function headers(authenticated = false) {
-    const value = {
+  function headers() {
+    return {
       Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
+      'X-GitHub-Api-Version': '2026-03-10',
     };
-    if (authenticated && token) value.Authorization = `Bearer ${token}`;
-    return value;
   }
 
   function notify(message, error = false) {
@@ -69,7 +78,7 @@
   async function github(path, options = {}) {
     const response = await fetch(path.startsWith('http') ? path : `${API}${path}`, {
       ...options,
-      headers: { ...headers(Boolean(token)), ...(options.headers || {}) },
+      headers: { ...headers(), ...(options.headers || {}) },
     });
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => ({}));
@@ -77,60 +86,73 @@
     return payload;
   }
 
+  async function control(path, options = {}) {
+    if (!session) throw new Error('Connecte-toi avec GitHub pour utiliser cette commande.');
+    const response = await fetch(`${CONTROL_API}${path}`, {
+      ...options,
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${session}`,
+        ...(options.headers || {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (payload.session) {
+      session = payload.session;
+      saveSession(session);
+    }
+    if (!response.ok) throw new Error(payload.error || `Contrôle Cloud indisponible (${response.status}).`);
+    return payload;
+  }
+
   function lockCommands() {
     document.querySelectorAll('.requires-token').forEach((button) => {
-      button.disabled = !token;
-      button.title = token ? '' : 'Connecte un jeton GitHub pour utiliser cette commande.';
+      button.disabled = !session;
+      button.title = session ? '' : 'Connecte-toi avec GitHub pour utiliser cette commande.';
     });
-    if (token) {
-      elements.token.value = '';
-      elements.token.placeholder = 'Jeton mémorisé sur cet appareil';
-    } else {
-      elements.token.placeholder = 'github_pat_…';
-    }
-    elements.disconnect.hidden = !token;
+    elements.connect.hidden = Boolean(session);
+    elements.disconnect.hidden = !session;
   }
 
-  async function connectToken() {
-    const candidate = elements.token.value.trim();
-    if (candidate) token = candidate;
-    if (!token) {
-      notify('Saisis un jeton GitHub finement limité au dépôt.', true);
+  function connectGithub() {
+    elements.connect.disabled = true;
+    elements.connect.textContent = 'Redirection…';
+    window.location.assign(`${CONTROL_API}/auth/start`);
+  }
+
+  async function verifySession() {
+    if (!session) {
+      lockCommands();
       return;
     }
-    elements.connect.disabled = true;
-    elements.connect.textContent = 'Vérification…';
+    elements.authState.textContent = 'Connexion GitHub en cours de vérification…';
     try {
-      const user = await fetch('https://api.github.com/user', { headers: headers(true) });
-      const payload = await user.json();
-      if (!user.ok) throw new Error(payload.message || 'Jeton refusé par GitHub.');
-      saveToken(token);
-      elements.tokenState.textContent = `Connecté en tant que ${payload.login} · connexion mémorisée sur cet appareil`;
-      elements.tokenState.style.color = '#58e6a9';
+      const payload = await control('/api/session');
+      elements.authState.textContent = `Connecté en tant que ${payload.login} · GitHub App privée`;
+      elements.authState.style.color = '#58e6a9';
       lockCommands();
-      notify(`Connexion GitHub réussie : ${payload.login}.`);
+      if (window.location.hash) window.history.replaceState({}, document.title, window.location.pathname);
       await refreshAll();
     } catch (error) {
-      token = '';
-      forgetToken();
+      session = '';
+      forgetSession();
       lockCommands();
-      elements.tokenState.textContent = 'Jeton refusé · vérifie la permission Actions: write';
-      elements.tokenState.style.color = '#ff7088';
+      elements.authState.textContent = 'Connexion expirée · reconnecte-toi avec GitHub';
+      elements.authState.style.color = '#ff7088';
       notify(error instanceof Error ? error.message : String(error), true);
-    } finally {
-      elements.connect.disabled = false;
-      elements.connect.textContent = 'Connecter';
     }
   }
 
-  function disconnectToken() {
-    token = '';
-    forgetToken();
-    elements.token.value = '';
-    elements.tokenState.textContent = 'Lecture publique · commandes verrouillées';
-    elements.tokenState.style.color = '';
+  async function disconnectGithub() {
+    if (session) await control('/api/logout', { method: 'POST' }).catch(() => null);
+    session = '';
+    forgetSession();
+    elements.authState.textContent = 'Lecture publique · connexion GitHub requise pour commander';
+    elements.authState.style.color = '';
     lockCommands();
-    notify('Jeton GitHub retiré de cet appareil.');
+    elements.connect.disabled = false;
+    elements.connect.textContent = 'Se connecter avec GitHub';
+    notify('Session ClipMaker fermée et autorisation GitHub révoquée.');
   }
 
   function formatDate(value) {
@@ -224,13 +246,13 @@
   }
 
   async function dispatch(workflow, inputs, successMessage) {
-    if (!token) {
-      notify('Connecte d’abord un jeton GitHub avec Actions: write.', true);
+    if (!session) {
+      notify('Connecte-toi d’abord avec GitHub.', true);
       return;
     }
-    await github(`/actions/workflows/${workflow}/dispatches`, {
+    await control('/api/dispatch', {
       method: 'POST',
-      body: JSON.stringify({ ref: 'main', inputs }),
+      body: JSON.stringify({ workflow, inputs }),
       headers: { 'Content-Type': 'application/json' },
     });
     notify(successMessage);
@@ -276,18 +298,18 @@
 
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', command));
   elements.form3d.addEventListener('submit', run3d);
-  elements.connect.addEventListener('click', connectToken);
-  elements.disconnect.addEventListener('click', disconnectToken);
-  elements.token.addEventListener('keydown', (event) => { if (event.key === 'Enter') void connectToken(); });
+  elements.connect.addEventListener('click', connectGithub);
+  elements.disconnect.addEventListener('click', disconnectGithub);
   elements.refresh.addEventListener('click', refreshAll);
   document.querySelectorAll('.nav-link').forEach((link) => link.addEventListener('click', () => {
     document.querySelectorAll('.nav-link').forEach((item) => item.classList.toggle('active', item === link));
   }));
 
-  if (token) {
-    elements.tokenState.textContent = 'Connexion mémorisée · vérification GitHub en cours';
-    void connectToken();
+  if (session) {
+    lockCommands();
+    void verifySession();
   } else {
+    forgetSession();
     lockCommands();
   }
   void refreshAll();
