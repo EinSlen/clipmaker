@@ -1,0 +1,53 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import test from 'node:test';
+
+const root = new URL('./', import.meta.url);
+
+async function source(name) {
+  return fs.readFile(new URL(name, root), 'utf8');
+}
+
+test('the public dashboard exposes every daily stage and an explicit mobile navigation', async () => {
+  const html = await source('index.html');
+  const css = await source('styles.css');
+  for (const label of ['Accueil', 'Actions', 'Comptes', 'Test 3D', 'Historique']) {
+    assert.match(html, new RegExp(`data-mobile-label="${label}"`, 'u'));
+  }
+  assert.match(css, /content:\s*attr\(data-mobile-label\)/u);
+  assert.match(css, /\.nav-link::after\s*\{[^}]*display:\s*block/u);
+  assert.doesNotMatch(css, /main\s*\{[^}]*100vw/u);
+  assert.match(html, /<time>00:07<\/time>[\s\S]*Rendu 3D/u);
+  assert.match(html, /<time>00:37<\/time>[\s\S]*Rendus 2D/u);
+  assert.match(html, /<time>18:07<\/time>[\s\S]*Publication/u);
+  assert.match(html, /<time>18:08<\/time>[\s\S]*Notification/u);
+});
+
+test('account setup offers creation, private connection and local fallback links', async () => {
+  const html = await source('index.html');
+  assert.match(html, /https:\/\/www\.tiktok\.com\/signup/u);
+  assert.match(html, /https:\/\/accounts\.google\.com\/signup/u);
+  assert.match(html, /https:\/\/codespaces\.new\/EinSlen\/clipmaker\?quickstart=1/u);
+  assert.match(html, /Studio local \(si démarré\)/u);
+  assert.match(html, /Créer puis connecter un nouveau compte/u);
+});
+
+test('the meta CSP contains only directives that browsers enforce there', async () => {
+  const html = await source('index.html');
+  assert.match(html, /object-src 'none'/u);
+  assert.doesNotMatch(html, /frame-ancestors/u);
+});
+
+test('the one-account-one-game editor and all public destinations remain present', async () => {
+  const html = await source('index.html');
+  const app = await source('app.js');
+  for (const id of ['overview', 'commands', 'configuration', 'three-d', 'runs']) {
+    assert.match(html, new RegExp(`id="${id}"`, 'u'));
+  }
+  assert.match(html, /Un compte, un jeu/u);
+  assert.match(app, /field\('Jeu de ce compte'/u);
+  assert.match(app, /Maximum : 8 comptes par dépôt/u);
+  assert.match(app, /Je confirme la publication/u);
+  assert.match(html, /issues\/36/u);
+  assert.match(html, /actions\/workflows\/soft-body-artifact\.yml/u);
+});
