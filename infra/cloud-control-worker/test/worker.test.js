@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { openSession, parseBearer, sealSession, validateDispatch } from '../src/index.js';
+import { normalizePublisherConfig } from '../src/publisher-config.js';
 
 const secret = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1)).toString('base64url');
 const env = { SESSION_SECRET: secret };
@@ -53,4 +54,39 @@ test('soft body dispatch validates every editable input', () => {
 
 test('unknown workflows are never forwarded', () => {
   assert.throws(() => validateDispatch({ workflow: 'evil.yml', inputs: {} }), /Workflow non autorisé/u);
+});
+
+test('publisher config enforces one game and one assignment per account', () => {
+  const base = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    channels: [{
+      id: 'soft-main',
+      enabled: true,
+      generateTime: '00:30',
+      publishTime: '18:00',
+      game: { id: 'soft-body-slide', difficulty: 100, duration: 30, obstacle: 'auto', title: 'HOW SOFT CAN IT GET?' },
+      tiktok: { enabled: true, username: 'dvlad', visibility: 'private' },
+      youtube: { enabled: true, account: 'default', privacy: 'private' },
+    }],
+  };
+  const config = normalizePublisherConfig(base);
+  assert.equal(config.channels[0].game.id, 'soft-body-slide');
+  assert.equal(config.channels[0].game.duration, 30);
+  assert.equal(config.channels[0].tiktok.username, 'dvlad');
+  assert.throws(() => normalizePublisherConfig({
+    ...base,
+    channels: [...base.channels, { ...base.channels[0], id: 'duplicate' }],
+  }), /déjà assigné/u);
+});
+
+test('public uploads require an explicit confirmation', () => {
+  assert.throws(() => normalizePublisherConfig({
+    channels: [{
+      id: 'public-test',
+      game: { id: 'ball-escape', difficulty: 14, duration: 15, title: 'CAN IT ESCAPE?' },
+      tiktok: { enabled: true, username: 'dvlad', visibility: 'public', confirmPublic: false },
+      youtube: { enabled: false, account: 'default', privacy: 'private' },
+    }],
+  }), /doit être confirmée/u);
 });

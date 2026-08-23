@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { readPublisherConfig } from './config.mjs';
-import { generateChannel, planForDate, publishChannel, runDue } from './orchestrator.mjs';
+import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
 import { loadState, saveState, withStateLock } from './state.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 
@@ -153,6 +153,36 @@ test('dry-run due planning never creates state or performs network writes', asyn
   assert.equal(results.length, 2);
   assert.equal(results.every((result) => result.dryRun), true);
   assert.deepEqual((await loadState(directory)).jobs, []);
+});
+
+test('a native 3D artifact is imported with the deterministic daily seed', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const channel = sampleChannel();
+  channel.id = 'soft-main';
+  channel.game = { game: 'soft-body-slide', difficulty: 100, duration: 30, obstacle: 'auto', title: 'HOW SOFT CAN IT GET?' };
+  const config = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    seedNamespace: 'test',
+    stateDir: directory,
+    catchupDays: 2,
+    retentionDays: 120,
+    channels: [channel],
+  };
+  const date = '2026-08-15';
+  const plan = planForDate(config, channel, date);
+  const result = await importRenderedJob(config, {
+    date,
+    channelId: channel.id,
+    seed: plan.seed,
+    filename: `soft-body-peg-grid-${plan.seed}.mp4`,
+    render: { title: 'HOW SOFT CAN IT GET?', duration: 30, outcome: 'comparison-complete', variantKey: 'peg-grid' },
+  });
+  assert.equal(result.job.render.status, 'ready');
+  assert.equal(result.job.render.filename, `soft-body-peg-grid-${plan.seed}.mp4`);
+  await assert.rejects(() => importRenderedJob(config, {
+    date, channelId: channel.id, seed: plan.seed + 1, filename: `soft-body-peg-grid-${plan.seed + 1}.mp4`, render: {},
+  }), /Seed mismatch/u);
 });
 
 test('a partial platform failure retries only the missing upload', async (t) => {

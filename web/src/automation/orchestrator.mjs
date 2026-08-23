@@ -242,15 +242,58 @@ export async function publishChannel(config, channel, date, options = {}) {
   });
 }
 
-function selectedChannels(config, channelId) {
-  const channels = config.channels.filter((channel) => channel.enabled && (!channelId || channel.id === channelId));
+export async function importRenderedJob(config, manifest) {
+  if (!manifest || typeof manifest !== 'object') throw new Error('Invalid rendered job manifest.');
+  const date = String(manifest.date || '');
+  const channelId = String(manifest.channelId || '');
+  const channel = config.channels.find((candidate) => candidate.enabled && candidate.id === channelId);
+  if (!channel) throw new Error(`Unknown or disabled rendered channel: ${channelId}`);
+  if (channel.game.game !== 'soft-body-slide') throw new Error(`Imported renders are only accepted for 3D channels: ${channelId}`);
+  const plan = planForDate(config, channel, date);
+  if (Number(manifest.seed) !== plan.seed) throw new Error(`Seed mismatch for imported job ${plan.id}.`);
+  const filename = String(manifest.filename || '');
+  if (!/^soft-body-[a-z0-9_-]+-\d+\.mp4$/u.test(filename)) throw new Error('Invalid imported render filename.');
+  return withStateLock(config.stateDir, async () => {
+    const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
+    const job = ensureJob(state, plan, channel);
+    if (job.status === 'published') return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+    const render = manifest.render && typeof manifest.render === 'object' ? manifest.render : {};
+    job.render = {
+      ...job.render,
+      status: 'ready',
+      completedAt: new Date().toISOString(),
+      error: null,
+      filename,
+      title: String(render.title || channel.game.title || 'HOW SOFT CAN IT GET?'),
+      youtubeTitle: String(render.youtubeTitle || `${render.title || channel.game.title || 'HOW SOFT CAN IT GET?'} #shorts`),
+      caption: String(render.caption || '0% to 100% soft body comparison. Did you predict the ending?'),
+      tags: Array.isArray(render.tags) ? render.tags.map(String).slice(0, 12) : ['#softbody', '#satisfying', '#shorts'],
+      game: 'soft-body-slide',
+      duration: Number(render.duration || 30),
+      outcome: String(render.outcome || 'comparison-complete'),
+      variantKey: String(render.variantKey || channel.game.obstacle || 'auto'),
+      raw: render.raw && typeof render.raw === 'object' ? render.raw : render,
+    };
+    job.status = 'ready';
+    touch(job);
+    await saveState(config.stateDir, state);
+    await appendEvent(config.stateDir, { type: 'render-imported', jobId: job.id, filename });
+    return { ok: true, job: publicState({ ...state, jobs: [job] }).jobs[0] };
+  });
+}
+
+function selectedChannels(config, channelId, skipGames = []) {
+  const skipped = new Set(skipGames);
+  const channels = config.channels.filter((channel) => channel.enabled
+    && (!channelId || channel.id === channelId)
+    && !skipped.has(channel.game.game));
   if (channelId && !channels.length) throw new Error(`Unknown or disabled channel: ${channelId}`);
   return channels;
 }
 
-export async function generate(config, { date = dateInTimeZone(new Date(), config.timeZone), channelId, dryRun } = {}) {
+export async function generate(config, { date = dateInTimeZone(new Date(), config.timeZone), channelId, dryRun, skipGames = [] } = {}) {
   const results = [];
-  for (const channel of selectedChannels(config, channelId)) {
+  for (const channel of selectedChannels(config, channelId, skipGames)) {
     results.push(await generateChannel(config, channel, date, { dryRun }));
   }
   return results;

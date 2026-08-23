@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { readPublisherConfig } from '../src/automation/config.mjs';
 import { assertDate, dateInTimeZone } from '../src/automation/time.mjs';
-import { doctor, generate, publish, runDue, status } from '../src/automation/orchestrator.mjs';
+import { doctor, generate, importRenderedJob, publish, runDue, status } from '../src/automation/orchestrator.mjs';
 
 function option(args, name, fallback = undefined) {
   const index = args.indexOf(name);
@@ -44,6 +44,7 @@ async function main() {
   const command = args[0] || 'status';
   const configPath = path.resolve(option(args, '--config', process.env.PUBLISHER_CONFIG || 'config/publisher.json'));
   const channelId = option(args, '--channel');
+  const skipGame = option(args, '--skip-game');
   const forcedDryRun = args.includes('--dry-run') ? true : undefined;
   const read = () => readPublisherConfig(configPath);
   const config = await read();
@@ -51,10 +52,23 @@ async function main() {
 
   if (command === 'doctor') return output(await doctor(config));
   if (command === 'status') return output(await status(config));
-  if (command === 'generate') return output(await generate(config, { date, channelId, dryRun: forcedDryRun }));
+  if (command === 'generate') return output(await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] }));
   if (command === 'publish') return output(await publish(config, { date, channelId, dryRun: forcedDryRun }));
+  if (command === 'import-3d') {
+    const manifestPath = path.resolve(option(args, '--manifest'));
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    const manifestDirectory = path.dirname(manifestPath);
+    const source = path.resolve(manifestDirectory, String(manifest.video || ''));
+    const filename = path.basename(source);
+    if (!filename || source !== path.join(manifestDirectory, filename)) throw new Error('Invalid imported video path.');
+    const renderDirectory = path.resolve(path.dirname(config.configPath), '../renders');
+    await fs.mkdir(renderDirectory, { recursive: true });
+    const destination = path.join(renderDirectory, filename);
+    if (source !== destination) await fs.copyFile(source, destination);
+    return output(await importRenderedJob(config, { ...manifest, filename }));
+  }
   if (command === 'run') {
-    const generated = await generate(config, { date, channelId, dryRun: forcedDryRun });
+    const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] });
     const published = await publish(config, { date, channelId, dryRun: forcedDryRun });
     return output({ generated, published });
   }
