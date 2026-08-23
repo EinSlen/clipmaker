@@ -28,6 +28,11 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             infra/cloud-control-worker/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install the renderer test dependency
+        run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
       - name: Install the web application
         run: npm ci --prefix web
       - name: Test and build the web application
