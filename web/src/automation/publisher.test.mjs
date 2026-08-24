@@ -139,14 +139,14 @@ test('workflow summary reports the requested operation and active configuration,
         endpoints: { youtube: { ok: true }, tiktok: { ok: true } },
       }],
     },
-    status: { jobs: [{ channelId: 'ball-old', date: '2026-08-22', status: 'published' }] },
+    status: { jobs: [{ channelId: 'ball-old', date: '2026-08-22', status: 'published', renderRequest: { game: 'ball-escape' } }] },
   });
   assert.match(summary, /Operation: `doctor`/u);
   assert.match(summary, /Channel: `softbody-dvlad`/u);
   assert.match(summary, /`soft-body-slide` · génération `00:07` · publication `18:00`/u);
   assert.match(summary, /YouTube default \(private, prêt\)/u);
   assert.match(summary, /TikTok @dvlad \(private, prêt\)/u);
-  assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old`/u);
+  assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old` · `ball-escape`/u);
 });
 
 test('a manual dry-run can validate publication without requiring the nightly 3D artifact', async () => {
