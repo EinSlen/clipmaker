@@ -25,7 +25,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.5",
-    "youtube-videos-uploader": "https://github.com/EinSlen/youtube-uploader/archive/48b5922af07c431b05e05382435b067c74088271.tar.gz"
+    "youtube-videos-uploader": "https://github.com/EinSlen/youtube-uploader/archive/1d624fcf31b81a836fc4cb75253afe06914b4230.tar.gz"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
