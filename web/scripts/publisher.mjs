@@ -45,6 +45,11 @@ async function main() {
   const configPath = path.resolve(option(args, '--config', process.env.PUBLISHER_CONFIG || 'config/publisher.json'));
   const channelId = option(args, '--channel');
   const skipGame = option(args, '--skip-game');
+  const forcePlatform = option(args, '--force-platform');
+  if (forcePlatform && !['youtube', 'tiktok'].includes(forcePlatform)) {
+    throw new Error(`Unsupported forced platform: ${forcePlatform}.`);
+  }
+  const forcePlatforms = forcePlatform ? [forcePlatform] : [];
   const forcedDryRun = args.includes('--dry-run') ? true : undefined;
   const read = () => readPublisherConfig(configPath);
   const config = await read();
@@ -53,7 +58,9 @@ async function main() {
   if (command === 'doctor') return output(await doctor(config));
   if (command === 'status') return output(await status(config));
   if (command === 'generate') return output(await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] }));
-  if (command === 'publish') return output(await publish(config, { date, channelId, dryRun: forcedDryRun }));
+  if (command === 'publish') {
+    return output(await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms }));
+  }
   if (command === 'import-3d') {
     const manifestPath = path.resolve(option(args, '--manifest'));
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
@@ -69,7 +76,7 @@ async function main() {
   }
   if (command === 'run') {
     const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] });
-    const published = await publish(config, { date, channelId, dryRun: forcedDryRun });
+    const published = await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms });
     return output({ generated, published });
   }
   if (command === 'due') return output(await runDue(config, { channelId, dryRun: forcedDryRun }));

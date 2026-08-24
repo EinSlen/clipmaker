@@ -152,7 +152,20 @@ test('workflow summary reports the requested operation and active configuration,
         endpoints: { youtube: { ok: true }, tiktok: { ok: true } },
       }],
     },
-    status: { jobs: [{ channelId: 'ball-old', date: '2026-08-22', status: 'published', renderRequest: { game: 'ball-escape' } }] },
+    status: { jobs: [{
+      channelId: 'ball-old',
+      date: '2026-08-22',
+      status: 'published',
+      renderRequest: { game: 'ball-escape' },
+      platforms: {
+        youtube: {
+          enabled: true,
+          status: 'published',
+          receipt: { id: 'youtube-one', provider: 'youtube-data-api', privacy: 'private' },
+        },
+        tiktok: { enabled: true, status: 'published', receipt: null },
+      },
+    }] },
   });
   assert.match(summary, /Operation: `doctor`/u);
   assert.match(summary, /Channel: `softbody-dvlad`/u);
@@ -160,6 +173,8 @@ test('workflow summary reports the requested operation and active configuration,
   assert.match(summary, /YouTube default \(private, prêt\)/u);
   assert.match(summary, /TikTok @dvlad \(private, prêt\)/u);
   assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old` · `ball-escape`/u);
+  assert.match(summary, /youtube: `published` · reçu youtube-data-api, private/u);
+  assert.match(summary, /tiktok: `published` · aucun reçu enregistré/u);
 });
 
 test('a manual dry-run can validate publication without requiring the nightly 3D artifact', async () => {
@@ -170,6 +185,8 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
     /Import today's completed 3D renders[\s\S]*github\.event_name == 'workflow_dispatch' && inputs\.dry_run/u,
   );
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
+  assert.match(workflow, /force_youtube:/u);
+  assert.match(workflow, /extra\+=\(--force-platform youtube\)/u);
   assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
   assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);
@@ -316,7 +333,16 @@ test('a partial platform failure retries only the missing upload', async (t) => 
     }
     if (request.url === '/api/youtube/upload') {
       calls.youtube += 1;
-      response.end(JSON.stringify({ ok: true, upload: { id: 'youtube-one' } }));
+      response.end(JSON.stringify({
+        ok: true,
+        account: 'default',
+        upload: {
+          provider: 'youtube-data-api',
+          platformPostId: `youtube-${calls.youtube}`,
+          releaseUrl: `https://youtube.com/shorts/youtube-${calls.youtube}`,
+          raw: { privacy: 'private' },
+        },
+      }));
       return;
     }
     if (request.url === '/api/tiktok/upload') {
@@ -369,10 +395,25 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   assert.equal(job.status, 'partial');
   assert.equal(job.platforms.youtube.status, 'published');
   assert.equal(job.platforms.tiktok.status, 'failed');
+  assert.equal(job.platforms.youtube.receipt.id, 'youtube-1');
+  assert.equal(job.platforms.youtube.receipt.privacy, 'private');
 
   await publishChannel(config, channel, date);
   job = (await loadState(directory)).jobs[0];
   assert.equal(job.status, 'published');
   assert.equal(calls.youtube, 1);
   assert.equal(calls.tiktok, 2);
+
+  await publishChannel(config, channel, date, { forcePlatforms: ['youtube'] });
+  job = (await loadState(directory)).jobs[0];
+  assert.equal(job.status, 'published');
+  assert.equal(job.platforms.youtube.receipt.id, 'youtube-2');
+  assert.equal(calls.youtube, 2);
+  assert.equal(calls.tiktok, 2);
+  await assert.rejects(
+    () => publishChannel(config, { ...channel, youtube: { ...channel.youtube, enabled: false } }, date, {
+      forcePlatforms: ['youtube'],
+    }),
+    /Cannot force disabled platform youtube/u,
+  );
 });
