@@ -180,6 +180,14 @@ test('missing 3D frame chunks are detected, retried and required before assembly
   assert.match(workflow, /Lots manquants détectés/u);
 });
 
+test('scheduled 3D renders use short reliable chunks without exceeding GitHub matrix limits', async () => {
+  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(workflow, /"samples": 64, "chunk_size": 15/u);
+  assert.match(workflow, /if len\(channels\) > 4:[\s\S]*channel\["chunk_size"\] = 30/u);
+  assert.match(workflow, /if len\(channels\) > 8:/u);
+});
+
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const source = await fs.readFile(routePath, 'utf8');
