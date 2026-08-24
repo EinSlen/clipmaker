@@ -9,8 +9,8 @@ import {
 import {
   REPO_ROOT,
   TIKTOK_COOKIES_DIR,
-  YOUTUBE_BROWSER_DATA_DIR,
 } from "@/lib/server-paths";
+import { listYouTubeAccounts } from "@/lib/youtube-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +66,7 @@ export async function POST(request: Request) {
       tiktok: Array<{ username: string; ready: boolean }>;
       youtube: Array<{ id: string; label: string; ready: boolean }>;
     } = { tiktok: [], youtube: [] };
+    const configuredYoutubeAccounts = await listYouTubeAccounts();
     for (const channel of config.channels.filter((item) => item.enabled)) {
       if (channel.tiktok.enabled && channel.tiktok.username) {
         const ready = await addSessionFile(
@@ -78,14 +79,9 @@ export async function POST(request: Request) {
         }
       }
       if (channel.youtube.enabled) {
-        const root = channel.youtube.account === "default"
-          ? YOUTUBE_BROWSER_DATA_DIR
-          : path.join(YOUTUBE_BROWSER_DATA_DIR, "accounts", channel.youtube.account);
-        const ready = await addSessionFile(
-          sessionFiles,
-          path.join(root, "yt-auth", "cookies-profile-local_invalid.json"),
-          warnings,
-        );
+        const ready = configuredYoutubeAccounts.some((item) => (
+          item.id.toLowerCase() === channel.youtube.account.toLowerCase() && item.configured
+        ));
         if (!accounts.youtube.some((item) => item.id.toLowerCase() === channel.youtube.account.toLowerCase())) {
           accounts.youtube.push({ id: channel.youtube.account, label: channel.youtube.account, ready });
         }

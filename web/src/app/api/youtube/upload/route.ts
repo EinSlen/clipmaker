@@ -69,7 +69,10 @@ export async function POST(req: Request) {
     const status = await getYouTubeDoctorStatus(account);
     if (!status.dry_run) {
       if (!status.ready_for_live_upload) {
-        return NextResponse.json({ ok: false, error: 'Session YouTube absente ou expirée; lance npm run youtube:auth' }, { status: 503 });
+        return NextResponse.json({
+          ok: false,
+          error: status.next_steps.join(' ') || 'Le compte YouTube n’est pas prêt pour la publication.',
+        }, { status: 503 });
       }
       if (!hasValidAdminToken(req)) {
         return NextResponse.json({ ok: false, error: "Jeton d'administration requis pour un upload réel" }, { status: 401 });

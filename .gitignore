@@ -41,3 +41,4 @@ youtube_cookies.txt
 
 # YouTube browser profile and exported session cookies
 .youtube-browser/
+.youtube-oauth-accounts.json

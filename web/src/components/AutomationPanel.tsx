@@ -30,6 +30,7 @@ import type { TiktokAccount } from "@/lib/types";
 
 type YoutubeAccount = { id: string; label: string; configured: boolean };
 type YoutubeStatus = {
+  provider?: "youtube-data-api";
   readyForLiveUpload?: boolean;
   publicUploadAllowed?: boolean;
   dryRun?: boolean;
@@ -162,7 +163,8 @@ export function AutomationPanel() {
       setRuntime(await runtimeResponse.json());
       setTiktokAccounts(tiktokPayload.accounts || []);
       setYoutubeAccounts(accounts);
-      const statuses = await Promise.all(accounts.map(async (account) => {
+      const statusAccounts = accounts.length ? accounts : [{ id: "default", label: "Chaîne par défaut", configured: false }];
+      const statuses = await Promise.all(statusAccounts.map(async (account) => {
         const response = await fetch(`/api/youtube/status?account=${encodeURIComponent(account.id)}`, { cache: "no-store" });
         return [account.id, await response.json()] as const;
       }));
@@ -218,12 +220,13 @@ export function AutomationPanel() {
       const accounts = (youtubePayload.accounts || []) as YoutubeAccount[];
       setTiktokAccounts(tiktokPayload.accounts || []);
       setYoutubeAccounts(accounts);
-      const statuses = await Promise.all(accounts.map(async (account) => {
+      const statusAccounts = accounts.length ? accounts : [{ id: "default", label: "Chaîne par défaut", configured: false }];
+      const statuses = await Promise.all(statusAccounts.map(async (account) => {
         const response = await fetch(`/api/youtube/status?account=${encodeURIComponent(account.id)}`, { cache: "no-store" });
         return [account.id, await response.json()] as const;
       }));
       setYoutubeStatuses(Object.fromEntries(statuses));
-      setMessage("Sessions actualisées.");
+      setMessage("Comptes actualisés.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -235,6 +238,11 @@ export function AutomationPanel() {
     const value = requestedValue.trim().toLowerCase();
     if (!value) {
       setError(platform === "tiktok" ? "Saisis le nom d’utilisateur TikTok prévu." : "Saisis un nom pour ce profil YouTube.");
+      return;
+    }
+    if (platform === "youtube") {
+      setError(null);
+      setMessage(`Pour connecter ${value}, ouvre un terminal dans web/ et lance : npm run youtube:oauth:setup -- --client-json "CHEMIN/client_secret.json" --account ${value}`);
       return;
     }
     const popup = window.open("about:blank", "_blank");
@@ -254,9 +262,7 @@ export function AutomationPanel() {
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Impossible de démarrer la connexion.");
       if (popup) popup.location.href = payload.authUrl;
       else window.open(payload.authUrl, "_blank", "noopener,noreferrer");
-      setMessage(platform === "tiktok"
-        ? `Navigateur ouvert pour @${value}. Connecte-toi ou crée le compte, puis actualise les sessions.`
-        : `Navigateur ouvert pour le profil ${value}. Connecte-toi ou crée le compte Google, puis actualise les sessions.`);
+      setMessage(`Navigateur ouvert pour @${value}. Connecte-toi ou crée le compte, puis actualise les sessions.`);
     } catch (caught) {
       popup?.close();
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -417,8 +423,8 @@ export function AutomationPanel() {
 
           <div className="subpanel space-y-4 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">YouTube</h3><Health ready={Object.values(youtubeStatuses).some((status) => status.readyForLiveUpload)}>{Object.values(youtubeStatuses).filter((status) => status.readyForLiveUpload).length} prête(s)</Health></div>
-            <label className="block space-y-1.5 text-xs text-ink-400"><span>Nom interne du profil</span><div className="flex flex-col gap-2 sm:flex-row"><input className="field-control h-11 min-w-0 flex-1" placeholder="ex. chaine_science" value={newYouTubeAccount} onChange={(event) => setNewYouTubeAccount(event.target.value)} /><Button type="button" onClick={() => void startInteractiveAuth("youtube", newYouTubeAccount)} disabled={authBusy !== null}>{authBusy === "youtube" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />} Connecter ou créer</Button></div></label>
-            <p className="text-xs leading-5 text-ink-500">Ce nom sert uniquement à séparer les sessions dans ClipMaker. Dans Google, sélectionne la chaîne YouTube réelle.</p>
+            <label className="block space-y-1.5 text-xs text-ink-400"><span>Nom interne du profil</span><div className="flex flex-col gap-2 sm:flex-row"><input className="field-control h-11 min-w-0 flex-1" placeholder="ex. chaine_science" value={newYouTubeAccount} onChange={(event) => setNewYouTubeAccount(event.target.value)} /><Button type="button" onClick={() => void startInteractiveAuth("youtube", newYouTubeAccount)} disabled={authBusy !== null}><ExternalLink className="size-4" /> Voir la commande OAuth</Button></div></label>
+            <p className="text-xs leading-5 text-ink-500">Ce nom sert uniquement à séparer les comptes dans ClipMaker. Avec OAuth, chaque chaîne dispose de son propre jeton renouvelable dans GitHub Secrets.</p>
             <div className="flex flex-wrap gap-2">{youtubeAccounts.map((account) => <span key={account.id} className={`rounded-full px-2.5 py-1 text-xs ${youtubeStatuses[account.id]?.readyForLiveUpload ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"}`}>{account.label} · {youtubeStatuses[account.id]?.readyForLiveUpload ? "prête" : "à connecter"}</span>)}</div>
           </div>
         </div>
@@ -483,7 +489,7 @@ export function AutomationPanel() {
                       </div>
 
                       <div className="space-y-3 border-t border-white/10 pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-                        <div className="flex items-center justify-between gap-3"><Toggle checked={channel.youtube.enabled} onChange={(enabled) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, enabled } }))} label="Publier sur YouTube" />{channel.youtube.account && <Health ready={Boolean(youtube?.readyForLiveUpload)}>{youtube?.readyForLiveUpload ? "Session prête" : "Connexion requise"}</Health>}</div>
+                        <div className="flex items-center justify-between gap-3"><Toggle checked={channel.youtube.enabled} onChange={(enabled) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, enabled } }))} label="Publier sur YouTube" />{channel.youtube.account && <Health ready={Boolean(youtube?.readyForLiveUpload)}>{youtube?.readyForLiveUpload ? (youtube.provider === "youtube-data-api" ? "OAuth prêt" : "Session prête") : "Connexion requise"}</Health>}</div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="space-y-1.5 text-xs text-ink-400"><span>Chaîne YouTube</span><select className="field-control h-11" value={channel.youtube.account} onChange={(event) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, account: event.target.value } }))}>{(youtubeAccounts.length ? youtubeAccounts : [{ id: "default", label: "Chaîne par défaut", configured: false }]).map((account) => <option key={account.id} value={account.id}>{account.id === "default" ? "Chaîne par défaut" : account.label}</option>)}</select></label>
                           <label className="space-y-1.5 text-xs text-ink-400"><span>Visibilité YouTube</span><select className="field-control h-11" value={channel.youtube.privacy} onChange={(event) => updateChannel(index, (item) => ({ ...item, youtube: { ...item.youtube, privacy: event.target.value as "private" | "unlisted" | "public", confirmPublic: false } }))}><option value="private">Privée</option><option value="unlisted">Non répertoriée</option><option value="public" disabled={!youtube?.publicUploadAllowed}>Publique{youtube?.publicUploadAllowed ? "" : " — bloquée serveur"}</option></select></label>

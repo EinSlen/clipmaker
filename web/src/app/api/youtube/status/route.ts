@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       account,
+      provider: status.provider,
       dryRun: status.dry_run,
       readyForLiveUpload: status.ready_for_live_upload,
       configured: status.configured,

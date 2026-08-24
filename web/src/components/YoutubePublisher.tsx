@@ -6,14 +6,10 @@ import { Button } from "./Button";
 
 type Status = {
   ok: boolean;
+  provider?: "youtube-data-api";
   dryRun: boolean;
   readyForLiveUpload: boolean;
-  configured: {
-    browser: "configured" | "missing";
-    cookies: "configured" | "missing";
-    authenticated: "configured" | "missing";
-    package: "configured" | "missing";
-  };
+  configured: Record<string, "configured" | "missing">;
   error?: string;
 };
 
@@ -98,12 +94,7 @@ export function YoutubePublisher({
           ok: false,
           dryRun: true,
           readyForLiveUpload: false,
-          configured: {
-            browser: "missing",
-            cookies: "missing",
-            authenticated: "missing",
-            package: "missing",
-          },
+          configured: {},
           error: String(error),
         })
       );
@@ -226,7 +217,7 @@ export function YoutubePublisher({
         <span className="block text-xs leading-relaxed text-ink-500">
           Cette destination est mémorisée pour ce format. Pour créer un autre
           profil :{" "}
-          <code>node scripts/youtube-agent.mjs auth --account nom-chaine</code>.
+          <code>npm run youtube:oauth:setup -- --client-json CHEMIN --account nom-chaine</code>.
         </span>
       </label>
 
@@ -283,9 +274,7 @@ export function YoutubePublisher({
       )}
       {liveMode && !status.readyForLiveUpload && (
         <p className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-200">
-          La session YouTube est absente ou expirée. Lance{" "}
-          <code>npm run youtube:auth</code> dans <code>web/</code>, puis
-          connecte-toi dans la fenêtre Chrome.
+          L’autorisation OAuth YouTube manque ou a expiré. Lance <code>npm run youtube:oauth:setup</code> dans <code>web/</code>.
         </p>
       )}
 
@@ -317,8 +306,8 @@ export function YoutubePublisher({
 
       <p className="text-xs leading-relaxed text-ink-400">
         Le mode test valide le fichier sans le publier. En mode réel, ClipMaker
-        réutilise uniquement la session Chrome locale et ne conserve jamais le
-        mot de passe Google. La publication publique reste désactivée.
+        utilise OAuth et l’API YouTube depuis GitHub Actions ; aucun navigateur ni ordinateur permanent n’est requis.{" "}
+        La publication publique reste désactivée.
       </p>
       {message && (
         <p

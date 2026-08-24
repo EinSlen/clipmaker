@@ -181,7 +181,7 @@
     const source = accountCatalog[platform] || [];
     const values = source.map((item) => platform === 'tiktok'
       ? [item.username, `@${item.username}${item.ready ? ' · prête' : ' · à reconnecter'}`]
-      : [item.id, `${item.label || item.id}${item.ready ? ' · prête' : ' · à reconnecter'}`]);
+      : [item.id, `${item.label || item.id}${item.ready ? ' · OAuth prêt' : ' · OAuth requis'}`]);
     if (current && !values.some(([value]) => value === current)) values.unshift([current, `${current} · session inconnue`]);
     return [['', 'Choisir un compte'], ...values];
   }
@@ -206,7 +206,7 @@
     const ready = document.createElement('span');
     const isReady = platformReady(platform, settings[accountKey]);
     ready.className = `platform-ready${isReady ? ' ready' : ''}`;
-    ready.textContent = isReady ? 'Session prête' : 'Session requise';
+    ready.textContent = isReady ? (isTiktok ? 'Session prête' : 'OAuth prêt') : (isTiktok ? 'Session requise' : 'OAuth requis');
     title.append(toggle, ready);
     box.append(title);
 
@@ -335,7 +335,7 @@
     publisherConfig = structuredClone(configPayload.config);
     accountCatalog = accountPayload.accounts || { tiktok: [], youtube: [] };
     elements.configState.textContent = `${publisherConfig.channels.filter((item) => item.enabled).length} canal(aux) actif(s)`;
-    elements.sessionsState.textContent = accountPayload.sessionsSynced ? `Sessions synchronisées · ${accountCatalog.syncedAt ? formatDate(accountCatalog.syncedAt) : 'prêtes'}` : 'Sessions à synchroniser depuis le Studio';
+    elements.sessionsState.textContent = accountPayload.sessionsSynced ? `Configuration et sessions TikTok synchronisées · ${accountCatalog.syncedAt ? formatDate(accountCatalog.syncedAt) : 'prêtes'}` : 'Configuration à synchroniser depuis le Studio';
     elements.sessionsState.classList.toggle('ready', Boolean(accountPayload.sessionsSynced));
     renderChannels();
   }
@@ -400,7 +400,7 @@
     elements.connect.disabled = false;
     elements.connect.textContent = 'Se connecter avec GitHub';
     elements.configState.textContent = 'Connexion requise';
-    elements.sessionsState.textContent = 'Sessions non vérifiées';
+    elements.sessionsState.textContent = 'Synchronisation non vérifiée';
     elements.sessionsState.classList.remove('ready');
     renderChannels();
     notify('Session ClipMaker fermée et autorisation GitHub révoquée.');

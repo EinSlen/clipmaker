@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { listYouTubeAccounts } from '@/lib/youtube-agent';
 import { hasPublisherWriteAccess } from '@/lib/server-publisher-config';
-import { interactiveAuthUrl, requestInteractiveAuth } from '@/lib/server-auth-requests';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,11 +22,8 @@ export async function POST(request: Request) {
   if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(account)) {
     return NextResponse.json({ ok: false, error: 'Utilise 1 à 32 lettres, chiffres, tirets ou underscores.' }, { status: 400 });
   }
-  await requestInteractiveAuth('youtube', account);
   return NextResponse.json({
-    ok: true,
-    account,
-    authUrl: interactiveAuthUrl(request, 'youtube'),
-    message: 'Le navigateur YouTube est prêt. Connecte-toi ou crée ton compte Google, puis actualise les sessions.',
-  });
+    ok: false,
+    error: 'YouTube utilise OAuth pour GitHub. Lance npm run youtube:oauth:setup depuis le Studio privé.',
+  }, { status: 409 });
 }

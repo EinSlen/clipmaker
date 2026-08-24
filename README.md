@@ -20,7 +20,7 @@ Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
 - création de vidéos de jeux en 1080×1920 avec physique déterministe, musique et Foley synchronisé ;
 - configuration **un compte = un jeu**, avec cadence, seed et plateformes indépendantes ;
 - rendu 3D matriciel à 00 h 07, génération 2D à 00 h 37 et publication programmée à 18 h 07, heure de Paris ;
-- envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts ;
+- envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts avec OAuth/API ;
 - conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
 - notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
 
@@ -40,8 +40,9 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 
 Le tableau de bord est public en lecture seule. Après connexion avec la GitHub App privée, il permet
 de modifier le jeu, l'obstacle, l'heure et les destinations de chaque compte. Aucun PAT n'est copié
-dans le navigateur. Les sessions TikTok/Google sont créées dans le Studio privé, puis synchronisées
-vers le Worker par le serveur ClipMaker sans transiter en clair dans Pages.
+dans le navigateur. La session TikTok est créée dans le Studio privé puis synchronisée vers le
+Worker. YouTube utilise un jeton OAuth renouvelable conservé dans GitHub Secrets : le runner n'a
+besoin ni de navigateur connecté, ni d'adresse IP fixe, ni d'un ordinateur ou VPS allumé.
 
 ## Démarrage local
 
@@ -89,6 +90,24 @@ et pourraient envoyer le même contenu deux fois.
 Les affectations compte → jeu sont définies dans `web/config/publisher.json`. Le dry-run reste
 activé par défaut afin d'éviter toute publication accidentelle.
 
+### Connecter YouTube à GitHub Actions
+
+Une seule autorisation locale est nécessaire par chaîne YouTube :
+
+1. activer **YouTube Data API v3** dans Google Cloud et créer un client OAuth de type
+   **Application de bureau** ;
+2. télécharger son fichier JSON sans l'ajouter au dépôt ;
+3. exécuter depuis `web/` :
+
+```bash
+npm run youtube:oauth:setup -- --client-json "CHEMIN/client_secret.json" --account default
+```
+
+La commande ouvre Google, demande uniquement le droit `youtube.upload`, puis crée ou actualise le
+secret GitHub `YOUTUBE_OAUTH_ACCOUNTS_B64`. Pour une autre chaîne, relancer la commande avec un nom
+de compte différent ; le fichier local ignoré `.youtube-oauth-accounts.json` conserve le bundle à
+resynchroniser. Aucun mot de passe ou jeton OAuth n'est commité.
+
 ## Architecture
 
 ```text
@@ -104,7 +123,7 @@ clipMaker/
 ├── infra/cloud-control-worker/ authentification GitHub App et commandes Pages
 ├── infra/systemd/           timer Linux optionnel
 ├── vendor/                  fork TikTok Auto Uploader
-└── docker-compose.yml       application, publication et login YouTube
+└── docker-compose.yml       application, publication et login TikTok
 ```
 
 ## Vérifications
