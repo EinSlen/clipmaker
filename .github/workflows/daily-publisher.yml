@@ -46,6 +46,7 @@ jobs:
       YOUTUBE_OAUTH_ACCOUNTS_B64: ${{ secrets.YOUTUBE_OAUTH_ACCOUNTS_B64 }}
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
+      MANUAL_DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v6
 
@@ -53,7 +54,9 @@ jobs:
         run: |
           test -n "$PUBLISHER_STATE_KEY" || { echo "La clé d'état chiffré manque." >&2; exit 1; }
           test -n "$CLIPMAKER_UPLOAD_TOKEN" || { echo "Le jeton interne ClipMaker manque." >&2; exit 1; }
-          test -n "$YOUTUBE_OAUTH_ACCOUNTS_B64" || { echo "Les comptes OAuth YouTube ne sont pas configurés." >&2; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$MANUAL_DRY_RUN" != "true" ]; then
+            test -n "$YOUTUBE_OAUTH_ACCOUNTS_B64" || { echo "Les comptes OAuth YouTube ne sont pas configurés." >&2; exit 1; }
+          fi
 
       - name: Restore configuration and TikTok sessions from Cloudflare
         run: |
@@ -113,14 +116,19 @@ jobs:
 
       - name: Start the private ClipMaker API
         run: |
+          publisher_dry_run=false
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
+            publisher_dry_run=true
+          fi
           docker run --detach --rm --init --name clipmaker-daily --network host \
             --env REPO_ROOT=/repo \
             --env PYTHON_BIN=python3 \
             --env BLENDER_BIN=blender \
             --env YOUTUBE_UPLOAD_PROVIDER=youtube-data-api \
-            --env YOUTUBE_API_DRY_RUN=false \
+            --env YOUTUBE_API_DRY_RUN="$publisher_dry_run" \
             --env YOUTUBE_OAUTH_ACCOUNTS_B64="$YOUTUBE_OAUTH_ACCOUNTS_B64" \
             --env YOUTUBE_ALLOW_PUBLIC_UPLOAD=true \
+            --env PUBLISHER_DRY_RUN="$publisher_dry_run" \
             --env CLIPMAKER_UPLOAD_TOKEN="$CLIPMAKER_UPLOAD_TOKEN" \
             --volume "$PWD:/repo" \
             --volume "$PWD/web/renders:/app/renders" \
