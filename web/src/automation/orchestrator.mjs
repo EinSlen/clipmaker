@@ -34,7 +34,24 @@ function newPlatformState(enabled) {
     lastAttemptAt: null,
     completedAt: null,
     error: null,
+    receipt: null,
     raw: null,
+  };
+}
+
+function safePlatformReceipt(platform, result) {
+  const upload = result?.upload && typeof result.upload === 'object' ? result.upload : {};
+  const id = String(upload.platformPostId || upload.id || '').trim();
+  const releaseUrl = String(upload.releaseUrl || '').trim();
+  const privacy = String(upload.raw?.privacy || result?.privacy || '').trim();
+  const provider = String(upload.provider || '').trim();
+  return {
+    platform,
+    ...(id ? { id } : {}),
+    ...(releaseUrl ? { releaseUrl } : {}),
+    ...(privacy ? { privacy } : {}),
+    ...(provider ? { provider } : {}),
+    recordedAt: new Date().toISOString(),
   };
 }
 
@@ -195,6 +212,19 @@ export async function publishChannel(config, channel, date, options = {}) {
     if (!enabled.length) {
       return { ok: true, skipped: true, reason: 'no-enabled-targets', jobId: job.id };
     }
+    const forced = new Set(options.forcePlatforms || []);
+    for (const platform of forced) {
+      if (!enabled.includes(platform)) {
+        throw new Error(`Cannot force disabled platform ${platform} for ${channel.id}.`);
+      }
+      const target = job.platforms[platform];
+      target.status = 'pending';
+      target.completedAt = null;
+      target.error = null;
+      target.receipt = null;
+      target.raw = null;
+      await appendEvent(config.stateDir, { type: 'publish-forced', jobId: job.id, platform });
+    }
     job.status = 'publishing';
     touch(job);
     await saveState(config.stateDir, state);
@@ -214,6 +244,7 @@ export async function publishChannel(config, channel, date, options = {}) {
           : await publishTiktok(config, channel, job);
         target.status = 'published';
         target.completedAt = new Date().toISOString();
+        target.receipt = safePlatformReceipt(platform, result);
         target.raw = result;
         touch(job);
         // Persist each platform independently before touching the next one so
@@ -299,10 +330,15 @@ export async function generate(config, { date = dateInTimeZone(new Date(), confi
   return results;
 }
 
-export async function publish(config, { date = dateInTimeZone(new Date(), config.timeZone), channelId, dryRun } = {}) {
+export async function publish(config, {
+  date = dateInTimeZone(new Date(), config.timeZone),
+  channelId,
+  dryRun,
+  forcePlatforms = [],
+} = {}) {
   const results = [];
   for (const channel of selectedChannels(config, channelId)) {
-    results.push(await publishChannel(config, channel, date, { dryRun }));
+    results.push(await publishChannel(config, channel, date, { dryRun, forcePlatforms }));
   }
   return results;
 }

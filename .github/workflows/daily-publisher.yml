@@ -23,6 +23,11 @@ on:
         required: true
         default: true
         type: boolean
+      force_youtube:
+        description: Retry YouTube even when the encrypted state says it was already published
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -47,6 +52,7 @@ jobs:
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
       MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+      MANUAL_FORCE_YOUTUBE: ${{ inputs.force_youtube }}
     steps:
       - uses: actions/checkout@v6
 
@@ -227,6 +233,9 @@ jobs:
           extra=()
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
             extra+=(--dry-run)
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_FORCE_YOUTUBE" = "true" ]; then
+            extra+=(--force-platform youtube)
           fi
           if [ "$COMMAND" = "generate" ] || [ "$COMMAND" = "run" ]; then
             extra+=(--skip-game soft-body-slide)

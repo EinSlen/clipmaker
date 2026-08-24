@@ -23,6 +23,15 @@ function channelTargets(channel, doctorChannel) {
   return targets.length ? targets.join(' · ') : 'aucune plateforme activée';
 }
 
+function platformPublication(platform, target) {
+  if (!target || target.enabled === false) return null;
+  const receipt = target.receipt;
+  const proof = receipt?.id
+    ? `reçu ${receipt.provider || platform}${receipt.privacy ? `, ${receipt.privacy}` : ''}`
+    : 'aucun reçu enregistré';
+  return `  - ${platform}: \`${target.status || 'unknown'}\` · ${proof}`;
+}
+
 export function buildPublisherSummary({ operation, config, doctor = null, status = null, configurationError = null }) {
   const activeChannels = (config?.channels || []).filter((channel) => channel.enabled !== false);
   const doctorChannels = new Map((doctor?.channels || []).map((channel) => [channel.id, channel]));
@@ -53,6 +62,10 @@ export function buildPublisherSummary({ operation, config, doctor = null, status
     lines.push(
       `- Latest stored job: \`${latest.status || 'unknown'}\` · \`${latest.date || '-'}\` · \`${latest.channelId || '-'}\` · \`${jobGameId(latest)}\``,
     );
+    for (const platform of ['youtube', 'tiktok']) {
+      const publication = platformPublication(platform, latest.platforms?.[platform]);
+      if (publication) lines.push(publication);
+    }
   } else {
     lines.push('- Latest stored job: `none`');
   }
