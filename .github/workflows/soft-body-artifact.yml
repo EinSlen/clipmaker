@@ -199,6 +199,7 @@ jobs:
     if: ${{ needs.plan.outputs.render_enabled == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 350
+    continue-on-error: true
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -227,10 +228,98 @@ jobs:
           compression-level: 0
           retention-days: 2
 
+  retry_plan:
+    name: Find missing native frame chunks
+    needs: [plan, prepare, render]
+    if: ${{ always() && needs.plan.outputs.render_enabled == 'true' && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-22.04
+    outputs:
+      frames: ${{ steps.missing.outputs.frames }}
+      has_missing: ${{ steps.missing.outputs.has_missing }}
+      missing_count: ${{ steps.missing.outputs.missing_count }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FRAME_MATRIX: ${{ needs.plan.outputs.frames }}
+    steps:
+      - id: missing
+        name: Compare expected chunks with uploaded artifacts
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > /tmp/render-artifact-pages.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          matrix = json.loads(os.environ["FRAME_MATRIX"])
+          pages = json.loads(Path("/tmp/render-artifact-pages.json").read_text(encoding="utf-8"))
+          existing = {
+              artifact["name"]
+              for page in pages
+              for artifact in page.get("artifacts", [])
+          }
+          missing = [
+              frame
+              for frame in matrix.get("include", [])
+              if f"soft-body-frames-{frame['key']}-{frame['index']}" not in existing
+          ]
+          compact = json.dumps({"include": missing}, separators=(",", ":"))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"frames={compact}\n")
+              output.write(f"has_missing={'true' if missing else 'false'}\n")
+              output.write(f"missing_count={len(missing)}\n")
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary.write_text(
+              "# Native frame retry\n\n"
+              f"- Missing chunks: `{len(missing)}`\n"
+              + "".join(
+                  f"- `{frame['channel_id']}` · frames `{frame['start']}-{frame['end']}`\n"
+                  for frame in missing
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+  retry:
+    name: Retry ${{ matrix.channel_id }} · frames ${{ matrix.start }}-${{ matrix.end }}
+    needs: [plan, prepare, retry_plan]
+    if: ${{ needs.retry_plan.outputs.has_missing == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.retry_plan.outputs.frames) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: soft-body-scene-${{ matrix.key }}
+          path: artifacts/scene
+      - name: Build the reproducible renderer
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
+      - name: Render the missing native frame range
+        run: |
+          mkdir -p artifacts/chunk
+          docker run --rm --init --volume "$PWD/artifacts/scene:/scene:ro" --volume "$PWD/artifacts/chunk:/output" \
+            clipmaker-ci:3d blender --background /scene/frames/soft-body-comparison.blend \
+              --render-output /output/frame_ --frame-start "${{ matrix.start }}" --frame-end "${{ matrix.end }}" --render-anim
+          test -s "artifacts/chunk/frame_$(printf '%04d' '${{ matrix.start }}').png"
+          test -s "artifacts/chunk/frame_$(printf '%04d' '${{ matrix.end }}').png"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: soft-body-frames-${{ matrix.key }}-${{ matrix.index }}
+          path: artifacts/chunk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
   assemble:
     name: Assemble ${{ matrix.channel_id }}
-    needs: [plan, prepare, render]
-    if: ${{ needs.plan.outputs.render_enabled == 'true' }}
+    needs: [plan, prepare, render, retry_plan, retry]
+    if: ${{ always() && needs.plan.outputs.render_enabled == 'true' && needs.prepare.result == 'success' && needs.retry_plan.result == 'success' && (needs.retry_plan.outputs.has_missing == 'false' || needs.retry.result == 'success') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     strategy:
@@ -395,7 +484,7 @@ jobs:
 
   notify:
     name: Notify the owner about the scheduled 3D render
-    needs: [plan, prepare, render, assemble]
+    needs: [plan, prepare, render, retry_plan, retry, assemble]
     if: ${{ always() && github.event_name == 'schedule' }}
     runs-on: ubuntu-22.04
     permissions:
@@ -406,6 +495,8 @@ jobs:
       PLAN_RESULT: ${{ needs.plan.result }}
       PREPARE_RESULT: ${{ needs.prepare.result }}
       RENDER_RESULT: ${{ needs.render.result }}
+      RETRY_RESULT: ${{ needs.retry.result }}
+      MISSING_CHUNKS: ${{ needs.retry_plan.outputs.missing_count }}
       ASSEMBLE_RESULT: ${{ needs.assemble.result }}
       HAS_CHANNELS: ${{ needs.plan.outputs.has_channels }}
     steps:
@@ -414,7 +505,7 @@ jobs:
           set -euo pipefail
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           successful=false
-          if [[ "$HAS_CHANNELS" == "true" && "$PLAN_RESULT" == "success" && "$PREPARE_RESULT" == "success" && "$RENDER_RESULT" == "success" && "$ASSEMBLE_RESULT" == "success" ]]; then
+          if [[ "$HAS_CHANNELS" == "true" && "$PLAN_RESULT" == "success" && "$PREPARE_RESULT" == "success" && "$ASSEMBLE_RESULT" == "success" ]]; then
             successful=true
           fi
 
@@ -432,6 +523,8 @@ jobs:
           - Plan : \`${PLAN_RESULT}\`
           - Simulation : \`${PREPARE_RESULT}\`
           - Images natives : \`${RENDER_RESULT}\`
+          - Lots manquants détectés : \`${MISSING_CHUNKS:-0}\`
+          - Nouvelle tentative : \`${RETRY_RESULT}\`
           - Assemblage : \`${ASSEMBLE_RESULT}\`
           - Canaux 3D configurés : \`${HAS_CHANNELS}\`
 
