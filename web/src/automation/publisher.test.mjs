@@ -170,6 +170,9 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
     /Import today's completed 3D renders[\s\S]*github\.event_name == 'workflow_dispatch' && inputs\.dry_run/u,
   );
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
+  assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
+  assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
+  assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);
 });
 
 test('cloud YouTube uploads use the OAuth Data API without a persistent browser', async () => {
@@ -181,7 +184,7 @@ test('cloud YouTube uploads use the OAuth Data API without a persistent browser'
   ]);
   assert.match(workflow, /YOUTUBE_OAUTH_ACCOUNTS_B64: \$\{\{ secrets\.YOUTUBE_OAUTH_ACCOUNTS_B64 \}\}/u);
   assert.match(workflow, /--env YOUTUBE_UPLOAD_PROVIDER=youtube-data-api/u);
-  assert.match(workflow, /--env YOUTUBE_API_DRY_RUN=false/u);
+  assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.doesNotMatch(workflow, /Xvfb :99/u);
   const ciStage = dockerfile.split('FROM runtime-base AS ci')[1].split('\nFROM ')[0];
   assert.doesNotMatch(ciStage, /xvfb/u);
