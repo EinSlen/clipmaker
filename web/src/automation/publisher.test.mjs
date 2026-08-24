@@ -159,6 +159,19 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
 });
 
+test('cloud YouTube uploads use the visible Studio flow inside a virtual display', async () => {
+  const workflowPath = new URL('../../../.github/workflows/daily-publisher.yml', import.meta.url);
+  const dockerfilePath = new URL('../../Dockerfile', import.meta.url);
+  const [workflow, dockerfile] = await Promise.all([
+    fs.readFile(workflowPath, 'utf8'),
+    fs.readFile(dockerfilePath, 'utf8'),
+  ]);
+  assert.match(workflow, /--env YOUTUBE_BROWSER_HEADLESS=false/u);
+  assert.match(workflow, /--env DISPLAY=:99/u);
+  assert.match(workflow, /Xvfb :99 -screen 0 1365x768x24/u);
+  assert.match(dockerfile, /FROM runtime-base AS ci[\s\S]*apt-get install[^\n]*xvfb/u);
+});
+
 test('every scheduled 3D render reports success or failure with a direct run link', async () => {
   const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
   const workflow = await fs.readFile(workflowPath, 'utf8');
