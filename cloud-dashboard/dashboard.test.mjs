@@ -61,3 +61,9 @@ test('current assignment and last published game are presented separately', asyn
   assert.match(app, /Latest stored job/u);
   assert.match(app, /latestPublishedDetail/u);
 });
+
+test('manual 3D renders default to the reliable 15-frame chunks', async () => {
+  const html = await source('index.html');
+  assert.match(html, /<option value="15" selected>15 images · recommandé<\/option>/u);
+  assert.doesNotMatch(html, /<option value="30" selected>/u);
+});
