@@ -90,7 +90,8 @@ async function runAgent<T>(args: string[], timeoutMs = 10 * 60 * 1000, account =
       proc.kill();
       if (!settled) {
         settled = true;
-        reject(new Error('YouTube agent timed out'));
+        const detail = (stderr || stdout).trim().slice(-2000);
+        reject(new Error(detail ? `YouTube agent timed out: ${detail}` : 'YouTube agent timed out'));
       }
     }, timeoutMs);
 
