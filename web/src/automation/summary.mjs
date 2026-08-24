@@ -2,6 +2,10 @@ function gameId(channel) {
   return channel?.game?.game || channel?.game?.id || channel?.game || 'unknown-game';
 }
 
+function jobGameId(job) {
+  return job?.renderRequest?.game || job?.renderRequest?.id || job?.renderRequest || 'unknown-game';
+}
+
 function endpointReady(doctorChannel, platform) {
   const endpoint = doctorChannel?.endpoints?.[platform];
   if (!endpoint) return 'non vérifié';
@@ -47,7 +51,7 @@ export function buildPublisherSummary({ operation, config, doctor = null, status
 
   if (latest) {
     lines.push(
-      `- Latest stored job: \`${latest.status || 'unknown'}\` · \`${latest.date || '-'}\` · \`${latest.channelId || '-'}\``,
+      `- Latest stored job: \`${latest.status || 'unknown'}\` · \`${latest.date || '-'}\` · \`${latest.channelId || '-'}\` · \`${jobGameId(latest)}\``,
     );
   } else {
     lines.push('- Latest stored job: `none`');

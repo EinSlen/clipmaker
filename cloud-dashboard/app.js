@@ -16,6 +16,8 @@
     latestTime: document.querySelector('#latest-time'),
     latestChannel: document.querySelector('#latest-channel'),
     latestOperation: document.querySelector('#latest-operation'),
+    latestPublished: document.querySelector('#latest-published'),
+    latestPublishedDetail: document.querySelector('#latest-published-detail'),
     runs: document.querySelector('#runs-list'),
     toast: document.querySelector('#toast'),
     form3d: document.querySelector('#three-d-form'),
@@ -472,13 +474,28 @@
   }
 
   async function loadNotification() {
-    const comments = await github('/issues/36/comments?per_page=20');
-    const latest = comments.at(-1);
-    if (!latest) return;
-    elements.latestChannel.textContent = extract(latest.body, /Channel:\s*`([^`]+)`/i, '—');
-    const action = extract(latest.body, /Action\s*:\s*`([^`]+)`/i, 'cron');
-    const operation = extract(latest.body, /Operation:\s*`([^`]+)`/i, '—');
-    elements.latestOperation.textContent = `${action} · ${operation}`;
+    const comments = await github('/issues/36/comments?per_page=100');
+    const newestFirst = [...comments].reverse();
+    const configured = newestFirst
+      .map((comment) => comment.body.match(/Configuration\s+`([^`]+)`:\s*`([^`]+)`/i))
+      .find(Boolean);
+    if (configured) {
+      const game = GAMES.find((item) => item.id === configured[2]);
+      elements.latestChannel.textContent = configured[1];
+      elements.latestOperation.textContent = `Jeu assigné : ${game?.name || configured[2]}`;
+    } else {
+      const latest = comments.at(-1);
+      if (latest) elements.latestChannel.textContent = extract(latest.body, /Channel:\s*`([^`]+)`/i, '—');
+    }
+
+    const published = newestFirst
+      .map((comment) => comment.body.match(/Latest stored job:\s*`published`\s*·\s*`([^`]+)`\s*·\s*`([^`]+)`(?:\s*·\s*`([^`]+)`)?/i))
+      .find(Boolean);
+    if (published) {
+      const game = GAMES.find((item) => item.id === published[3]);
+      elements.latestPublished.textContent = published[2];
+      elements.latestPublishedDetail.textContent = `${game?.name || published[3] || 'Jeu historique'} · ${formatDate(`${published[1]}T12:00:00Z`)}`;
+    }
   }
 
   async function refreshAll() {

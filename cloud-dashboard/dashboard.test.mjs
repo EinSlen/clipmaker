@@ -51,3 +51,13 @@ test('the one-account-one-game editor and all public destinations remain present
   assert.match(html, /issues\/36/u);
   assert.match(html, /actions\/workflows\/soft-body-artifact\.yml/u);
 });
+
+test('current assignment and last published game are presented separately', async () => {
+  const html = await source('index.html');
+  const app = await source('app.js');
+  assert.match(html, /Configuration actuelle/u);
+  assert.match(html, /Dernière publication/u);
+  assert.match(app, /Jeu assigné/u);
+  assert.match(app, /Latest stored job/u);
+  assert.match(app, /latestPublishedDetail/u);
+});
