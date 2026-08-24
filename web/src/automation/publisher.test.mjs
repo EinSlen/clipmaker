@@ -169,6 +169,17 @@ test('every scheduled 3D render reports success or failure with a direct run lin
   assert.match(workflow, /actions\/runs\/\$\{GITHUB_RUN_ID\}/u);
 });
 
+test('missing 3D frame chunks are detected, retried and required before assembly', async () => {
+  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(workflow, /continue-on-error: true/u);
+  assert.match(workflow, /Find missing native frame chunks/u);
+  assert.match(workflow, /f"soft-body-frames-\{frame\['key'\]\}-\{frame\['index'\]\}"/u);
+  assert.match(workflow, /needs\.retry_plan\.outputs\.has_missing == 'true'/u);
+  assert.match(workflow, /needs\.retry\.result == 'success'/u);
+  assert.match(workflow, /Lots manquants détectés/u);
+});
+
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const source = await fs.readFile(routePath, 'utf8');
