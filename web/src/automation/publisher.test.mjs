@@ -188,6 +188,16 @@ test('scheduled 3D renders use short reliable chunks without exceeding GitHub ma
   assert.match(workflow, /if len\(channels\) > 8:/u);
 });
 
+test('production 3D assembly rejects a video without the generated audio mix', async () => {
+  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(workflow, /stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels/u);
+  assert.match(workflow, /expected_audio = \("aac", "48000", 2\)/u);
+  assert.match(workflow, /29\.9 <= duration <= 30\.1/u);
+  assert.match(workflow, /metadata\.get\("music_generated"\) is not True/u);
+  assert.match(workflow, /metadata\.get\("sound_pack"\) != "premium-foley"/u);
+});
+
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const source = await fs.readFile(routePath, 'utf8');

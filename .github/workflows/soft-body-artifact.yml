@@ -366,8 +366,8 @@ jobs:
         run: |
           video="artifacts/final/soft-body-${DAILY_OBSTACLE}-${DAILY_SEED}.mp4"
           docker run --rm --volume "$PWD/artifacts/final:/final:ro" clipmaker-ci:3d \
-            ffprobe -v error -select_streams v:0 \
-              -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames \
+            ffprobe -v error \
+              -show_entries stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels \
               -show_entries format=duration,size -of json "/final/$(basename "$video")" \
               > artifacts/final/ffprobe.json
           python3 - <<'PY'
@@ -377,11 +377,22 @@ jobs:
 
           metadata = json.loads(Path("artifacts/final/metadata.json").read_text(encoding="utf-8"))
           probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
-          stream = probe["streams"][0]
-          expected = ("h264", 1080, 1920, "30/1", "900")
-          actual = tuple(stream.get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
-          if actual != expected:
-              raise SystemExit(f"Unexpected production stream: {stream}")
+          streams = probe.get("streams", [])
+          video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+          audio_stream = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+          expected_video = ("h264", 1080, 1920, "30/1", "900")
+          actual_video = tuple((video_stream or {}).get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
+          if actual_video != expected_video:
+              raise SystemExit(f"Unexpected production video stream: {video_stream}")
+          expected_audio = ("aac", "48000", 2)
+          actual_audio = tuple((audio_stream or {}).get(key) for key in ("codec_name", "sample_rate", "channels"))
+          if actual_audio != expected_audio:
+              raise SystemExit(f"Unexpected production audio stream: {audio_stream}")
+          duration = float(probe.get("format", {}).get("duration", 0))
+          if not 29.9 <= duration <= 30.1:
+              raise SystemExit(f"Unexpected production duration: {duration}")
+          if metadata.get("music_generated") is not True or metadata.get("sound_pack") != "premium-foley":
+              raise SystemExit(f"Missing generated music or collision Foley metadata: {metadata}")
           title = os.environ["DAILY_TITLE"]
           video = f"soft-body-{os.environ['DAILY_OBSTACLE']}-{os.environ['DAILY_SEED']}.mp4"
           manifest = {
