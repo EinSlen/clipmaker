@@ -2,18 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
-import { YOUTUBE_BROWSER_DATA_DIR } from './server-paths';
 
 export type YouTubeDoctorStatus = {
   ok: boolean;
   dry_run: boolean;
-  provider: 'browser-session';
-  configured: {
-    browser: 'configured' | 'missing';
-    cookies: 'configured' | 'missing';
-    authenticated: 'configured' | 'missing';
-    package: 'configured' | 'missing';
-  };
+  provider: 'youtube-data-api';
+  configured: Record<string, 'configured' | 'missing'>;
   browser_path: string | null;
   ready_for_live_upload: boolean;
   next_steps: string[];
@@ -30,7 +24,7 @@ export type YouTubeUploadResult = {
   };
 };
 
-const CLI_PATH = path.join(process.cwd(), 'scripts', 'youtube-agent.mjs');
+const CLI_PATH = path.join(process.cwd(), 'scripts', 'youtube-data-api-agent.mjs');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 export type YouTubeAccount = {
@@ -48,28 +42,13 @@ export function normalizeYouTubeAccount(value: unknown): string {
 }
 
 export async function listYouTubeAccounts(): Promise<YouTubeAccount[]> {
-  const accounts: YouTubeAccount[] = [];
-  const defaultCookies = path.join(YOUTUBE_BROWSER_DATA_DIR, 'yt-auth', 'cookies-profile-local_invalid.json');
-  accounts.push({ id: 'default', label: 'Default channel', configured: Boolean(await fs.stat(defaultCookies).catch(() => null)) });
-  const accountsDir = path.join(YOUTUBE_BROWSER_DATA_DIR, 'accounts');
-  const entries = await fs.readdir(accountsDir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(entry.name)) continue;
-    const cookieFile = path.join(accountsDir, entry.name, 'yt-auth', 'cookies-profile-local_invalid.json');
-    accounts.push({
-      id: entry.name,
-      label: entry.name.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
-      configured: Boolean(await fs.stat(cookieFile).catch(() => null)),
-    });
-  }
-  return accounts.sort((a, b) => a.id === 'default' ? -1 : b.id === 'default' ? 1 : a.label.localeCompare(b.label));
+  return runAgent<YouTubeAccount[]>(['accounts'], 30_000);
 }
 
 async function runAgent<T>(args: string[], timeoutMs = 10 * 60 * 1000, account = 'default'): Promise<T> {
   const accountId = normalizeYouTubeAccount(account);
-  await fs.mkdir(YOUTUBE_BROWSER_DATA_DIR, { recursive: true });
   await fs.access(CLI_PATH).catch(() => {
-    throw new Error('Le script de session YouTube est introuvable.');
+    throw new Error('Le module de publication YouTube est introuvable.');
   });
 
   return new Promise<T>((resolve, reject) => {
@@ -77,7 +56,6 @@ async function runAgent<T>(args: string[], timeoutMs = 10 * 60 * 1000, account =
       cwd: process.cwd(),
       env: {
         ...process.env,
-        YOUTUBE_BROWSER_DATA_DIR,
         YOUTUBE_ACCOUNT: accountId,
       },
       windowsHide: true

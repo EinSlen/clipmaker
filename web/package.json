@@ -14,8 +14,8 @@
     "publisher": "node scripts/publisher.mjs",
     "publisher:doctor": "node scripts/publisher.mjs doctor",
     "publisher:status": "node scripts/publisher.mjs status",
-    "youtube:doctor": "node scripts/youtube-agent.mjs doctor",
-    "youtube:auth": "node scripts/youtube-agent.mjs auth"
+    "youtube:doctor": "node scripts/youtube-data-api-agent.mjs doctor",
+    "youtube:oauth:setup": "node scripts/youtube-oauth-setup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
@@ -24,8 +24,7 @@
     "next": "16.2.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.5.5",
-    "youtube-videos-uploader": "https://github.com/EinSlen/youtube-uploader/archive/1d624fcf31b81a836fc4cb75253afe06914b4230.tar.gz"
+    "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

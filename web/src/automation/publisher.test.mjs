@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { readPublisherConfig } from './config.mjs';
 import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
 import { loadState, saveState, withStateLock } from './state.mjs';
@@ -14,6 +15,18 @@ async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'clipmaker-publisher-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return directory;
+}
+
+async function repositoryFile(relativePath) {
+  const candidates = [
+    ...(process.env.REPO_ROOT ? [path.join(process.env.REPO_ROOT, relativePath)] : []),
+    fileURLToPath(new URL(`../../../${relativePath}`, import.meta.url)),
+    fileURLToPath(new URL(`../../${relativePath}`, import.meta.url)),
+  ];
+  for (const candidate of candidates) {
+    if (await fs.stat(candidate).then((stat) => stat.isFile()).catch(() => false)) return candidate;
+  }
+  throw new Error(`Repository fixture not found: ${relativePath}`);
 }
 
 function sampleChannel() {
@@ -150,7 +163,7 @@ test('workflow summary reports the requested operation and active configuration,
 });
 
 test('a manual dry-run can validate publication without requiring the nightly 3D artifact', async () => {
-  const workflowPath = new URL('../../../.github/workflows/daily-publisher.yml', import.meta.url);
+  const workflowPath = await repositoryFile('.github/workflows/daily-publisher.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(
     workflow,
@@ -159,21 +172,23 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
 });
 
-test('cloud YouTube uploads use the visible Studio flow inside a virtual display', async () => {
-  const workflowPath = new URL('../../../.github/workflows/daily-publisher.yml', import.meta.url);
+test('cloud YouTube uploads use the OAuth Data API without a persistent browser', async () => {
+  const workflowPath = await repositoryFile('.github/workflows/daily-publisher.yml');
   const dockerfilePath = new URL('../../Dockerfile', import.meta.url);
   const [workflow, dockerfile] = await Promise.all([
     fs.readFile(workflowPath, 'utf8'),
     fs.readFile(dockerfilePath, 'utf8'),
   ]);
-  assert.match(workflow, /--env YOUTUBE_BROWSER_HEADLESS=false/u);
-  assert.match(workflow, /--env DISPLAY=:99/u);
-  assert.match(workflow, /Xvfb :99 -screen 0 1365x768x24/u);
-  assert.match(dockerfile, /FROM runtime-base AS ci[\s\S]*apt-get install[^\n]*xvfb/u);
+  assert.match(workflow, /YOUTUBE_OAUTH_ACCOUNTS_B64: \$\{\{ secrets\.YOUTUBE_OAUTH_ACCOUNTS_B64 \}\}/u);
+  assert.match(workflow, /--env YOUTUBE_UPLOAD_PROVIDER=youtube-data-api/u);
+  assert.match(workflow, /--env YOUTUBE_API_DRY_RUN=false/u);
+  assert.doesNotMatch(workflow, /Xvfb :99/u);
+  const ciStage = dockerfile.split('FROM runtime-base AS ci')[1].split('\nFROM ')[0];
+  assert.doesNotMatch(ciStage, /xvfb/u);
 });
 
 test('every scheduled 3D render reports success or failure with a direct run link', async () => {
-  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflowPath = await repositoryFile('.github/workflows/soft-body-artifact.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(workflow, /issues: write/u);
   assert.match(workflow, /always\(\) && github\.event_name == 'schedule'/u);
@@ -183,7 +198,7 @@ test('every scheduled 3D render reports success or failure with a direct run lin
 });
 
 test('missing 3D frame chunks are detected, retried and required before assembly', async () => {
-  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflowPath = await repositoryFile('.github/workflows/soft-body-artifact.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(workflow, /continue-on-error: true/u);
   assert.match(workflow, /Find missing native frame chunks/u);
@@ -194,7 +209,7 @@ test('missing 3D frame chunks are detected, retried and required before assembly
 });
 
 test('scheduled 3D renders use short reliable chunks without exceeding GitHub matrix limits', async () => {
-  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflowPath = await repositoryFile('.github/workflows/soft-body-artifact.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(workflow, /"samples": 64, "chunk_size": 15/u);
   assert.match(workflow, /if len\(channels\) > 4:[\s\S]*channel\["chunk_size"\] = 30/u);
@@ -202,7 +217,7 @@ test('scheduled 3D renders use short reliable chunks without exceeding GitHub ma
 });
 
 test('production 3D assembly rejects a video without the generated audio mix', async () => {
-  const workflowPath = new URL('../../../.github/workflows/soft-body-artifact.yml', import.meta.url);
+  const workflowPath = await repositoryFile('.github/workflows/soft-body-artifact.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(workflow, /stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels/u);
   assert.match(workflow, /expected_audio = \("aac", "48000", 2\)/u);

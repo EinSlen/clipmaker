@@ -64,8 +64,6 @@ FROM runtime-base AS runtime
 # stack as production without installing tools directly on the host runner.
 FROM runtime-base AS ci
 ENV NODE_ENV=test
-RUN apt-get update && apt-get install -y --no-install-recommends xvfb \
-    && rm -rf /var/lib/apt/lists/*
 # runtime-base already contains the built application, source, scripts and
 # node_modules. TypeScript only needs the project configuration files omitted
 # from the lean runtime image.
@@ -73,10 +71,12 @@ COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/next-env.d.ts ./next-env.d.ts
 COPY --from=builder /app/postcss.config.js ./postcss.config.js
 COPY --from=builder /app/tailwind.config.ts ./tailwind.config.ts
+COPY web/Dockerfile ./Dockerfile
+COPY .github ./.github
 CMD ["npm", "test"]
 
-# One-shot interactive image used only to create a YouTube browser session on Linux.
-FROM runtime-base AS youtube-auth
+# One-shot interactive image used only to create a TikTok browser session on Linux.
+FROM runtime-base AS browser-auth
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11vnc novnc websockify openbox \
     && rm -rf /var/lib/apt/lists/*
