@@ -129,6 +129,9 @@ function doctor() {
 function launchArgs() {
   const args = [
     '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-default-browser-check',
     '--lang=en-US',
     '--window-size=1365,768',
     '--start-maximized'
@@ -153,7 +156,7 @@ async function showAuthenticationSuccess(page) {
   const configuredDelay = Number.parseInt(process.env.YOUTUBE_AUTH_SUCCESS_DELAY_MS || '8000', 10);
   const delayMs = Math.max(5000, Number.isFinite(configuredDelay) ? configuredDelay : 8000);
   await page.bringToFront();
-  await page.setContent(`<!doctype html>
+  const confirmationHtml = `<!doctype html>
 <html lang="fr">
   <head>
     <meta charset="utf-8">
@@ -206,7 +209,13 @@ async function showAuthenticationSuccess(page) {
       <p class="close">Cette fenêtre va se fermer automatiquement.</p>
     </main>
   </body>
-</html>`, { waitUntil: 'domcontentloaded' });
+</html>`;
+  // Recent Chromium versions enforce Trusted Types on some Google-owned
+  // pages, which makes Puppeteer's legacy setContent implementation fail.
+  // A data URL replaces the document without calling document.write.
+  await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(confirmationHtml)}`, {
+    waitUntil: 'domcontentloaded'
+  });
   console.log(`Connexion YouTube réussie. Confirmation affichée pendant ${Math.ceil(delayMs / 1000)} secondes.`);
   await page.waitForTimeout(delayMs);
 }
@@ -222,6 +231,7 @@ async function authenticate() {
     executablePath,
     userDataDir: authProfileDir,
     headless: false,
+    timeout: 120_000,
     defaultViewport: null,
     args: launchArgs()
   });
