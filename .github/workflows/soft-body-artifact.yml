@@ -41,7 +41,7 @@ on:
       chunk_size:
         description: Frames rendered by each parallel runner
         required: true
-        default: "30"
+        default: "15"
         type: choice
         options: ["15", "30", "45"]
       title:
@@ -118,7 +118,7 @@ jobs:
                   "seed": int(os.environ.get("MANUAL_SEED") or "910104"),
                   "obstacle": os.environ.get("MANUAL_OBSTACLE") or "peg-grid",
                   "samples": int(os.environ.get("MANUAL_SAMPLES") or "64"),
-                  "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "30"),
+                  "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
               })
@@ -137,12 +137,19 @@ jobs:
                       "channel_id": channel_id,
                       "key": re.sub(r"[^a-z0-9_-]", "-", channel_id.lower()),
                       "date": today, "seed": seed, "obstacle": game.get("obstacle", "auto"),
-                      "samples": 64, "chunk_size": 30,
+                      "samples": 64, "chunk_size": 15,
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
                   })
           if len(channels) > 8:
               raise SystemExit("Maximum 8 canaux 3D par dépôt.")
+          # GitHub limits a job matrix to 256 entries. Keep short, reliable
+          # chunks while there are at most four 3D channels, then use 30-frame
+          # chunks so all eight supported channels still fit in one matrix.
+          if len(channels) > 4:
+              for channel in channels:
+                  if channel["scheduled"]:
+                      channel["chunk_size"] = 30
           frames = []
           total = int(os.environ["FRAME_COUNT"])
           for channel in channels:
