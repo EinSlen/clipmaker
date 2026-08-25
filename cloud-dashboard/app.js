@@ -18,6 +18,8 @@
     latestOperation: document.querySelector('#latest-operation'),
     latestPublished: document.querySelector('#latest-published'),
     latestPublishedDetail: document.querySelector('#latest-published-detail'),
+    watchdogStatus: document.querySelector('#watchdog-status'),
+    watchdogTime: document.querySelector('#watchdog-time'),
     runs: document.querySelector('#runs-list'),
     toast: document.querySelector('#toast'),
     form3d: document.querySelector('#three-d-form'),
@@ -31,11 +33,11 @@
   };
 
   const GAMES = [
-    { id: 'ball-escape', name: 'Ball Escape', difficulty: 14, duration: 15, title: 'CAN IT ESCAPE?', musicMode: 'hit-reveal' },
-    { id: 'shape-tunnel', name: 'Organic Escape', difficulty: 200, duration: 15, title: 'HOW MANY LAYERS?', musicMode: 'continuous' },
-    { id: 'laser-dodge', name: 'Laser Dodge', difficulty: 24, duration: 15, title: 'CAN IT DODGE THEM ALL?', musicMode: 'hit-reveal' },
-    { id: 'boss-battle', name: 'Boss Battle', difficulty: 300, duration: 15, title: 'WHO WILL WIN?', musicMode: 'hit-reveal' },
-    { id: 'soft-body-slide', name: 'Souplesse 3D', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
+    { id: 'ball-escape', name: 'Ball Escape', description: 'Anneaux et gravité', preview: 'assets/games/ball-escape.webp', difficulty: 14, duration: 15, title: 'CAN IT ESCAPE?', musicMode: 'hit-reveal' },
+    { id: 'shape-tunnel', name: 'Organic Escape', description: 'Couches organiques', preview: 'assets/games/shape-tunnel.webp', difficulty: 200, duration: 15, title: 'HOW MANY LAYERS?', musicMode: 'continuous' },
+    { id: 'laser-dodge', name: 'Laser Dodge', description: 'Esquive de lasers', preview: 'assets/games/laser-dodge.webp', difficulty: 24, duration: 15, title: 'CAN IT DODGE THEM ALL?', musicMode: 'hit-reveal' },
+    { id: 'boss-battle', name: 'Boss Battle', description: 'Combat physique', preview: 'assets/games/boss-battle.webp', difficulty: 300, duration: 15, title: 'WHO WILL WIN?', musicMode: 'hit-reveal' },
+    { id: 'soft-body-slide', name: 'Souplesse 3D', description: 'Simulation Blender', preview: 'assets/games/soft-body-slide.webp', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
   ];
   const OBSTACLES = [
     ['auto', 'Automatique (change chaque jour)'], ['moving-slide', 'Rampe mobile'],
@@ -241,6 +243,66 @@
     return box;
   }
 
+  function assignGame(channel, value) {
+    const definition = GAMES.find((item) => item.id === value) || GAMES[0];
+    channel.game = {
+      ...channel.game,
+      id: definition.id,
+      difficulty: definition.difficulty,
+      duration: definition.duration,
+      title: definition.title,
+      musicMode: definition.musicMode,
+    };
+    if (definition.id === 'soft-body-slide') channel.game.obstacle = 'auto';
+    else delete channel.game.obstacle;
+    renderChannels();
+  }
+
+  function renderGamePicker(channel) {
+    const picker = document.createElement('section');
+    picker.className = 'game-picker';
+    const heading = document.createElement('div');
+    heading.className = 'game-picker-heading';
+    const copy = document.createElement('div');
+    const label = document.createElement('span');
+    label.textContent = 'JEU DE CE COMPTE';
+    const selected = GAMES.find((item) => item.id === channel.game.id) || GAMES[0];
+    const current = document.createElement('strong');
+    current.textContent = `${selected.name} · ${selected.description}`;
+    copy.append(label, current);
+    const hint = document.createElement('small');
+    hint.textContent = 'Clique sur un aperçu pour changer le rendu quotidien.';
+    heading.append(copy, hint);
+
+    const list = document.createElement('div');
+    list.className = 'game-picker-list';
+    list.append(...GAMES.map((game) => {
+      const button = document.createElement('button');
+      const active = game.id === channel.game.id;
+      button.type = 'button';
+      button.className = `game-choice${active ? ' selected' : ''}`;
+      button.setAttribute('aria-pressed', String(active));
+      button.setAttribute('aria-label', `Choisir ${game.name}`);
+      button.addEventListener('click', () => assignGame(channel, game.id));
+      const image = document.createElement('img');
+      image.src = game.preview;
+      image.alt = `Aperçu gameplay ${game.name}`;
+      image.loading = 'lazy';
+      image.width = 240;
+      image.height = 427;
+      const caption = document.createElement('span');
+      const name = document.createElement('strong');
+      name.textContent = game.name;
+      const description = document.createElement('small');
+      description.textContent = game.description;
+      caption.append(name, description);
+      button.append(image, caption);
+      return button;
+    }));
+    picker.append(heading, list);
+    return picker;
+  }
+
   function renderChannel(channel, index) {
     const card = document.createElement('article');
     card.className = 'channel-card';
@@ -274,18 +336,12 @@
       }
     });
     head.append(title, remove);
-    card.append(head);
+    card.append(head, renderGamePicker(channel));
 
     const fields = document.createElement('div');
     fields.className = 'channel-fields';
     fields.append(field('Identifiant', inputNode(channel.id, 'text', (value) => { channel.id = String(value).toLowerCase(); })));
-    fields.append(field('Jeu de ce compte', selectNode(GAMES.map((item) => [item.id, item.name]), channel.game.id, (value) => {
-      const definition = GAMES.find((item) => item.id === value) || GAMES[0];
-      channel.game = { ...channel.game, id: definition.id, difficulty: definition.difficulty, duration: definition.duration, title: definition.title, musicMode: definition.musicMode };
-      if (definition.id === 'soft-body-slide') channel.game.obstacle = 'auto';
-      else delete channel.game.obstacle;
-      renderChannels();
-    })));
+    fields.append(field('Jeu sélectionné', selectNode(GAMES.map((item) => [item.id, item.name]), channel.game.id, (value) => assignGame(channel, value))));
     fields.append(field('Génération', inputNode(channel.generateTime, 'time', (value) => { channel.generateTime = value; })));
     fields.append(field('Publication', inputNode(channel.publishTime, 'time', (value) => { channel.publishTime = value; })));
     fields.append(field('Accroche vidéo (anglais)', inputNode(channel.game.title, 'text', (value) => { channel.game.title = value; }), 'field-span-2'));
@@ -499,11 +555,31 @@
     }
   }
 
+  async function loadWatchdog() {
+    const response = await fetch(`${CONTROL_API}/health`, { headers: { Accept: 'application/json' } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.scheduler) throw new Error('Le relais Cloudflare ne répond pas.');
+    const tick = payload.lastTick;
+    if (!tick) {
+      elements.watchdogStatus.textContent = 'Actif · en attente';
+      elements.watchdogTime.textContent = 'Premier contrôle planifié toutes les 5 minutes';
+      return;
+    }
+    const publish = Array.isArray(tick.results)
+      ? tick.results.find((item) => item.operation === 'daily-publish')
+      : null;
+    const detail = publish
+      ? `${publish.action === 'skip' ? 'Aucun doublon' : 'Rattrapage lancé'}${publish.runId ? ` · run ${publish.runId}` : ''}`
+      : 'Planning contrôlé';
+    elements.watchdogStatus.textContent = tick.status === 'ok' ? 'Actif · contrôle réussi' : 'Erreur de contrôle';
+    elements.watchdogTime.textContent = `${formatDate(tick.scheduledTime || tick.completedAt)} · ${detail}`;
+  }
+
   async function refreshAll() {
     elements.refresh.disabled = true;
     elements.refresh.textContent = 'Actualisation…';
     try {
-      await Promise.all([loadRuns(), loadNotification()]);
+      await Promise.all([loadRuns(), loadNotification(), loadWatchdog()]);
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), true);
     } finally {

@@ -25,6 +25,16 @@ test('the public dashboard exposes every daily stage and an explicit mobile navi
   assert.match(html, /toutes les 5 minutes/u);
 });
 
+test('the public dashboard exposes the persisted Cloudflare watchdog heartbeat', async () => {
+  const html = await source('index.html');
+  const app = await source('app.js');
+  assert.match(html, /id="watchdog-status"/u);
+  assert.match(html, /id="watchdog-time"/u);
+  assert.match(app, /fetch\(`\$\{CONTROL_API\}\/health`/u);
+  assert.match(app, /Aucun doublon/u);
+  assert.match(app, /loadWatchdog\(\)/u);
+});
+
 test('account setup offers creation, private connection and local fallback links', async () => {
   const html = await source('index.html');
   assert.match(html, /https:\/\/www\.tiktok\.com\/signup/u);
@@ -47,11 +57,27 @@ test('the one-account-one-game editor and all public destinations remain present
     assert.match(html, new RegExp(`id="${id}"`, 'u'));
   }
   assert.match(html, /Un compte, un jeu/u);
-  assert.match(app, /field\('Jeu de ce compte'/u);
+  assert.match(app, /label\.textContent = 'JEU DE CE COMPTE'/u);
+  assert.match(app, /field\('Jeu sélectionné'/u);
   assert.match(app, /Maximum : 8 comptes par dépôt/u);
   assert.match(app, /Je confirme la publication/u);
   assert.match(html, /issues\/36/u);
   assert.match(html, /actions\/workflows\/soft-body-artifact\.yml/u);
+});
+
+test('every game has a real gameplay preview in the account editor', async () => {
+  const app = await source('app.js');
+  const css = await source('styles.css');
+  const games = ['ball-escape', 'shape-tunnel', 'laser-dodge', 'boss-battle', 'soft-body-slide'];
+  for (const game of games) {
+    assert.match(app, new RegExp(`assets/games/${game}\\.webp`, 'u'));
+    const stat = await fs.stat(new URL(`assets/games/${game}.webp`, root));
+    assert.ok(stat.size > 8_000, `${game} preview should contain a real rendered frame`);
+  }
+  assert.match(app, /renderGamePicker\(channel\)/u);
+  assert.match(app, /Aperçu gameplay/u);
+  assert.match(css, /\.game-picker-list/u);
+  assert.match(css, /\.game-choice\.selected/u);
 });
 
 test('current assignment and last published game are presented separately', async () => {

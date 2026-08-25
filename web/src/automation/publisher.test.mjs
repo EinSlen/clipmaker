@@ -248,10 +248,18 @@ test('production 3D assembly rejects a video without the generated audio mix', a
 
 test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
+  const cliPath = await repositoryFile('vendor/TiktokAutoUploader/cli.py');
+  const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/tiktok.py');
   const source = await fs.readFile(routePath, 'utf8');
+  const [cli, uploader] = await Promise.all([fs.readFile(cliPath, 'utf8'), fs.readFile(uploaderPath, 'utf8')]);
   assert.match(source, /'--users', username/);
   assert.match(source, /'--visibility'/);
   assert.match(source, /x-clipmaker-upload-token/);
+  assert.match(source, /parseUploaderReceipt\(stdout\)/u);
+  assert.match(source, /platformPostId/u);
+  assert.match(cli, /CLIPMAKER_RECEIPT:/u);
+  assert.match(uploader, /"visibility_type": visibility_type/u);
+  assert.match(uploader, /"provider": "tiktok-web-upload"/u);
   assert.doesNotMatch(source, /'--user', username/);
 });
 
@@ -351,7 +359,14 @@ test('a partial platform failure retries only the missing upload', async (t) => 
         response.statusCode = 503;
         response.end(JSON.stringify({ ok: false, error: 'temporary TikTok failure' }));
       } else {
-        response.end(JSON.stringify({ ok: true, upload: { id: 'tiktok-one' } }));
+        response.end(JSON.stringify({
+          ok: true,
+          upload: {
+            provider: 'tiktok-web-upload',
+            platformPostId: 'tiktok-one',
+            raw: { privacy: 'private' },
+          },
+        }));
       }
       return;
     }
@@ -403,6 +418,9 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   assert.equal(job.status, 'published');
   assert.equal(calls.youtube, 1);
   assert.equal(calls.tiktok, 2);
+  assert.equal(job.platforms.tiktok.receipt.id, 'tiktok-one');
+  assert.equal(job.platforms.tiktok.receipt.provider, 'tiktok-web-upload');
+  assert.equal(job.platforms.tiktok.receipt.privacy, 'private');
 
   await publishChannel(config, channel, date, { forcePlatforms: ['youtube'] });
   job = (await loadState(directory)).jobs[0];

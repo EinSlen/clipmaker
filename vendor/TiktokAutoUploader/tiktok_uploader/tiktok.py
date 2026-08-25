@@ -123,7 +123,10 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 		status_message = project_payload.get("status_msg") or project_payload.get("message") or "session rejected"
 		eprint(f"[-] TikTok session is expired or invalid ({status_message}); log in again for '{session_user}'.")
 		return False
-	video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth = upload_to_tiktok(video, session)
+	upload_result = upload_to_tiktok(video, session)
+	if not upload_result:
+		return False
+	video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth = upload_result
 
 	url = f"https://{upload_host}/{store_uri}?uploadID={upload_id}&phase=finish&uploadmode=part"
 	headers = {
@@ -278,7 +281,7 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 					"video_id": video_id
 				},
 				"privacy_setting_info": {
-					"visibility_type": 0,
+					"visibility_type": visibility_type,
 					"allow_duet": 1,
 					"allow_stitch": 1,
 					"allow_comment": 1
@@ -343,9 +346,29 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 			printError(url, r)
 			return False
 
-		if r.json()["status_code"] == 0:
+		post_payload = r.json()
+		if post_payload["status_code"] == 0:
 			print(f"Published successfully {'| Scheduled for ' + str(schedule_time) if schedule_time else ''}")
-			uploaded = True
+			post_data = post_payload.get("data") if isinstance(post_payload.get("data"), dict) else {}
+			explicit_post_id = (
+				post_payload.get("aweme_id") or post_payload.get("item_id") or post_payload.get("post_id")
+				or post_data.get("aweme_id") or post_data.get("item_id") or post_data.get("post_id")
+			)
+			platform_post_id = str(explicit_post_id or video_id)
+			uploaded = {
+				"provider": "tiktok-web-upload",
+				"platformPostId": platform_post_id,
+				"releaseUrl": (
+					f"https://www.tiktok.com/@{session_user}/video/{explicit_post_id}"
+					if explicit_post_id else ""
+				),
+				"raw": {
+					"privacy": "public" if visibility_type == 0 else "private",
+					"creationId": creation_id,
+					"statusCode": 0,
+					"uploadVideoId": str(video_id),
+				},
+			}
 			break
 		else:
 			print("[-] Publish failed to Tiktok, trying again...")
@@ -365,7 +388,7 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 	if not uploaded:
 		print("[-] Could not upload video")
 		return False
-	return True
+	return uploaded
 
 
 

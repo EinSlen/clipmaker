@@ -1,4 +1,5 @@
 import argparse
+import json
 import re
 from tiktok_uploader import tiktok
 from tiktok_uploader.basics import eprint
@@ -96,6 +97,8 @@ if __name__ == "__main__":
         uploaded = tiktok.upload_video(args.users, args.video, args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy, music_id=music_id)
         if not uploaded:
             sys.exit(1)
+        if isinstance(uploaded, dict):
+            print("CLIPMAKER_RECEIPT:" + json.dumps(uploaded, separators=(",", ":"), ensure_ascii=True))
 
     elif args.subcommand == "show":
         # if flag is c then show cookie names

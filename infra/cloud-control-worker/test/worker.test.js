@@ -57,6 +57,28 @@ test('unknown workflows are never forwarded', () => {
   assert.throws(() => validateDispatch({ workflow: 'evil.yml', inputs: {} }), /Workflow non autorisé/u);
 });
 
+test('health reports the last persisted scheduler tick', async () => {
+  const lastTick = {
+    status: 'ok',
+    scheduledTime: '2026-08-25T17:40:00.000Z',
+    completedAt: '2026-08-25T17:40:01.000Z',
+    results: [{ operation: 'daily-publish', action: 'skip', reason: 'success', runId: 32874377702 }],
+  };
+  const worker = (await import('../src/index.js')).default;
+  const response = await worker.fetch(new Request('https://worker.test/health'), {
+    GITHUB_AUTOMATION_TOKEN: 'configured',
+    CONFIG: {
+      get: async (key, type) => {
+        if (key === 'github-app-config') return '{}';
+        if (key === 'scheduler-last-tick-v1') return type === 'json' ? lastTick : JSON.stringify(lastTick);
+        return null;
+      },
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).lastTick, lastTick);
+});
+
 test('publisher config enforces one game and one assignment per account', () => {
   const base = {
     dryRun: false,
