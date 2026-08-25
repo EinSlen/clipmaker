@@ -350,7 +350,7 @@
       });
       publisherConfig = structuredClone(payload.config);
       renderChannels();
-      notify('Planning cloud sauvegardé. Il sera utilisé par le prochain cron GitHub.');
+      notify('Planning cloud sauvegardé. GitHub et le watchdog Cloudflare utiliseront ces horaires.');
       elements.configState.textContent = `${publisherConfig.channels.filter((item) => item.enabled).length} canal(aux) actif(s)`;
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), true);
@@ -373,7 +373,8 @@
     elements.authState.textContent = 'Connexion GitHub en cours de vérification…';
     try {
       const payload = await control('/api/session');
-      elements.authState.textContent = `Connecté en tant que ${payload.login} · GitHub App privée`;
+      const watchdog = payload.scheduler?.enabled ? ' · watchdog Cloudflare actif' : '';
+      elements.authState.textContent = `Connecté en tant que ${payload.login} · GitHub App privée${watchdog}`;
       elements.authState.style.color = '#58e6a9';
       lockCommands();
       if (window.location.hash) window.history.replaceState({}, document.title, window.location.pathname);
