@@ -18,6 +18,45 @@ type Body = {
   confirmPublic?: boolean;
 };
 
+type UploadReceipt = {
+  provider: string;
+  platformPostId: string;
+  releaseUrl: string;
+  raw: {
+    privacy: 'private' | 'public';
+    creationId: string;
+    statusCode: number;
+    uploadVideoId: string;
+  };
+};
+
+const RECEIPT_PREFIX = 'CLIPMAKER_RECEIPT:';
+
+function parseUploaderReceipt(stdout: string): UploadReceipt | null {
+  const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith(RECEIPT_PREFIX));
+  if (!line) return null;
+  try {
+    const source = JSON.parse(line.slice(RECEIPT_PREFIX.length)) as Record<string, unknown>;
+    const raw = source.raw && typeof source.raw === 'object' ? source.raw as Record<string, unknown> : {};
+    const platformPostId = String(source.platformPostId || '').trim();
+    const privacy = raw.privacy === 'public' ? 'public' : 'private';
+    if (!platformPostId) return null;
+    return {
+      provider: String(source.provider || 'tiktok-web-upload').trim() || 'tiktok-web-upload',
+      platformPostId,
+      releaseUrl: String(source.releaseUrl || '').trim(),
+      raw: {
+        privacy,
+        creationId: String(raw.creationId || '').trim(),
+        statusCode: Number(raw.statusCode || 0),
+        uploadVideoId: String(raw.uploadVideoId || platformPostId).trim(),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 function extractMusicId(raw: string | undefined): string | null {
   if (!raw) return null;
   const s = raw.trim();
@@ -83,10 +122,14 @@ export async function POST(req: Request) {
     proc.stdout.on('data', (d) => (stdout += d.toString()));
     proc.stderr.on('data', (d) => (stderr += d.toString()));
     proc.on('close', (code) => {
+      const upload = code === 0 ? parseUploaderReceipt(stdout) : null;
+      const ok = code === 0 && Boolean(upload);
       resolve(
         NextResponse.json({
-          ok: code === 0,
+          ok,
           code,
+          ...(!ok && code === 0 ? { error: 'TikTok a accepté la commande sans retourner de reçu vérifiable.' } : {}),
+          ...(upload ? { upload } : {}),
           stdout: stdout.slice(-4000),
           stderr: stderr.slice(-4000)
         })

@@ -8,6 +8,7 @@ const PUBLISHER_CONFIG_KEY = 'publisher-config-v1';
 const PUBLISHER_SESSIONS_KEY = 'publisher-sessions-v1';
 const PUBLISHER_ACCOUNTS_KEY = 'publisher-accounts-v1';
 const SCHEDULER_SESSION_KEY = 'github-scheduler-session-v1';
+const SCHEDULER_HEALTH_KEY = 'scheduler-last-tick-v1';
 const SESSION_LIFETIME_MS = 150 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 12_000;
 const MAX_SYNC_BODY_BYTES = 96_000;
@@ -546,6 +547,7 @@ async function schedulerCredential(env) {
 
 async function scheduledTick(controller, env) {
   const credential = await schedulerCredential(env);
+  const scheduledTime = new Date(controller.scheduledTime).toISOString();
   const results = await runScheduler({
     env: {
       CONFIG: env.CONFIG,
@@ -556,12 +558,17 @@ async function scheduledTick(controller, env) {
     token: credential.token,
     now: new Date(controller.scheduledTime),
   });
-  console.log(JSON.stringify({
+  const tick = {
+    status: 'ok',
     message: 'clipmaker scheduler tick',
     credential: credential.source,
-    scheduledTime: new Date(controller.scheduledTime).toISOString(),
+    scheduledTime,
+    completedAt: new Date().toISOString(),
     results,
-  }));
+  };
+  await env.CONFIG.put(SCHEDULER_HEALTH_KEY, JSON.stringify(tick));
+  console.log(JSON.stringify(tick));
+  return tick;
 }
 
 async function route(request, env) {
@@ -571,14 +578,16 @@ async function route(request, env) {
     return new Response(null, { status: 204, headers: noStoreHeaders(corsHeaders(request, env)) });
   }
   if (request.method === 'GET' && url.pathname === '/health') {
-    const [configured, schedulerSession] = await Promise.all([
+    const [configured, schedulerSession, lastTick] = await Promise.all([
       env.CONFIG.get(APP_CONFIG_KEY),
       env.CONFIG.get(SCHEDULER_SESSION_KEY),
+      env.CONFIG.get(SCHEDULER_HEALTH_KEY, 'json'),
     ]);
     return json({
       ok: true,
       configured: Boolean(configured),
       scheduler: Boolean(schedulerSession || env.GITHUB_AUTOMATION_TOKEN),
+      lastTick: lastTick || null,
     }, 200, request, env);
   }
   if (request.method === 'GET' && url.pathname === '/setup/start') return setupStart(request, env);
@@ -614,11 +623,16 @@ export default {
     try {
       await scheduledTick(controller, env);
     } catch (error) {
-      console.error(JSON.stringify({
+      const failure = {
+        status: 'error',
         message: 'clipmaker scheduler failed',
         error: error instanceof Error ? error.message : String(error),
         scheduledTime: new Date(controller.scheduledTime).toISOString(),
-      }));
+        completedAt: new Date().toISOString(),
+        results: [],
+      };
+      await env.CONFIG.put(SCHEDULER_HEALTH_KEY, JSON.stringify(failure)).catch(() => null);
+      console.error(JSON.stringify(failure));
       throw error;
     }
   },
