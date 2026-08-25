@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { openSession, parseBearer, sealSession, validateDispatch } from '../src/index.js';
 import { normalizePublisherConfig } from '../src/publisher-config.js';
+import { localClock, runScheduler, schedulerOperations } from '../src/scheduler.js';
 
 const secret = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1)).toString('base64url');
 const env = { SESSION_SECRET: secret };
@@ -89,4 +90,93 @@ test('public uploads require an explicit confirmation', () => {
       youtube: { enabled: false, account: 'default', privacy: 'private' },
     }],
   }), /doit être confirmée/u);
+});
+
+test('scheduler follows Europe/Paris across summer time', () => {
+  assert.deepEqual(localClock(new Date('2026-08-25T16:10:00Z'), 'Europe/Paris'), {
+    date: '2026-08-25',
+    minute: 18 * 60 + 10,
+  });
+});
+
+test('scheduler watchdog only exposes due production operations', () => {
+  const config = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    channels: [{
+      id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
+      game: { id: 'soft-body-slide' },
+    }],
+  };
+  const beforeGrace = schedulerOperations(config, new Date('2026-08-25T16:09:00Z'));
+  assert.equal(beforeGrace.find((item) => item.id === 'daily-publish').eligible, false);
+  const atGrace = schedulerOperations(config, new Date('2026-08-25T16:10:00Z'));
+  assert.equal(atGrace.find((item) => item.id === 'daily-publish').eligible, true);
+  assert.equal(atGrace.find((item) => item.id === 'soft-body-3d').eligible, false);
+});
+
+test('scheduler skips a delayed native run instead of dispatching a duplicate', async () => {
+  const writes = [];
+  const config = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    channels: [{
+      id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
+      game: { id: 'soft-body-slide' },
+    }],
+  };
+  const env = {
+    REPOSITORY_OWNER: 'EinSlen',
+    REPOSITORY_NAME: 'clipmaker',
+    CONFIG: {
+      get: async (key) => key === 'publisher-config-v1' ? config : null,
+      put: async (...args) => writes.push(args),
+    },
+    github: async () => ({
+      response: new Response('{}', { status: 200 }),
+      payload: {
+        workflow_runs: [{
+          id: 32874377702,
+          event: 'schedule',
+          status: 'in_progress',
+          conclusion: null,
+          created_at: '2026-08-25T16:50:45Z',
+        }],
+      },
+    }),
+  };
+  const result = await runScheduler({ env, token: 'test', now: new Date('2026-08-25T17:00:00Z') });
+  assert.deepEqual(result, [{ operation: 'daily-publish', action: 'skip', reason: 'active', runId: 32874377702 }]);
+  assert.equal(writes.length, 0);
+});
+
+test('scheduler dispatches once when GitHub missed the publication window', async () => {
+  const calls = [];
+  const config = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    channels: [{
+      id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
+      game: { id: 'soft-body-slide' },
+    }],
+  };
+  const env = {
+    REPOSITORY_OWNER: 'EinSlen',
+    REPOSITORY_NAME: 'clipmaker',
+    CONFIG: {
+      get: async (key) => key === 'publisher-config-v1' ? config : null,
+      put: async (...args) => calls.push(['put', ...args]),
+    },
+    github: async (path, options = {}) => {
+      calls.push([options.method || 'GET', path, options.body]);
+      if (options.method === 'POST') {
+        return { response: new Response(null, { status: 204 }), payload: null };
+      }
+      return { response: new Response('{}', { status: 200 }), payload: { workflow_runs: [] } };
+    },
+  };
+  const result = await runScheduler({ env, token: 'test', now: new Date('2026-08-25T16:15:00Z') });
+  assert.equal(result[0].action, 'dispatch');
+  assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'put').length, 1);
 });

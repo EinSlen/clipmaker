@@ -1,4 +1,5 @@
 import { normalizePublisherConfig, publicPublisherConfig } from './publisher-config.js';
+import { runScheduler } from './scheduler.js';
 
 const API_VERSION = '2026-03-10';
 const APP_CONFIG_KEY = 'github-app-config';
@@ -6,6 +7,7 @@ const INSTALLATION_KEY = 'github-app-installation';
 const PUBLISHER_CONFIG_KEY = 'publisher-config-v1';
 const PUBLISHER_SESSIONS_KEY = 'publisher-sessions-v1';
 const PUBLISHER_ACCOUNTS_KEY = 'publisher-accounts-v1';
+const SCHEDULER_SESSION_KEY = 'github-scheduler-session-v1';
 const SESSION_LIFETIME_MS = 150 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 12_000;
 const MAX_SYNC_BODY_BYTES = 96_000;
@@ -403,8 +405,15 @@ async function apiSession(request, env) {
   if (!response.ok || user.login?.toLowerCase() !== env.ALLOWED_LOGIN.toLowerCase()) {
     throw new HttpError(401, 'La connexion GitHub doit être renouvelée.');
   }
-  const renewed = authenticated.changed ? await sealSession(authenticated.session, env) : null;
-  return json({ authenticated: true, login: user.login, session: renewed }, 200, request, env);
+  const schedulerSession = await sealSession(authenticated.session, env);
+  await env.CONFIG.put(SCHEDULER_SESSION_KEY, schedulerSession);
+  const renewed = authenticated.changed ? schedulerSession : null;
+  return json({
+    authenticated: true,
+    login: user.login,
+    session: renewed,
+    scheduler: { enabled: true, source: 'github-app', intervalMinutes: 5 },
+  }, 200, request, env);
 }
 
 async function apiDispatch(request, env) {
@@ -509,7 +518,50 @@ async function apiLogout(request, env) {
       body: JSON.stringify({ access_token: session.access_token }),
     }).catch(() => null);
   }
+  await env.CONFIG.delete(SCHEDULER_SESSION_KEY);
   return json({ ok: true }, 200, request, env);
+}
+
+async function schedulerCredential(env) {
+  const stored = await env.CONFIG.get(SCHEDULER_SESSION_KEY);
+  if (stored) {
+    try {
+      const opened = await openSession(stored, env);
+      const config = await appConfig(env);
+      const refreshed = await refreshedSession(opened, config);
+      if (refreshed.changed) {
+        await env.CONFIG.put(SCHEDULER_SESSION_KEY, await sealSession(refreshed.session, env));
+      }
+      return { token: refreshed.session.access_token, source: 'github-app' };
+    } catch (error) {
+      console.warn(JSON.stringify({
+        message: 'stored GitHub App scheduler session is unavailable',
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+  if (env.GITHUB_AUTOMATION_TOKEN) return { token: env.GITHUB_AUTOMATION_TOKEN, source: 'automation-secret' };
+  throw new Error('No GitHub scheduler credential is configured.');
+}
+
+async function scheduledTick(controller, env) {
+  const credential = await schedulerCredential(env);
+  const results = await runScheduler({
+    env: {
+      CONFIG: env.CONFIG,
+      REPOSITORY_OWNER: env.REPOSITORY_OWNER,
+      REPOSITORY_NAME: env.REPOSITORY_NAME,
+      github,
+    },
+    token: credential.token,
+    now: new Date(controller.scheduledTime),
+  });
+  console.log(JSON.stringify({
+    message: 'clipmaker scheduler tick',
+    credential: credential.source,
+    scheduledTime: new Date(controller.scheduledTime).toISOString(),
+    results,
+  }));
 }
 
 async function route(request, env) {
@@ -519,7 +571,15 @@ async function route(request, env) {
     return new Response(null, { status: 204, headers: noStoreHeaders(corsHeaders(request, env)) });
   }
   if (request.method === 'GET' && url.pathname === '/health') {
-    return json({ ok: true, configured: Boolean(await env.CONFIG.get(APP_CONFIG_KEY)) }, 200, request, env);
+    const [configured, schedulerSession] = await Promise.all([
+      env.CONFIG.get(APP_CONFIG_KEY),
+      env.CONFIG.get(SCHEDULER_SESSION_KEY),
+    ]);
+    return json({
+      ok: true,
+      configured: Boolean(configured),
+      scheduler: Boolean(schedulerSession || env.GITHUB_AUTOMATION_TOKEN),
+    }, 200, request, env);
   }
   if (request.method === 'GET' && url.pathname === '/setup/start') return setupStart(request, env);
   if (request.method === 'GET' && url.pathname === '/setup/callback') return setupCallback(request, env);
@@ -548,6 +608,18 @@ export default {
         console.error(JSON.stringify({ message: 'cloud-control request failed', error: error instanceof Error ? error.message : String(error), path: new URL(request.url).pathname }));
       }
       return json({ error: message }, status, request, env);
+    }
+  },
+  async scheduled(controller, env) {
+    try {
+      await scheduledTick(controller, env);
+    } catch (error) {
+      console.error(JSON.stringify({
+        message: 'clipmaker scheduler failed',
+        error: error instanceof Error ? error.message : String(error),
+        scheduledTime: new Date(controller.scheduledTime).toISOString(),
+      }));
+      throw error;
     }
   },
 };

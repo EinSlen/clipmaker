@@ -21,6 +21,8 @@ test('the public dashboard exposes every daily stage and an explicit mobile navi
   assert.match(html, /<time>00:37<\/time>[\s\S]*Rendus 2D/u);
   assert.match(html, /<time>18:07<\/time>[\s\S]*Publication/u);
   assert.match(html, /<time>18:08<\/time>[\s\S]*Notification/u);
+  assert.match(html, /<time>18:10<\/time>[\s\S]*Watchdog Cloudflare/u);
+  assert.match(html, /toutes les 5 minutes/u);
 });
 
 test('account setup offers creation, private connection and local fallback links', async () => {

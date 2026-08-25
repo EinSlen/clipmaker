@@ -29,7 +29,7 @@
       </nav>
       <div class="sidebar-card">
         <span class="live-dot"></span>
-        <div><strong>Automatisation active</strong><small>Paris · tous les jours</small></div>
+        <div><strong>Automatisation redondante</strong><small>GitHub + Cloudflare · Paris</small></div>
       </div>
       <div class="sidebar-foot">Aucun cookie n’est envoyé à cette page.</div>
     </aside>
@@ -52,9 +52,9 @@
 
       <section id="overview" class="hero">
         <div>
-          <span class="pill"><span class="live-dot"></span> GitHub Actions opérationnel</span>
+          <span class="pill"><span class="live-dot"></span> GitHub Actions + watchdog Cloudflare</span>
           <h2>Une vidéo prête<br><span>chaque jour à 18 h.</span></h2>
-          <p>Surveille le cron, déclenche un rendu et ouvre le studio complet depuis n’importe quel appareil.</p>
+          <p>GitHub lance le planning et Cloudflare le contrôle toutes les 5 minutes pour rattraper automatiquement un cron retardé ou manqué.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/EinSlen/clipmaker/issues/36" target="_blank" rel="noreferrer">Voir les notifications <span>↗</span></a>
             <button id="refresh-all" class="button button-secondary">Actualiser</button>
@@ -64,7 +64,7 @@
           <div class="orbit-ring"></div>
           <div class="orbit-core"><strong>18:07</strong><span>PUBLICATION</span></div>
           <div class="orbit-node node-one"><b>00:07 · 00:37</b><span>3D · 2D</span></div>
-          <div class="orbit-node node-two"><b>18:07</b><span>TikTok + YouTube</span></div>
+          <div class="orbit-node node-two"><b>18:07 · 18:10</b><span>Publication · secours</span></div>
         </div>
       </section>
 
@@ -116,6 +116,7 @@
             <div><time>00:37</time><span><b>Rendus 2D</b><small>Jeu + musique + chiffrement</small></span></div>
             <div><time>18:07</time><span><b>Publication</b><small>TikTok et YouTube actifs</small></span></div>
             <div><time>18:08</time><span><b>Notification</b><small>Résultat dans le ticket GitHub</small></span></div>
+            <div><time>18:10</time><span><b>Watchdog Cloudflare</b><small>Rattrapage automatique si GitHub n’a pas démarré</small></span></div>
           </div>
         </aside>
       </section>
@@ -125,7 +126,7 @@
           <div><p class="eyebrow">AUTOMATISATION</p><h3>Un compte, un jeu</h3></div>
           <span id="config-state" class="secure-badge">Connexion requise</span>
         </div>
-        <p class="panel-intro">Choisis le jeu, l’obstacle, l’heure et les destinations de chaque compte. Les changements sont utilisés par le prochain cron GitHub, sans PAT.</p>
+        <p class="panel-intro">Choisis le jeu, l’obstacle, l’heure et les destinations de chaque compte. GitHub exécute le planning et Cloudflare rattrape automatiquement un déclenchement manqué.</p>
         <div class="config-toolbar">
           <label class="compact-field">Mode
             <select id="global-mode"><option value="live">Production</option><option value="test">Test uniquement</option></select>
@@ -204,7 +205,7 @@
         <a class="button button-light" href="https://codespaces.new/EinSlen/clipmaker?quickstart=1" target="_blank" rel="noreferrer">Ouvrir le studio complet <span>↗</span></a>
       </section>
 
-      <footer><span>ClipMaker Cloud</span><span>Interface GitHub Pages · contrôle Cloudflare privé · calcul GitHub Actions</span></footer>
+      <footer><span>ClipMaker Cloud</span><span>Interface GitHub Pages · watchdog Cloudflare privé · calcul GitHub Actions</span></footer>
     </main>
   </div>
 
