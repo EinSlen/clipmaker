@@ -406,7 +406,7 @@
       });
       publisherConfig = structuredClone(payload.config);
       renderChannels();
-      notify('Planning cloud sauvegardé. GitHub et le watchdog Cloudflare utiliseront ces horaires.');
+      notify('Planning sauvegardé. Cloudflare et le secours GitHub utiliseront ces horaires.');
       elements.configState.textContent = `${publisherConfig.channels.filter((item) => item.enabled).length} canal(aux) actif(s)`;
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), true);
@@ -429,7 +429,7 @@
     elements.authState.textContent = 'Connexion GitHub en cours de vérification…';
     try {
       const payload = await control('/api/session');
-      const watchdog = payload.scheduler?.enabled ? ' · watchdog Cloudflare actif' : '';
+      const watchdog = payload.scheduler?.enabled ? ' · planificateur Cloudflare actif' : '';
       elements.authState.textContent = `Connecté en tant que ${payload.login} · GitHub App privée${watchdog}`;
       elements.authState.style.color = '#58e6a9';
       lockCommands();
@@ -558,7 +558,7 @@
   async function loadWatchdog() {
     const response = await fetch(`${CONTROL_API}/health`, { headers: { Accept: 'application/json' } });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.scheduler) throw new Error('Le relais Cloudflare ne répond pas.');
+    if (!response.ok || !payload.scheduler) throw new Error('Le planificateur Cloudflare ne répond pas.');
     const tick = payload.lastTick;
     if (!tick) {
       elements.watchdogStatus.textContent = 'Actif · en attente';

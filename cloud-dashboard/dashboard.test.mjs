@@ -19,9 +19,9 @@ test('the public dashboard exposes every daily stage and an explicit mobile navi
   assert.doesNotMatch(css, /main\s*\{[^}]*100vw/u);
   assert.match(html, /<time>00:07<\/time>[\s\S]*Rendu 3D/u);
   assert.match(html, /<time>00:37<\/time>[\s\S]*Rendus 2D/u);
-  assert.match(html, /<time>18:07<\/time>[\s\S]*Publication/u);
-  assert.match(html, /<time>18:08<\/time>[\s\S]*Notification/u);
-  assert.match(html, /<time>18:10<\/time>[\s\S]*Watchdog Cloudflare/u);
+  assert.match(html, /<time>18:00<\/time>[\s\S]*Publication Cloudflare/u);
+  assert.match(html, /<time>≈18:02<\/time>[\s\S]*Notification/u);
+  assert.match(html, /<time>18:07<\/time>[\s\S]*Secours GitHub/u);
   assert.match(html, /toutes les 5 minutes/u);
 });
 

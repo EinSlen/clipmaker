@@ -19,8 +19,9 @@ Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
 
 - création de vidéos de jeux en 1080×1920 avec physique déterministe, musique et Foley synchronisé ;
 - configuration **un compte = un jeu**, avec cadence, seed et plateformes indépendantes ;
-- rendu 3D matriciel à 00 h 07, génération 2D à 00 h 37 et publication programmée à 18 h 07, heure de Paris ;
-- watchdog Cloudflare toutes les cinq minutes : après dix minutes de grâce, il relance tout cron GitHub absent ou échoué sans doubler un run actif ou réussi ;
+- rendu 3D matriciel à 00 h 07, génération 2D à 00 h 37 et publication Cloudflare dès 18 h 00, heure de Paris ;
+- planificateur Cloudflare toutes les cinq minutes : il déclenche la publication au créneau configuré et rattrape les générations absentes ou échouées sans doubler un run actif ou réussi ;
+- cron GitHub de 18 h 07 conservé comme second filet de sécurité ; l’état chiffré du publisher empêche un second envoi ;
 - envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts avec OAuth/API ;
 - conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
 - notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
@@ -34,9 +35,9 @@ plusieurs familles d'obstacles avec cinq niveaux de souplesse.
 | Service GitHub | Rôle |
 | --- | --- |
 | [GitHub Pages](https://einslen.github.io/clipmaker/) | Tableau de bord permanent : état, affectation compte → jeu, planning, commandes et rendu 3D. |
-| [GitHub Actions](https://github.com/EinSlen/clipmaker/actions) | Calcul, génération, rendu, publication et notification. Le cron GitHub reste le premier déclencheur. |
+| [GitHub Actions](https://github.com/EinSlen/clipmaker/actions) | Calcul, génération, rendu, publication et notification. Le cron de 18 h 07 sert de secours automatique. |
 | [GitHub Codespaces](https://codespaces.new/EinSlen/clipmaker?quickstart=1) | Studio complet et privé pour connecter les comptes et modifier la configuration. |
-| [Cloudflare Worker](https://clipmaker-cloud-control.einslen.workers.dev) | Authentification GitHub privée, configuration en KV et watchdog du planning toutes les cinq minutes. |
+| [Cloudflare Worker](https://clipmaker-cloud-control.einslen.workers.dev) | Authentification GitHub privée, configuration en KV et planificateur principal toutes les cinq minutes. |
 | GitHub Secrets | Jetons du runner et clé de chiffrement de l'état ; aucune valeur n'est incluse dans Pages. |
 
 Le tableau de bord est public en lecture seule. Après connexion avec la GitHub App privée, il permet

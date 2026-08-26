@@ -1,5 +1,5 @@
 const DEFAULT_TIME_ZONE = 'Europe/Paris';
-const WATCHDOG_GRACE_MINUTES = 10;
+const GENERATION_WATCHDOG_GRACE_MINUTES = 10;
 const RETRY_DELAY_MS = 20 * 60 * 1000;
 const MAX_DISPATCH_ATTEMPTS = 3;
 const RECORD_TTL_SECONDS = 8 * 24 * 60 * 60;
@@ -53,7 +53,7 @@ export function schedulerOperations(config, now) {
       dueMinute,
       windowStart: Math.max(0, dueMinute - 5),
       windowEnd: Math.max(dueMinute, publishMinute - 60),
-      eligible: clock.minute >= dueMinute + WATCHDOG_GRACE_MINUTES && clock.minute < publishMinute - 60,
+      eligible: clock.minute >= dueMinute + GENERATION_WATCHDOG_GRACE_MINUTES && clock.minute < publishMinute - 60,
       inputs: {
         use_cloud_config: 'true',
         plan_only: dryRun ? 'true' : 'false',
@@ -75,7 +75,7 @@ export function schedulerOperations(config, now) {
       dueMinute,
       windowStart: Math.max(0, dueMinute - 5),
       windowEnd: Math.max(dueMinute, publishMinute - 15),
-      eligible: clock.minute >= dueMinute + WATCHDOG_GRACE_MINUTES && clock.minute < publishMinute - 15,
+      eligible: clock.minute >= dueMinute + GENERATION_WATCHDOG_GRACE_MINUTES && clock.minute < publishMinute - 15,
       inputs: { action: 'generate', dry_run: dryRun ? 'true' : 'false', force_youtube: 'false' },
     });
   }
@@ -86,7 +86,7 @@ export function schedulerOperations(config, now) {
     dueMinute: publishMinute,
     windowStart: Math.max(0, publishMinute - 5),
     windowEnd: 1439,
-    eligible: clock.minute >= publishMinute + WATCHDOG_GRACE_MINUTES,
+    eligible: clock.minute >= publishMinute,
     inputs: { action: 'publish', dry_run: dryRun ? 'true' : 'false', force_youtube: 'false' },
   });
 

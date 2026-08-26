@@ -121,7 +121,7 @@ test('scheduler follows Europe/Paris across summer time', () => {
   });
 });
 
-test('scheduler watchdog only exposes due production operations', () => {
+test('Cloudflare makes publication due at the exact configured minute', () => {
   const config = {
     dryRun: false,
     timeZone: 'Europe/Paris',
@@ -130,11 +130,11 @@ test('scheduler watchdog only exposes due production operations', () => {
       game: { id: 'soft-body-slide' },
     }],
   };
-  const beforeGrace = schedulerOperations(config, new Date('2026-08-25T16:09:00Z'));
-  assert.equal(beforeGrace.find((item) => item.id === 'daily-publish').eligible, false);
-  const atGrace = schedulerOperations(config, new Date('2026-08-25T16:10:00Z'));
-  assert.equal(atGrace.find((item) => item.id === 'daily-publish').eligible, true);
-  assert.equal(atGrace.find((item) => item.id === 'soft-body-3d').eligible, false);
+  const beforeDue = schedulerOperations(config, new Date('2026-08-25T15:59:00Z'));
+  assert.equal(beforeDue.find((item) => item.id === 'daily-publish').eligible, false);
+  const atDue = schedulerOperations(config, new Date('2026-08-25T16:00:00Z'));
+  assert.equal(atDue.find((item) => item.id === 'daily-publish').eligible, true);
+  assert.equal(atDue.find((item) => item.id === 'soft-body-3d').eligible, false);
 });
 
 test('scheduler skips a delayed native run instead of dispatching a duplicate', async () => {
@@ -197,7 +197,7 @@ test('scheduler dispatches once when GitHub missed the publication window', asyn
       return { response: new Response('{}', { status: 200 }), payload: { workflow_runs: [] } };
     },
   };
-  const result = await runScheduler({ env, token: 'test', now: new Date('2026-08-25T16:15:00Z') });
+  const result = await runScheduler({ env, token: 'test', now: new Date('2026-08-25T16:00:00Z') });
   assert.equal(result[0].action, 'dispatch');
   assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
   assert.equal(calls.filter(([method]) => method === 'put').length, 1);
