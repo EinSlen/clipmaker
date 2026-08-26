@@ -108,6 +108,8 @@ input:focus, select:focus { border-color: rgba(143,107,255,.72); box-shadow: 0 0
 .metric-card span { color: #797d91; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .12em; }
 .metric-card strong { overflow: hidden; text-overflow: ellipsis; margin: 5px 0 3px; font-size: 15px; white-space: nowrap; }
 .metric-card small { color: #767a8e; font-size: 9px; }
+.publication-visibility { margin-top: 4px; color: #58e6a9 !important; font-weight: 750; }
+.publication-visibility.warning { color: #ffc56f !important; }
 
 .section-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(250px, .75fr); gap: 14px; }
 .panel { border: 1px solid var(--line); border-radius: 19px; padding: 24px; background: var(--panel); box-shadow: 0 12px 45px rgba(0,0,0,.11); }
