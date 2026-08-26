@@ -18,6 +18,7 @@
     latestOperation: document.querySelector('#latest-operation'),
     latestPublished: document.querySelector('#latest-published'),
     latestPublishedDetail: document.querySelector('#latest-published-detail'),
+    latestPublishedVisibility: document.querySelector('#latest-published-visibility'),
     watchdogStatus: document.querySelector('#watchdog-status'),
     watchdogTime: document.querySelector('#watchdog-time'),
     runs: document.querySelector('#runs-list'),
@@ -552,13 +553,24 @@
       if (latest) elements.latestChannel.textContent = extract(latest.body, /Channel:\s*`([^`]+)`/i, '—');
     }
 
-    const published = newestFirst
-      .map((comment) => comment.body.match(/Latest stored job:\s*`published`\s*·\s*`([^`]+)`\s*·\s*`([^`]+)`(?:\s*·\s*`([^`]+)`)?/i))
-      .find(Boolean);
+    const publishedComment = newestFirst.find((comment) => /Latest stored job:\s*`published`/iu.test(comment.body));
+    const published = publishedComment?.body.match(/Latest stored job:\s*`published`\s*·\s*`([^`]+)`\s*·\s*`([^`]+)`(?:\s*·\s*`([^`]+)`)?/i);
     if (published) {
       const game = GAMES.find((item) => item.id === published[3]);
       elements.latestPublished.textContent = published[2];
       elements.latestPublishedDetail.textContent = `${game?.name || published[3] || 'Jeu historique'} · ${formatDay(`${published[1]}T12:00:00Z`)}`;
+      const destinations = publishedComment?.body.match(/Destinations:\s*([^\r\n]+)/iu)?.[1] || '';
+      const privateCount = destinations.match(/\(private,/giu)?.length || 0;
+      const publicCount = destinations.match(/\(public,/giu)?.length || 0;
+      const visibility = publicCount && privateCount
+        ? 'Visibilité mixte · vérifie chaque plateforme'
+        : publicCount
+          ? 'Visible publiquement'
+          : privateCount
+            ? 'Privée · aucune vue publique'
+            : 'Visibilité inconnue';
+      elements.latestPublishedVisibility.textContent = visibility;
+      elements.latestPublishedVisibility.classList.toggle('warning', privateCount > 0);
     }
   }
 
