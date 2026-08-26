@@ -470,6 +470,13 @@
     }).format(new Date(value));
   }
 
+  function formatDay(value) {
+    if (!value) return '—';
+    return new Intl.DateTimeFormat('fr-FR', {
+      dateStyle: 'medium', timeZone: 'Europe/Paris',
+    }).format(new Date(value));
+  }
+
   function runLabel(run) {
     if (run.status !== 'completed') return ['En cours', 'running'];
     if (run.conclusion === 'success') return ['Réussi', 'success'];
@@ -551,7 +558,7 @@
     if (published) {
       const game = GAMES.find((item) => item.id === published[3]);
       elements.latestPublished.textContent = published[2];
-      elements.latestPublishedDetail.textContent = `${game?.name || published[3] || 'Jeu historique'} · ${formatDate(`${published[1]}T12:00:00Z`)}`;
+      elements.latestPublishedDetail.textContent = `${game?.name || published[3] || 'Jeu historique'} · ${formatDay(`${published[1]}T12:00:00Z`)}`;
     }
   }
 

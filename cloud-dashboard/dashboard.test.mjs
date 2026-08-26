@@ -88,6 +88,8 @@ test('current assignment and last published game are presented separately', asyn
   assert.match(app, /Jeu assigné/u);
   assert.match(app, /Latest stored job/u);
   assert.match(app, /latestPublishedDetail/u);
+  assert.match(app, /formatDay\(`\$\{published\[1\]\}T12:00:00Z`\)/u);
+  assert.doesNotMatch(app, /formatDate\(`\$\{published\[1\]\}T12:00:00Z`\)/u);
 });
 
 test('manual 3D renders default to the reliable 15-frame chunks', async () => {
