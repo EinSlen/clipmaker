@@ -110,3 +110,11 @@ test('generation explains saved assignments and shows the server-selected pipeli
   assert.match(app, /comptes et jeux du planning sauvegardé/u);
   assert.match(app, /notify\(result\.message \|\| successMessage\)/u);
 });
+
+test('changing a game explains regeneration and the in-flight publication boundary', async () => {
+  const html = await source('index.html');
+  assert.match(html, /id="selection-help"/u);
+  assert.match(html, /Sauvegarde, puis lance « Générer maintenant »/u);
+  assert.match(html, /Si un envoi a déjà commencé/u);
+  assert.match(html, /le nouveau choix servira le lendemain/u);
+});

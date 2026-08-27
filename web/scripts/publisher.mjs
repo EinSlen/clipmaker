@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { randomUUID } from 'node:crypto';
 import { readPublisherConfig } from '../src/automation/config.mjs';
 import { cleanupPublishedRenders } from '../src/automation/render-cleanup.mjs';
 import { assertDate, dateInTimeZone } from '../src/automation/time.mjs';
@@ -73,10 +74,19 @@ async function main() {
     // An invalid import must not overwrite a previously validated ready video.
     validateRenderedManifest(config, { ...manifest, filename });
     const renderDirectory = path.resolve(path.dirname(config.configPath), '../renders');
-    await fs.mkdir(renderDirectory, { recursive: true });
     const destination = path.join(renderDirectory, filename);
-    if (source !== destination) await fs.copyFile(source, destination);
-    return output(await importRenderedJob(config, { ...manifest, filename }));
+    return output(await importRenderedJob(config, { ...manifest, filename }, { copyVideo: async () => {
+      if (!(await fs.stat(source)).isFile()) throw new Error('Imported video must be a file.');
+      if (source === destination) return;
+      await fs.mkdir(renderDirectory, { recursive: true });
+      const temporary = path.join(renderDirectory, `.import-${randomUUID()}.tmp`);
+      try {
+        await fs.copyFile(source, temporary);
+        await fs.rename(temporary, destination);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    } }));
   }
   if (command === 'run') {
     const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] });

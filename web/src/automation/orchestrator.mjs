@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   appendEvent,
   errorMessage,
@@ -40,6 +41,43 @@ function newPlatformState(enabled) {
   };
 }
 
+function newRenderState() {
+  return { status: 'pending', attempts: 0, lastAttemptAt: null, completedAt: null,
+    error: null, filename: null, raw: null };
+}
+
+function matchesRenderPlan(job, plan) {
+  return job.seed === plan.seed && isDeepStrictEqual(job.renderRequest, plan.renderRequest)
+    && (!job.render?.game || job.render.game === plan.renderRequest.game);
+}
+
+function publicationStarted(job) {
+  return ['publishing', 'partial', 'published'].includes(job.status)
+    || Object.values(job.platforms || {}).some(target => Number(target.attempts) > 0
+      || ['publishing', 'published'].includes(target.status) || target.lastAttemptAt || target.completedAt || target.receipt);
+}
+
+function selectionChangedError(job) {
+  const instruction = publicationStarted(job)
+    ? 'An upload has already been attempted; restore the original selection to finish or retry it. The new selection applies to the next day.'
+    : 'Generate the newly selected game before publishing; the previous video will not be sent.';
+  const error = new Error(`Render selection changed for ${job.id}. ${instruction}`);
+  error.code = 'RENDER_SELECTION_CHANGED';
+  return error;
+}
+
+async function refreshUnpublishedSelection(config, job, plan, channel) {
+  if (matchesRenderPlan(job, plan)) return;
+  if (publicationStarted(job)) throw selectionChangedError(job);
+  const previous = { seed: job.seed, renderRequest: job.renderRequest,
+    filename: job.render?.filename || null, replacedAt: new Date().toISOString() };
+  await appendEvent(config.stateDir, { type: 'render-selection-changed', jobId: job.id, previous,
+    renderRequest: plan.renderRequest });
+  Object.assign(job, plan, { status: 'planned', render: newRenderState(),
+    previousRenders: [...(job.previousRenders || []), previous],
+    platforms: { youtube: newPlatformState(channel.youtube.enabled), tiktok: newPlatformState(channel.tiktok.enabled) } });
+}
+
 function safePlatformReceipt(platform, result) {
   const upload = result?.upload && typeof result.upload === 'object' ? result.upload : {};
   const id = String(upload.platformPostId || upload.id || '').trim();
@@ -64,15 +102,7 @@ function ensureJob(state, plan, channel) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: 'planned',
-    render: {
-      status: 'pending',
-      attempts: 0,
-      lastAttemptAt: null,
-      completedAt: null,
-      error: null,
-      filename: null,
-      raw: null,
-    },
+    render: newRenderState(),
     platforms: {
       youtube: newPlatformState(channel.youtube.enabled),
       tiktok: newPlatformState(channel.tiktok.enabled),
@@ -106,6 +136,10 @@ export async function generateChannel(config, channel, date, options = {}) {
   return withStateLock(config.stateDir, async () => {
     const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
     const job = ensureJob(state, plan, channel);
+    if (job.status === 'published') {
+      return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+    }
+    await refreshUnpublishedSelection(config, job, plan, channel);
     if (job.render.status === 'ready') {
       return { ok: true, skipped: true, reason: 'already-rendered', job: publicState({ ...state, jobs: [job] }).jobs[0] };
     }
@@ -118,10 +152,10 @@ export async function generateChannel(config, channel, date, options = {}) {
     await saveState(config.stateDir, state);
     await appendEvent(config.stateDir, { type: 'render-started', jobId: job.id, attempt: job.render.attempts });
     try {
-      // Once a job exists, its seed and render request are immutable. This
-      // prevents a config edit after a failed attempt from changing the video
-      // attached to the same daily idempotency key.
+      // Selection may change before the first upload attempt, never during
+      // a partial publication. Regeneration retains the same daily key.
       const result = await renderVideo(config, renderPayload(job));
+      if (result.game !== job.renderRequest.game) throw new Error('Renderer returned the wrong selected game.');
       if (job.renderRequest.game === 'soft-body-slide') {
         assertNative3dQuality(result.native3d, { seed: job.seed, ...job.renderRequest });
       }
@@ -217,6 +251,12 @@ export async function publishChannel(config, channel, date, options = {}) {
       return { ok: true, skipped: true, reason: 'no-enabled-targets', jobId: job.id };
     }
     const forced = new Set(options.forcePlatforms || []);
+    if (!matchesRenderPlan(job, plan)) {
+      if (!forced.size && enabled.every(platform => job.platforms[platform]?.status === 'published')) {
+        return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+      }
+      throw selectionChangedError(job);
+    }
     if ((job.render.game === 'soft-body-slide' || job.renderRequest.game === 'soft-body-slide')
       && (forced.size || enabled.some((platform) => job.platforms[platform].status !== 'published'))) {
       assertNative3dQuality(job.render.raw?.native3d || job.render.raw, { seed: job.seed, ...job.renderRequest });
@@ -299,12 +339,20 @@ export function validateRenderedManifest(config, manifest) {
   return { plan, channel, date, filename, render };
 }
 
-export async function importRenderedJob(config, manifest) {
+export async function importRenderedJob(config, manifest, { copyVideo } = {}) {
   const { plan, channel, date, filename, render } = validateRenderedManifest(config, manifest);
   return withStateLock(config.stateDir, async () => {
     const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
     const job = ensureJob(state, plan, channel);
     if (job.status === 'published') return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+    if (publicationStarted(job)) {
+      if (!matchesRenderPlan(job, plan)) throw selectionChangedError(job);
+      return { ok: true, skipped: true, reason: 'publication-started', jobId: job.id };
+    }
+    // Copy under the same lock as the state check. A re-import may never
+    // overwrite a file already uploaded (or possibly accepted) by a platform.
+    if (copyVideo) await copyVideo();
+    await refreshUnpublishedSelection(config, job, plan, channel);
     job.render = {
       ...job.render,
       status: 'ready',

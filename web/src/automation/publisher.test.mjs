@@ -430,6 +430,33 @@ test('an invalid 3D import cannot replace an existing ready video on disk', asyn
   assert.match(result.stderr, /3D publication blocked/u);
   assert.equal(await fs.readFile(destination, 'utf8'), 'existing validated video');
   assert.doesNotThrow(() => assertNative3dQuality(native3dEvidence(plan.seed), { seed: plan.seed }));
+  const valid = { date, channelId: 'soft-main', seed: plan.seed, filename,
+    render: { raw: native3dEvidence(plan.seed) } };
+  await importRenderedJob(config, valid);
+  await fs.writeFile(manifest, JSON.stringify({ ...valid, video: filename }));
+  await fs.writeFile(path.join(imports, filename), 'validated replacement');
+  const ready = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+  assert.equal(ready.status, 0, ready.stderr);
+  assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+  assert.equal((await fs.readdir(renders)).filter(name => name.startsWith('.import-')).length, 0);
+  await fs.writeFile(path.join(imports, filename), 'newer but different film');
+  for (const status of ['partial', 'published', 'failed']) {
+    const state = await loadState(config.stateDir);
+    state.jobs[0].status = status;
+    Object.assign(state.jobs[0].platforms.youtube, { status: status === 'failed' ? 'failed' : 'published',
+      attempts: 1, receipt: { id: 'immutable-receipt' } });
+    await saveState(config.stateDir, state);
+    const retry = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(JSON.parse(retry.stdout).skipped, true);
+    assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+    assert.equal((await loadState(config.stateDir)).jobs[0].platforms.youtube.receipt.id, 'immutable-receipt');
+  }
+  await withStateLock(config.stateDir, async () => {
+    const busy = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+    assert.equal(busy.status, 75, busy.stderr);
+    assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+  });
 });
 
 test('a partial platform failure retries only the missing upload', async (t) => {
