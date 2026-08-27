@@ -637,8 +637,12 @@ export function GameStudio() {
                 {game === "soft-body-slide" ? (
                   <div className="space-y-1.5 text-xs text-ink-400">
                     <span>Niveaux de souplesse</span>
-                    <div className="field-control flex h-11 items-center justify-center font-semibold text-white">
-                      5 niveaux générés · 0 → 100 %
+                    <div
+                      aria-label="5 niveaux de souplesse, de 0 à 100 %"
+                      className="field-control flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-2 text-center font-semibold text-white"
+                    >
+                      <span className="whitespace-nowrap">5 niveaux</span>
+                      <span className="whitespace-nowrap text-ink-300">0 → 100 %</span>
                     </div>
                   </div>
                 ) : (
@@ -902,14 +906,16 @@ export function GameStudio() {
                     {duration} s
                   </dd>
                 </div>
-                <div>
+                <div className={game === "soft-body-slide" ? "col-span-2" : undefined}>
                   <dt className="text-ink-500">
                     {game === "soft-body-slide"
-                      ? "Variation"
+                      ? "Parcours"
                       : gameDefinition.uiMetricLabel}
                   </dt>
                   <dd className="mt-1 font-semibold text-white">
-                    {game === "soft-body-slide" ? "Automatique" : difficulty}
+                    {game === "soft-body-slide"
+                      ? softBodyObstacles.find((item) => item.id === softBodyObstacle)?.label
+                      : difficulty}
                   </dd>
                 </div>
                 <div className="col-span-2">
