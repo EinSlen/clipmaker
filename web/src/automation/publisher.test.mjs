@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readPublisherConfig } from './config.mjs';
 import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
@@ -371,6 +372,33 @@ test('a restored 3D ready job cannot upload without valid physics evidence', asy
   await saveState(directory, state);
   await assert.rejects(() => publishChannel(config, channel, date), /3D publication blocked/u);
   assert.equal((await loadState(directory)).jobs[0].platforms.youtube.attempts, 0);
+});
+
+test('an invalid 3D import cannot replace an existing ready video on disk', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configDirectory = path.join(directory, 'config');
+  const imports = path.join(directory, 'incoming');
+  const renders = path.join(directory, 'renders');
+  await Promise.all([configDirectory, imports, renders].map((dir) => fs.mkdir(dir)));
+  const configPath = path.join(configDirectory, 'publisher.json');
+  await fs.writeFile(configPath, JSON.stringify({ seedNamespace: 'test', channels: [{
+    id: 'soft-main', game: { id: 'soft-body-slide' },
+  }] }));
+  const config = await readPublisherConfig(configPath);
+  const date = '2026-08-27';
+  const plan = planForDate(config, config.channels[0], date);
+  const filename = `soft-body-peg-grid-${plan.seed}.mp4`;
+  const destination = path.join(renders, filename);
+  await fs.writeFile(destination, 'existing validated video');
+  await fs.writeFile(path.join(imports, filename), 'invalid replacement');
+  const manifest = path.join(imports, 'publisher-import.json');
+  await fs.writeFile(manifest, JSON.stringify({ date, channelId: 'soft-main', seed: plan.seed, video: filename, render: {} }));
+  const cli = await repositoryFile('web/scripts/publisher.mjs');
+  const result = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /3D publication blocked/u);
+  assert.equal(await fs.readFile(destination, 'utf8'), 'existing validated video');
+  assert.doesNotThrow(() => assertNative3dQuality(native3dEvidence(plan.seed), { seed: plan.seed }));
 });
 
 test('a partial platform failure retries only the missing upload', async (t) => {

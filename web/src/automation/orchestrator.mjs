@@ -281,7 +281,7 @@ export async function publishChannel(config, channel, date, options = {}) {
   });
 }
 
-export async function importRenderedJob(config, manifest) {
+export function validateRenderedManifest(config, manifest) {
   if (!manifest || typeof manifest !== 'object') throw new Error('Invalid rendered job manifest.');
   const date = String(manifest.date || '');
   const channelId = String(manifest.channelId || '');
@@ -291,13 +291,20 @@ export async function importRenderedJob(config, manifest) {
   const plan = planForDate(config, channel, date);
   if (Number(manifest.seed) !== plan.seed) throw new Error(`Seed mismatch for imported job ${plan.id}.`);
   const filename = String(manifest.filename || '');
-  if (!/^soft-body-[a-z0-9_-]+-\d+\.mp4$/u.test(filename)) throw new Error('Invalid imported render filename.');
+  if (!/^soft-body-[a-z0-9_-]+-\d+\.mp4$/u.test(filename) || !filename.endsWith(`-${plan.seed}.mp4`)) {
+    throw new Error('Invalid imported render filename.');
+  }
+  const render = manifest.render && typeof manifest.render === 'object' ? manifest.render : {};
+  assertNative3dQuality(render.raw, { seed: plan.seed, ...plan.renderRequest });
+  return { plan, channel, date, filename, render };
+}
+
+export async function importRenderedJob(config, manifest) {
+  const { plan, channel, date, filename, render } = validateRenderedManifest(config, manifest);
   return withStateLock(config.stateDir, async () => {
     const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
     const job = ensureJob(state, plan, channel);
     if (job.status === 'published') return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
-    const render = manifest.render && typeof manifest.render === 'object' ? manifest.render : {};
-    assertNative3dQuality(render.raw, { seed: plan.seed, ...plan.renderRequest });
     job.render = {
       ...job.render,
       status: 'ready',

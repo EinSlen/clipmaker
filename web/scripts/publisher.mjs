@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { readPublisherConfig } from '../src/automation/config.mjs';
 import { assertDate, dateInTimeZone } from '../src/automation/time.mjs';
-import { doctor, generate, importRenderedJob, publish, runDue, status } from '../src/automation/orchestrator.mjs';
+import { doctor, generate, importRenderedJob, publish, runDue, status, validateRenderedManifest } from '../src/automation/orchestrator.mjs';
 
 function option(args, name, fallback = undefined) {
   const index = args.indexOf(name);
@@ -68,6 +68,8 @@ async function main() {
     const source = path.resolve(manifestDirectory, String(manifest.video || ''));
     const filename = path.basename(source);
     if (!filename || source !== path.join(manifestDirectory, filename)) throw new Error('Invalid imported video path.');
+    // An invalid import must not overwrite a previously validated ready video.
+    validateRenderedManifest(config, { ...manifest, filename });
     const renderDirectory = path.resolve(path.dirname(config.configPath), '../renders');
     await fs.mkdir(renderDirectory, { recursive: true });
     const destination = path.join(renderDirectory, filename);
