@@ -37,14 +37,14 @@ type YoutubeStatus = {
 };
 
 const OBSTACLES = [
-  ["auto", "Automatique"],
+  ["auto", "Automatique — sélection principale"],
   ["moving-slide", "Rampe mobile"],
   ["stair-cascade", "Cascade d’escaliers"],
   ["v-stairs", "Barres en V"],
-  ["pipe-bend", "Tube courbé"],
+  ["pipe-bend", "Tube courbé — bêta manuelle"],
   ["peg-grid", "Grille de barres"],
-  ["twin-gears", "Double engrenage"],
-  ["compression-ring", "Anneau de compression"],
+  ["twin-gears", "Double engrenage — bêta manuelle"],
+  ["compression-ring", "Anneau de compression — bêta manuelle"],
 ] as const;
 
 function defaultChannel(index: number): PublisherChannelConfig {

@@ -185,7 +185,7 @@ jobs:
         run: |
           mkdir -p artifacts/scene/frames
           docker run --rm --init --volume "$PWD/artifacts/scene:/scene" clipmaker-ci:3d \
-            blender --background --factory-startup --python scripts/blender-soft-body-slide.py -- \
+            blender --background --factory-startup --python-exit-code 1 --python scripts/blender-soft-body-slide.py -- \
               --frames /scene/frames --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --width "$RENDER_WIDTH" --height "$RENDER_HEIGHT" --samples "${{ matrix.samples }}" \
               --seed "${{ matrix.seed }}" --softness 100 --theme ice --title "${{ matrix.title }}" \

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deep_3d:
+        description: Audit all seven 3D obstacle families at five softness levels
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,3 +82,47 @@ jobs:
         run: |
           cp web/.env.example web/.env.local
           docker compose config --quiet
+
+  soft-body-surface:
+    name: Blender surface contacts and repeat timing
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the production Blender environment
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:surface .
+      - name: Test contact skinning, every spawn and the animated reset
+        run: |
+          docker run --rm --init clipmaker-ci:surface \
+            blender --background --factory-startup --python-exit-code 1 \
+            --python /app/scripts/test_soft_body_surface_blender.py
+
+  soft-body-physics:
+    name: 3D audit · ${{ matrix.obstacle }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deep_3d }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 7
+      matrix:
+        obstacle: [moving-slide, stair-cascade, v-stairs, peg-grid, pipe-bend, twin-gears, compression-ring]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the production Blender environment
+        run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:audit .
+      - name: Audit the native simulation and rendered obstacle surfaces
+        run: |
+          mkdir -p artifacts/3d-audit
+          docker run --rm --init --volume "$PWD/artifacts/3d-audit:/output" clipmaker-ci:audit \
+            blender --background --factory-startup --python-exit-code 1 \
+            --python /app/scripts/audit-soft-body-3d.py -- \
+            --seeds 910103 --obstacles '${{ matrix.obstacle }}' --softness 0,25,55,75,100 \
+            --sample-fps 3 --check-surface --output /output/report.json
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: soft-body-audit-${{ matrix.obstacle }}
+          path: artifacts/3d-audit
+          if-no-files-found: error
+          retention-days: 7

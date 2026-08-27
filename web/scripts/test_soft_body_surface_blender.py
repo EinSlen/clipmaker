@@ -1,0 +1,118 @@
+"""Fast integration regressions executed inside Blender, without rendering."""
+
+import importlib.util
+from pathlib import Path
+import sys
+import unittest
+
+import bpy
+from mathutils import Vector
+from bpy_extras.object_utils import world_to_camera_view
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+from soft_body_variants import (
+    OBSTACLES, obstacle_specimen_depth_offsets, obstacle_specimen_offsets,
+    stage_motion_for, variant_for_seed,
+)
+
+spec = importlib.util.spec_from_file_location("soft_body_renderer", ROOT / "blender-soft-body-slide.py")
+renderer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(renderer)
+
+
+class SurfaceContactTests(unittest.TestCase):
+    def setUp(self):
+        renderer.reset_scene()
+        self.variant = variant_for_seed(910103, "v-stairs")
+        self.material = renderer.material("Test surface", (0.5, 0.5, 0.5, 1.0))
+
+    def box_surface(self):
+        bpy.ops.mesh.primitive_cube_add(size=1.0)
+        box = bpy.context.object
+        box.dimensions = (1.0, 1.0, 0.2)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        return renderer.ObstacleSurface((box,)).at_frame(1)
+
+    def constrain(self, target, anchor_z=0.3):
+        return renderer.constrain_visible_skin(
+            [target], [(0.0, 0.0, -0.2)],
+            [Vector((-0.1, anchor_z)), Vector((0.1, anchor_z))],
+            self.variant, self.box_surface(),
+        )
+
+    def test_cosmetic_fold_stops_above_the_actual_mesh(self):
+        shape, report = self.constrain((0.0, -0.04, 0.05))
+        self.assertGreaterEqual(shape[0][2], 0.107)
+        self.assertEqual(report["corrected_vertices"], 1)
+        self.assertEqual(report["inside_contacts"], 0)
+
+    def test_a_ray_cannot_skip_through_a_thin_obstacle(self):
+        shape, report = self.constrain((0.0, -0.04, -0.3))
+        self.assertGreaterEqual(shape[0][2], 0.107)
+        self.assertEqual(report["corrected_vertices"], 1)
+
+    def test_free_skin_is_not_changed(self):
+        target = (0.0, -0.04, 0.2)
+        shape, report = self.constrain(target)
+        for actual, expected in zip(shape[0], target):
+            self.assertAlmostEqual(actual, expected, places=6)
+        self.assertEqual(report["corrected_vertices"], 0)
+
+    def test_an_inside_spine_is_reported_not_hidden(self):
+        _shape, report = self.constrain((0.0, -0.04, 0.3), anchor_z=0.0)
+        self.assertEqual(report["inside_contacts"], 1)
+
+    def test_second_attempt_restarts_the_visible_ramp_clock(self):
+        variant = variant_for_seed(910103, "moving-slide")
+        ramp = renderer.add_ramp(
+            self.material, self.material, variant, 240, 30, ((2, 1, 120), (7, 121, 240)),
+        )
+        bpy.context.scene.frame_set(121)
+        expected = renderer.ramp_position(0.0, variant, 4.0, stage_motion_for(variant, 7).ramp_phase_offset)
+        self.assertAlmostEqual(ramp.location.x, expected, places=5)
+        bpy.context.scene.frame_set(150)
+        expected = renderer.ramp_position(29 / 30, variant, 4.0, stage_motion_for(variant, 7).ramp_phase_offset)
+        self.assertAlmostEqual(ramp.location.x, expected, places=5)
+
+    def test_every_family_has_a_clear_spawn(self):
+        for obstacle in OBSTACLES:
+            for seed in (910103, 910104, 910105):
+                with self.subTest(obstacle=obstacle.key, seed=seed):
+                    renderer.reset_scene()
+                    variant = variant_for_seed(seed, obstacle.key)
+                    material = renderer.material("Spawn test", (0.5, 0.5, 0.5, 1.0))
+                    renderer.add_receiver(material, material, variant)
+                    if obstacle.key == "moving-slide":
+                        renderer.add_ramp(material, material, variant, 1, 30, ((0, 1, 1),))
+                    else:
+                        renderer.add_obstacle_geometry(material, material, variant, 1, 30)
+                    surface = renderer.ObstacleSurface(bpy.context.collection.objects).at_frame(1)
+                    base, _faces = renderer.capsule_geometry(variant)
+                    for offset, depth in zip(obstacle_specimen_offsets(obstacle.key), obstacle_specimen_depth_offsets(obstacle.key)):
+                        points, impact, nodes, *_rest = renderer.simulate_chain(55, 0, 30, variant, 0, offset)[0]
+                        shape = renderer.skin_capsule(base, points, 0.55, impact, nodes, 0, variant)
+                        _shape, report = renderer.constrain_visible_skin(shape, base, points, variant, surface, depth)
+                        self.assertEqual(report["inside_contacts"], 0)
+                        self.assertEqual(report["corrected_vertices"], 0, "body starts intersecting an obstacle")
+
+    def test_v_stairs_spawn_and_outer_steps_fit_portrait_frame(self):
+        scene = bpy.context.scene
+        scene.render.resolution_x, scene.render.resolution_y = 1080, 1920
+        camera = renderer.add_camera(self.variant)
+        bpy.context.view_layer.update()
+        positions = [Vector((x, 0.0, z)) for segment in renderer.obstacle_segments(self.variant) for x, z in segment[:2]]
+        for offset in obstacle_specimen_offsets("v-stairs"):
+            points = renderer.simulate_chain(55, 0, 30, self.variant, 0, offset)[0][0]
+            positions.extend(Vector((point.x, 0.0, point.y + self.variant.shape.radius)) for point in points)
+        for position in positions:
+            projected = world_to_camera_view(scene, camera, position)
+            self.assertGreater(projected.x, 0.025)
+            self.assertLess(projected.x, 0.975)
+            self.assertGreater(projected.y, 0.06)
+            self.assertLess(projected.y, 0.91)
+
+
+if __name__ == "__main__":
+    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(SurfaceContactTests))
+    raise SystemExit(0 if result.wasSuccessful() else 1)

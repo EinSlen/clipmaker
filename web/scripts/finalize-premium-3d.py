@@ -95,6 +95,8 @@ def main() -> None:
 
     variant = renderer.variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
+    motion_payload = json.loads(events_path.read_text(encoding="utf-8"))
+    attempt_quality = renderer.validate_motion_preflight(motion_payload, variant, frame_count, args.fps)
     events, attempt_cuts = read_motion_events(events_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,12 +106,12 @@ def main() -> None:
         staged_frames = root / "frames"
         stage_frame_sequence(frames, staged_frames, frame_count)
         repaired = renderer.repair_stage_cut_frames(
-            staged_frames, frame_count, len(stages), attempt_cuts
+            staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key
         )
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
         music = root / "original-soft-body-bed.wav"
-        video_filter = renderer.build_video_filter(args.duration, stages)
+        video_filter = renderer.build_video_filter(args.duration, stages, variant.obstacle.key)
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -149,6 +151,8 @@ def main() -> None:
         "music_hits": len(events),
         "events": len(events),
         "event_source": "simulated-collision-peaks" if events else "no-physical-events",
+        "physics_preflight": "passed",
+        "attempt_quality": attempt_quality,
         "foley_event_times": [round(float(event["time"]), 3) for event in events],
         "foley_event_types": sorted({str(event.get("kind", "contact")) for event in events}),
         "trials": len(stages),
