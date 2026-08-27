@@ -164,6 +164,8 @@ jobs:
 
       - name: Import today's completed 3D renders
         if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           expected="$(python3 - <<'PY'
           import json
@@ -176,28 +178,51 @@ jobs:
           if [ "$expected" -eq 0 ]; then exit 0; fi
           today="$(TZ=Europe/Paris date +%F)"
           mkdir -p artifacts/soft-body-imports
-          for run_id in $(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/soft-body-artifact.yml/runs?event=schedule&status=success&per_page=5" \
-            --jq '.workflow_runs[].id'); do
+          imported=0
+          declare -A imported_channels=()
+          # Cloudflare starts the same production workflow via dispatch. Test
+          # branches are never eligible, and a newer render must win over an
+          # older run for the same day (an ascending path sort did the reverse).
+          for run_id in $(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/soft-body-artifact.yml/runs" \
+            -f status=success -f branch="$DEFAULT_BRANCH" -f per_page=20 \
+            --jq '.workflow_runs | sort_by(.created_at, .run_number) | reverse | .[] | select(.event == "schedule" or .event == "workflow_dispatch") | .id'); do
             while IFS=$'\t' read -r artifact_id artifact_name; do
               [ -n "$artifact_id" ] || continue
               target="artifacts/soft-body-imports/${run_id}-${artifact_name}"
               mkdir -p "$target"
               gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/soft-body-artifact.zip
               unzip -oq /tmp/soft-body-artifact.zip -d "$target"
+              manifest="$target/publisher-import.json"
+              test -s "$manifest" || { echo "Manifeste 3D absent : $artifact_name" >&2; exit 1; }
+              channel_id="$(python3 - "$manifest" "$today" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          config = json.loads(Path("web/config/publisher.json").read_text(encoding="utf-8"))
+          channel_id = manifest.get("channelId")
+          if any(channel.get("enabled", True) and channel.get("id") == channel_id
+                 and channel.get("game", {}).get("id") == "soft-body-slide"
+                 for channel in config.get("channels", [])):
+              if manifest.get("date") != sys.argv[2]:
+                  raise SystemExit("Date du manifeste 3D incohérente avec l'artefact quotidien")
+              print(channel_id)
+          PY
+              )"
+              # A manual preview uses manual-3d, not a configured daily channel.
+              [ -n "$channel_id" ] || continue
+              if [ -n "${imported_channels[$channel_id]:-}" ]; then continue; fi
+              # Fail closed on invalid new evidence; do not fall back to an
+              # older video that lacks the current contact-quality checks.
+              docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs import-3d \
+                --config /repo/web/config/publisher.json --manifest "/repo/$manifest" > "${manifest%.json}-result.json"
+              imported_channels[$channel_id]=1
+              imported=$((imported + 1))
             done < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
-              --jq ".artifacts[] | select(.name | startswith(\"soft-body-daily-${today}-\")) | [.id,.name] | @tsv")
+              --jq ".artifacts[] | select(.expired == false) | select(.name | startswith(\"soft-body-daily-${today}-\")) | [.id,.name] | @tsv")
+            if [ "$imported" -eq "$expected" ]; then break; fi
           done
-          imported=0
-          declare -A imported_channels=()
-          while IFS= read -r manifest; do
-            channel_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["channelId"])' "$manifest")"
-            if [ -n "${imported_channels[$channel_id]:-}" ]; then continue; fi
-            docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs import-3d \
-              --config /repo/web/config/publisher.json --manifest "/repo/$manifest" > "${manifest%.json}-result.json"
-            imported_channels[$channel_id]=1
-            imported=$((imported + 1))
-          done < <(find artifacts/soft-body-imports -name publisher-import.json -type f | sort -u)
           test "$imported" -eq "$expected" || {
             echo "Rendus 3D prêts : $imported/$expected. La publication est arrêtée pour ne pas envoyer une mauvaise vidéo." >&2
             exit 1

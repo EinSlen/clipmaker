@@ -92,6 +92,22 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
   }
 });
 
+test('daily 3D import prefers the latest default-branch render and accepts the cloud scheduler', async () => {
+  const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
+  const source = await fs.readFile(workflow, 'utf8');
+  const step = source.split("- name: Import today's completed 3D renders")[1].split('- name: Check connected accounts')[0];
+  assert.match(step, /DEFAULT_BRANCH:.*github\.event\.repository\.default_branch/u);
+  assert.ok(step.includes('-f branch="$DEFAULT_BRANCH"'));
+  assert.ok(step.includes('sort_by(.created_at, .run_number) | reverse'));
+  assert.ok(step.includes('.event == "schedule" or .event == "workflow_dispatch"'));
+  assert.ok(step.includes('manifest.get("date") != sys.argv[2]'));
+  assert.ok(step.includes('channel.get("id") == channel_id'));
+  assert.ok(step.includes('select(.expired == false)'));
+  assert.doesNotMatch(step, /event=schedule|find artifacts\/soft-body-imports.*sort/u);
+  assert.ok(step.indexOf('declare -A imported_channels') < step.indexOf('for run_id'));
+  assert.ok(step.indexOf('imported_channels[$channel_id]=1') < step.indexOf('if [ "$imported" -eq "$expected" ]'));
+});
+
 test('date helpers are deterministic across month boundaries', () => {
   assert.equal(addDays('2026-08-31', 1), '2026-09-01');
   assert.equal(dateInTimeZone(new Date('2026-08-14T23:30:00Z'), 'Europe/Paris'), '2026-08-15');
