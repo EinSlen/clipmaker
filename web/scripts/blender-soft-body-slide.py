@@ -420,8 +420,12 @@ def obstacle_circles(time: float, variant: SoftBodyVariant):
         return static_obstacle_circles(key)
     if key == "compression-ring":
         angle = math.tau * time / 1.72 - math.pi / 2
-        half_gap = 0.92 - 0.28 * (0.5 + 0.5 * math.sin(angle))
-        velocity = -0.28 * 0.5 * math.tau / 1.72 * math.cos(angle)
+        # The earlier 0.28 squeeze closed the rollers more narrowly than even
+        # the flattened collision section. Alternating projections then had no
+        # geometric solution and could tear the chain. Keep a visible press,
+        # but retain a physically solvable clearance throughout the cycle.
+        half_gap = 0.92 - 0.14 * (0.5 + 0.5 * math.sin(angle))
+        velocity = -0.14 * 0.5 * math.tau / 1.72 * math.cos(angle)
         return [
             (Vector((-half_gap, 3.82)), 0.58, Vector((-velocity, 0.0)), 0.0),
             (Vector((half_gap, 3.82)), 0.58, Vector((velocity, 0.0)), 0.0),
@@ -1096,8 +1100,12 @@ def _chain_ticks(
         "stair-cascade": 0.62,
         "v-stairs": 0.25,
         "peg-grid": 0.42,
-        "twin-gears": 0.36,
-        "compression-ring": 0.42,
+        "pipe-bend": 0.65,
+        "twin-gears": 0.24,
+        # These close-ups use a deliberate slow-motion physical timescale so
+        # an outcome is still visible at the cut rather than 1-2 seconds of an
+        # empty portrait frame.
+        "compression-ring": 0.14,
     }.get(variant.obstacle.key, 1.0)
     exit_time = effective_ramp_exit_time(
         variant,

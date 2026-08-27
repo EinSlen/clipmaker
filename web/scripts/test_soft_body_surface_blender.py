@@ -117,6 +117,19 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertGreaterEqual(quality["minimum_segment_ratio"], 0.96)
         self.assertLessEqual(quality["maximum_segment_ratio"], 1.04)
 
+    def test_pressure_and_gears_remain_stable_and_visible_at_a_soft_impact(self):
+        for obstacle, seed in (("compression-ring", 910104), ("twin-gears", 910105)):
+            with self.subTest(obstacle=obstacle):
+                variant = variant_for_seed(seed, obstacle)
+                simulation = renderer.simulate_chain(75, 115, 30, variant, 3)
+                self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
+                self.assertEqual(renderer.inspect_simulation_framing([simulation], variant, 30)["issues"], [])
+
+    def test_rigid_triple_stair_misses_stay_in_the_portrait_composition(self):
+        variant = variant_for_seed(910105, "stair-cascade")
+        simulations = renderer.simulate_specimens(0, 120, 30, variant, 0)
+        self.assertEqual(renderer.inspect_simulation_framing(simulations, variant, 30)["issues"], [])
+
     def test_portrait_projection_matches_blender_for_every_camera(self):
         scene = bpy.context.scene
         scene.render.resolution_x, scene.render.resolution_y = 1080, 1920
