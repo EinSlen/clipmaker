@@ -53,6 +53,7 @@ function native3dEvidence(seed) {
       stage: index + 1, softness, attempt: 1, body,
       start_frame: index * 180 + 1, end_frame: (index + 1) * 180,
       issues: [], surface: { inside_contacts: 0 },
+      framing: { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
       inter_body_contact: { frames_checked: 180, issues: [] },
     }))),
   };
@@ -69,6 +70,12 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
     { ...good, attempt_quality: [...good.attempt_quality, good.attempt_quality[0]] },
     { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, issues: ['constraint-tear'] } : r) },
     { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, surface: { inside_contacts: 1 } } : r) },
+    ...[undefined, { frames_checked: 180, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: 1.5, maximum_side_exit_seconds: 0, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0.7, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: Number.NaN, maximum_side_exit_seconds: 0, issues: [] },
+      { frames_checked: 179, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
+    ].map((framing) => ({ ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, framing } : r) })),
     { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, inter_body_contact: { frames_checked: 180, issues: ['specimens-interpenetrate'] } } : r) },
     { ...good, attempt_quality: good.attempt_quality.map((r) => r.stage === 2 ? { ...r, start_frame: 180 } : r) },
   ];

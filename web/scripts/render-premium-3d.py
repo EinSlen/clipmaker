@@ -29,7 +29,7 @@ def softness_stages(seed: int) -> tuple[int, ...]:
 def validate_motion_preflight(payload, variant, frame_count, fps):
     """Require native physics/surface evidence for every body of every take."""
     if (
-        payload.get("preflight_schema") != 2
+        payload.get("preflight_schema") != 3
         or payload.get("obstacle") != variant.obstacle.key
         or payload.get("stages") != list(variant.stages)
         or payload.get("fps") != fps
@@ -53,6 +53,13 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
         surface = item.get("surface")
         if not isinstance(surface, dict) or surface.get("inside_contacts") != 0:
             raise ValueError("Native 3D surface contacts were not validated")
+        framing = item.get("framing")
+        if (not isinstance(framing, dict) or framing.get("issues") != []
+            or framing.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1
+            or any(not isinstance(framing.get(key), (int, float))
+                   or not math.isfinite(framing[key]) or not 0 <= framing[key] <= limit
+                   for key, limit in (("maximum_empty_seconds", 1.0), ("maximum_side_exit_seconds", 0.5)))):
+            raise ValueError("Native 3D camera framing was not validated")
         if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
             between = item.get("inter_body_contact")
             if not isinstance(between, dict) or between.get("issues") != [] or between.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1:

@@ -37,6 +37,7 @@ from soft_body_variants import (
     supported_body_damping,
     variant_for_seed,
 )
+from soft_body_framing import inspect_simulation_framing
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -128,6 +129,32 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_framing_blocks_sustained_side_exits_and_empty_comparisons(self):
+        variant = variant_for_seed(910103, "moving-slide")
+        def frames(position, count=61):
+            return [([position],)] * count
+        visible = frames((0.0, 3.0))
+        self.assertEqual(inspect_simulation_framing([visible], variant, 30)["issues"], [])
+        sideways = inspect_simulation_framing([frames((-20.0, 3.0))], variant, 30)
+        self.assertIn("body-left-camera-side", sideways["issues"])
+        self.assertIn("empty-comparison-tail", sideways["issues"])
+        lower_exit = frames((0.0, 3.0), 45) + frames((0.0, -20.0), 16)
+        self.assertEqual(inspect_simulation_framing([lower_exit], variant, 30)["issues"], [])
+        self.assertIn("empty-comparison-tail", inspect_simulation_framing(
+            [frames((0.0, -20.0))], variant, 30)["issues"])
+
+    def test_framing_keeps_a_multi_body_take_while_a_specimen_finishes(self):
+        variant = variant_for_seed(910103, "v-stairs")
+        visible = [([(0.0, 3.0)],)] * 61
+        finished = [([(0.0, -20.0)],)] * 61
+        report = inspect_simulation_framing([visible, finished], variant, 30)
+        self.assertEqual(report["issues"], [])
+        self.assertEqual(report["frames_checked"], 60)
+        with self.assertRaises(ValueError):
+            inspect_simulation_framing([visible], variant, 30)
+        with self.assertRaises(ValueError):
+            inspect_simulation_framing([visible, finished[:-1]], variant, 30)
+
     def test_obstacle_attempt_spans_cover_every_frame_without_empty_tails(self):
         for obstacle in OBSTACLES:
             for softness in (0, 25, 50, 75, 100):
@@ -172,8 +199,10 @@ class SoftBodyVariantTests(unittest.TestCase):
             for body in (1, 2):
                 quality.append({"stage": stage, "softness": softness, "attempt": 1, "body": body,
                     "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": end - start + 1, "maximum_empty_seconds": 0,
+                                "maximum_side_exit_seconds": 0, "issues": []},
                     "inter_body_contact": {"issues": [], "frames_checked": end - start + 1}})
-        payload = {"preflight_schema": 2, "obstacle": "v-stairs", "stages": list(variant.stages),
+        payload = {"preflight_schema": 3, "obstacle": "v-stairs", "stages": list(variant.stages),
             "fps": 30, "duration": 30, "attempt_quality": quality}
         self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
         with self.assertRaisesRegex(ValueError, "Incomplete"):
@@ -182,6 +211,13 @@ class SoftBodyVariantTests(unittest.TestCase):
             PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_quality": [{**quality[0], "surface": {"inside_contacts": 1}}, *quality[1:]]}, variant, 900, 30)
         with self.assertRaisesRegex(ValueError, "Missing"):
             PREMIUM_RENDERER.validate_motion_preflight({}, variant, 900, 30)
+        with self.assertRaisesRegex(ValueError, "Missing"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "preflight_schema": 2}, variant, 900, 30)
+        for invalid in (None, {"issues": [], "frames_checked": 120},
+                        {"issues": [], "frames_checked": 120, "maximum_empty_seconds": 1.5, "maximum_side_exit_seconds": 0}):
+            with self.assertRaisesRegex(ValueError, "framing"):
+                PREMIUM_RENDERER.validate_motion_preflight({**payload,
+                    "attempt_quality": [{**quality[0], "framing": invalid}, *quality[1:]]}, variant, 900, 30)
 
     def test_fast_obstacles_repeat_during_long_levels(self):
         for obstacle in ("moving-slide", "pipe-bend", "twin-gears", "compression-ring"):

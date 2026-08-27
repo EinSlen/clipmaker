@@ -254,6 +254,7 @@ def main() -> int:
                         softness, attempt_span[1] - attempt_span[0] + 1, args.production_fps,
                         variant, stage_index + attempt_index * len(variant.stages),
                     )
+                    framing = renderer.inspect_simulation_framing(simulations, variant, args.production_fps)
                     for instance_index, instance_offset in enumerate(
                         obstacle_specimen_offsets(obstacle.key)
                     ):
@@ -273,6 +274,8 @@ def main() -> int:
                                 simulations[instance_index],
                             )
                         )
+                        stage["attempts"][-1]["framing"] = framing
+                        stage["attempts"][-1]["issues"].extend(framing["issues"])
                         checkpoint()
                         print("CLIPMAKER_AUDIT_PROGRESS=" + json.dumps({
                             "seed": seed, "obstacle": obstacle.key, "softness": softness,

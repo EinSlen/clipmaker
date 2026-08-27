@@ -1,6 +1,7 @@
 """Fast integration regressions executed inside Blender, without rendering."""
 
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 import sys
 import unittest
@@ -15,6 +16,7 @@ from soft_body_variants import (
     OBSTACLES, obstacle_specimen_depth_offsets, obstacle_specimen_offsets,
     stage_motion_for, variant_for_seed,
 )
+from soft_body_framing import project_point
 
 spec = importlib.util.spec_from_file_location("soft_body_renderer", ROOT / "blender-soft-body-slide.py")
 renderer = importlib.util.module_from_spec(spec)
@@ -103,6 +105,64 @@ class SurfaceContactTests(unittest.TestCase):
             self.assertEqual(len(first.physics_samples), len(second.physics_samples))
             for a, b in zip(first[-1][0], second[-1][0]):
                 self.assertLess((a - b).length, 1e-6)
+
+    def test_quarter_soft_moving_ramp_does_not_stretch_at_a_fast_impact(self):
+        variant = variant_for_seed(910105, "moving-slide")
+        # Preserve the original high-energy repro, independently of the
+        # gentler authored ramp used for publication now.
+        variant = replace(variant, ramp=replace(variant.ramp, slope=0.17, lip_rise=0.94))
+        simulation = renderer.simulate_chain(25, 115, 30, variant, 1)
+        quality = renderer.simulation_quality(simulation, variant)
+        self.assertEqual(quality["issues"], [])
+        self.assertGreaterEqual(quality["minimum_segment_ratio"], 0.96)
+        self.assertLessEqual(quality["maximum_segment_ratio"], 1.04)
+
+    def test_portrait_projection_matches_blender_for_every_camera(self):
+        scene = bpy.context.scene
+        scene.render.resolution_x, scene.render.resolution_y = 1080, 1920
+        for obstacle in OBSTACLES:
+            variant = variant_for_seed(910103, obstacle.key)
+            camera = renderer.add_camera(variant)
+            bpy.context.view_layer.update()
+            for position in ((-2.0, -1.15, 6.0), (2.7, 1.15, 2.5), (0.0, 0.0, 0.0)):
+                expected = world_to_camera_view(scene, camera, Vector(position))
+                actual = project_point(position, obstacle)
+                self.assertAlmostEqual(actual[0], expected.x, places=5)
+                self.assertAlmostEqual(actual[1], expected.y, places=5)
+
+    def test_pipe_glass_uses_the_exact_continuous_collision_path(self):
+        variant = variant_for_seed(910104, "pipe-bend")
+        segments = renderer.obstacle_segments(variant)
+        renderer.add_obstacle_geometry(self.material, self.material, variant, 1, 30)
+        for side in range(2):
+            walls = segments[side::2]
+            for first, second in zip(walls, walls[1:]):
+                self.assertEqual(first[1], second[0])
+            curve = bpy.data.objects[f"Continuous glass pipe wall {side + 1}"].data
+            self.assertTrue(curve.use_fill_caps)
+            self.assertEqual(curve.splines[0].type, "POLY")
+            visible = [(point.co.x, point.co.z) for point in curve.splines[0].points]
+            expected = [walls[0][0], *[wall[1] for wall in walls]]
+            self.assertEqual(visible, expected)
+
+    def test_pipe_cap_contact_from_outside_is_not_reported_as_inside(self):
+        variant = variant_for_seed(910104, "pipe-bend")
+        renderer.add_obstacle_geometry(self.material, self.material, variant, 1, 30)
+        wall = bpy.data.objects["Continuous glass pipe wall 2"]
+        tree = renderer.ObstacleSurface((wall,)).at_frame(1)
+        anchor = Vector((0.5000838637, -0.04, 2.8064873219))
+        target = Vector((0.82, -0.04, 2.925))
+        direction = (target - anchor).normalized()
+        hit, normal, _face, _distance = tree.ray_cast(anchor, direction, 0.5)
+        self.assertIsNotNone(hit)
+        self.assertLess(normal.dot(direction), 0.0)
+        shape, report = renderer.constrain_visible_skin(
+            [tuple(target)], [(0.0, 0.0, 0.0)],
+            [Vector((anchor.x, anchor.z))] * 2, variant, tree,
+        )
+        self.assertEqual(report["inside_contacts"], 0)
+        self.assertEqual(report["corrected_vertices"], 1)
+        self.assertLess((Vector(shape[0]) - anchor).length, (hit - anchor).length)
 
     def test_second_attempt_restarts_the_visible_ramp_clock(self):
         variant = variant_for_seed(910103, "moving-slide")

@@ -36,6 +36,10 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
       || !Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > frames
       || !Array.isArray(report.issues) || report.issues.length
       || report.surface?.inside_contacts !== 0) fail();
+    const framing = report.framing;
+    if (framing?.frames_checked !== end - start + 1 || !Array.isArray(framing?.issues) || framing.issues.length
+      || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
+      || !Number.isFinite(framing.maximum_side_exit_seconds) || framing.maximum_side_exit_seconds < 0 || framing.maximum_side_exit_seconds > 0.5) fail();
     if (specimens > 1 && (report.inter_body_contact?.frames_checked !== end - start + 1
       || !Array.isArray(report.inter_body_contact?.issues) || report.inter_body_contact.issues.length)) fail();
     const key = `${stage}:${attempt}`;

@@ -39,6 +39,7 @@ from soft_body_variants import (
     supported_body_damping,
     variant_for_seed,
 )
+from soft_body_framing import camera_location, inspect_simulation_framing
 
 
 
@@ -306,11 +307,13 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
-@lru_cache(maxsize=64)
 def obstacle_segments(variant: SoftBodyVariant):
     """Return visible/collision-aligned line obstacles in the simulation plane."""
+    return static_obstacle_segments(variant.obstacle.key)
 
-    key = variant.obstacle.key
+
+@lru_cache(maxsize=16)
+def static_obstacle_segments(key):
     if key == "peg-grid":
         # The source grid has a real landing rail, not a tube or an invisible
         # catch. Bodies finish the squeeze, land and slide during the payoff.
@@ -338,22 +341,50 @@ def obstacle_segments(variant: SoftBodyVariant):
             (-0.42, 3.94), (-0.08, 3.75), (0.25, 3.55), (0.36, 3.24),
             (0.36, 2.92),
         ]
+        knots = [Vector(point) for point in centerline]
+        centerline = []
+        for index in range(len(knots) - 1):
+            a, b = knots[max(0, index - 1)], knots[index]
+            c, d = knots[index + 1], knots[min(index + 2, len(knots) - 1)]
+            for sample in range(4):
+                u = sample / 4.0
+                point = 0.5 * ((2.0 * b) + (-a + c) * u
+                    + (2.0 * a - 5.0 * b + 4.0 * c - d) * u * u
+                    + (-a + 3.0 * b - 3.0 * c + d) * u * u * u)
+                centerline.append(tuple(point))
+        centerline.append(tuple(knots[-1]))
         walls = []
         half_opening = 0.47
+        normals = []
+        for start, end in zip(centerline, centerline[1:]):
+            tangent = (Vector(end) - Vector(start)).normalized()
+            normals.append(Vector((-tangent.y, tangent.x)))
+        offsets = []
+        for index in range(len(centerline)):
+            before = normals[max(0, index - 1)]
+            after = normals[min(index, len(normals) - 1)]
+            bisector = (before + after).normalized()
+            offsets.append(bisector * (half_opening / max(0.25, bisector.dot(after))))
+        # Adjacent segments share the SAME corner. Independently offset
+        # tangents left small collider gaps, while the smoothed glass took a
+        # different path altogether. Use a closed, joined polyline for both.
         for index in range(len(centerline) - 1):
-            start, end = centerline[index], centerline[index + 1]
-            dx, dz = end[0] - start[0], end[1] - start[1]
-            length = max(1e-9, math.hypot(dx, dz))
-            normal = (-dz / length, dx / length)
             for side in (-1.0, 1.0):
-                offset = (normal[0] * half_opening * side, normal[1] * half_opening * side)
-                walls.append((
-                    ((start[0] + offset[0]), (start[1] + offset[1])),
-                    ((end[0] + offset[0]), (end[1] + offset[1])),
-                    0.085,
-                ))
+                start = Vector(centerline[index]) + offsets[index] * side
+                end = Vector(centerline[index + 1]) + offsets[index + 1] * side
+                walls.append((tuple(start), tuple(end), 0.090))
         return walls
     return []
+
+
+@lru_cache(maxsize=16)
+def obstacle_segment_bounds(key):
+    # Keep the original contact order and exact bounds, but do not recalculate
+    # four min/max pairs millions of times while checking a smooth pipe.
+    return tuple((start, end, thickness,
+        min(start[0], end[0]), max(start[0], end[0]),
+        min(start[1], end[1]), max(start[1], end[1]))
+        for start, end, thickness in static_obstacle_segments(key))
 
 
 @lru_cache(maxsize=16)
@@ -523,12 +554,13 @@ def add_obstacle_geometry(
             curve.resolution_u = 10
             curve.bevel_depth = 0.085
             curve.bevel_resolution = 5
-            spline = curve.splines.new("NURBS")
+            curve.use_fill_caps = True
+            # The shared path is already smoothly sampled. A second NURBS
+            # interpolation would move the visible glass off its colliders.
+            spline = curve.splines.new("POLY")
             spline.points.add(len(path) - 1)
             for point, coordinate in zip(spline.points, path):
                 point.co = (coordinate[0], 0.0, coordinate[1], 1.0)
-            spline.use_endpoint_u = True
-            spline.order_u = min(3, len(path))
             wall = bpy.data.objects.new(f"Continuous glass pipe wall {side + 1}", curve)
             bpy.context.collection.objects.link(wall)
             wall.data.materials.append(glass)
@@ -853,13 +885,13 @@ def collide_point(
                     previous = point - velocity
 
     if variant.obstacle.key != "moving-slide":
-        for start, end, thickness in obstacle_segments(variant):
+        for start, end, thickness, min_x, max_x, min_z, max_z in obstacle_segment_bounds(variant.obstacle.key):
             padding = radius + thickness + 0.06
             if (
-                point.x < min(start[0], end[0]) - padding
-                or point.x > max(start[0], end[0]) + padding
-                or point.y < min(start[1], end[1]) - padding
-                or point.y > max(start[1], end[1]) + padding
+                point.x < min_x - padding
+                or point.x > max_x + padding
+                or point.y < min_z - padding
+                or point.y > max_z + padding
             ):
                 continue
             point, previous, intensity, contact = resolve_obstacle_contact(
@@ -1064,6 +1096,7 @@ def _chain_ticks(
         "v-stairs": 0.25,
         "peg-grid": 0.42,
         "twin-gears": 0.36,
+        "compression-ring": 0.42,
     }.get(variant.obstacle.key, 1.0)
     exit_time = effective_ramp_exit_time(
         variant,
@@ -1206,11 +1239,15 @@ def _chain_ticks(
                         frame_ramp_intensity = max(frame_ramp_intensity, ramp_hit)
                         frame_receiver_intensity = max(frame_receiver_intensity, receiver_hit)
                         node_intensity[index] = max(node_intensity[index], intensity)
-                if variant.obstacle.key in {"pipe-bend", "twin-gears"}:
-                    # In a tight bend the final collider projection can undo
-                    # an adjacent length constraint. Finish to convergence
-                    # without bending targets fighting the narrow passage.
-                    # This numerical cleanup must not inject a new velocity.
+                if variant.obstacle.key in {"pipe-bend", "twin-gears", "moving-slide", "compression-ring"} and any(
+                    abs((second - first).length / rest - 1.0) > 0.035
+                    for first, second in zip(points, points[1:])
+                ):
+                    # The final collider projection can undo an adjacent
+                    # length constraint in a tight bend OR a fast moving-ramp
+                    # impact. Finish without bending targets fighting the
+                    # contact surface.
+                    # Numerical cleanup must not inject a new velocity.
                     before_cleanup = [point.copy() for point in points]
                     for cleanup in range(80):
                         error = max(abs((second - first).length / rest - 1.0)
@@ -1565,12 +1602,14 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
     expected_rest = 2.0 * variant.shape.cylinder_half / 40.0
     minimum_ratio = math.inf
     maximum_ratio = 0.0
+    maximum_coordinate = 0.0
     finite = True
     centers_y = []
     for points, *_rest in simulated:
         centers_y.append(sum(point.y for point in points) / len(points))
         for point in points:
             finite = finite and math.isfinite(point.x) and math.isfinite(point.y)
+            maximum_coordinate = max(maximum_coordinate, abs(point.x), abs(point.y))
         for first, second in zip(points, points[1:]):
             ratio = (second - first).length / expected_rest
             minimum_ratio = min(minimum_ratio, ratio)
@@ -1594,6 +1633,8 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
     issues = []
     if not finite:
         issues.append("non-finite-coordinate")
+    if maximum_coordinate > 25.0:
+        issues.append("left-scene-before-cut")
     if minimum_ratio < 0.82 or maximum_ratio > 1.18:
         issues.append("constraint-tear")
     if contact_peak < 0.20:
@@ -1608,6 +1649,7 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
         "maximum_segment_ratio": round(maximum_ratio, 4),
         "maximum_physics_step": round(maximum_physics_step, 4),
         "vertical_drop": round(vertical_drop, 4),
+        "maximum_coordinate": round(maximum_coordinate, 4),
         "receiver_entries": len(getattr(simulated, "receiver_entries", ())),
         "first_receiver_entry": (
             round(float(simulated.receiver_entries[0][0]), 4)
@@ -1869,6 +1911,11 @@ class ObstacleSurface:
             try:
                 bm = bmesh.new()
                 bm.from_mesh(mesh)
+                # Curve bevel caps duplicate the rim vertices. Recalculating
+                # their normals as disconnected disks can turn an exterior
+                # entry into a false inside-spine report. Weld only coincident
+                # vertices in this temporary query mesh before orienting it.
+                bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
                 bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
                 bm.to_mesh(mesh)
                 bm.free()
@@ -2195,11 +2242,7 @@ def add_background(value):
 
 def add_camera(variant: SoftBodyVariant):
     target = variant.obstacle
-    if target.key == "stair-cascade":
-        location = (target.camera_target_x + 6.70, -11.50, 7.50)
-    else:
-        location = (target.camera_target_x + 1.05, -14.8, 7.25)
-    bpy.ops.object.camera_add(location=location)
+    bpy.ops.object.camera_add(location=camera_location(target))
     camera = bpy.context.object
     camera.name = "Fixed reference camera"
     camera.data.type = "ORTHO"
@@ -2276,6 +2319,7 @@ def main() -> None:
                 softness, attempt_end - attempt_start + 1, args.fps, variant,
                 stage_index + attempt_index * len(variant.stages),
             )
+            framing = inspect_simulation_framing(simulations, variant, args.fps)
             for instance_index, instance_offset in enumerate(specimen_offsets):
                 rotation_offset = 0.0
                 if len(specimen_offsets) > 1:
@@ -2299,6 +2343,8 @@ def main() -> None:
                     tuple((simulation, specimen_depths[index]) for index, simulation in enumerate(simulations) if index != instance_index),
                 )
                 all_events.extend(events)
+                quality["framing"] = framing
+                quality["issues"].extend(framing["issues"])
                 attempt_objects.append(_capsule)
                 attempt_reports.append({
                         "stage": stage_index + 1,
@@ -2321,7 +2367,7 @@ def main() -> None:
         events_path.write_text(
             json.dumps(
                 {
-                    "preflight_schema": 2,
+                    "preflight_schema": 3,
                     "obstacle": variant.obstacle.key,
                     "fps": args.fps,
                     "duration": frame_end / args.fps,
