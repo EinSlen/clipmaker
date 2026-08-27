@@ -11,6 +11,10 @@ on:
         description: Audit all seven 3D obstacle families at five softness levels
         type: boolean
         default: false
+      audit_seeds:
+        description: Comma-separated deterministic seeds for the deep 3D audit
+        type: string
+        default: "910103,910104,910105"
 
 permissions:
   contents: read
@@ -102,6 +106,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.deep_3d }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
+    env:
+      AUDIT_SEEDS: ${{ inputs.audit_seeds || '910103,910104,910105' }}
     strategy:
       fail-fast: false
       max-parallel: 7
@@ -113,11 +119,12 @@ jobs:
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:audit .
       - name: Audit the native simulation and rendered obstacle surfaces
         run: |
+          [[ "$AUDIT_SEEDS" =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "Invalid audit seeds" >&2; exit 1; }
           mkdir -p artifacts/3d-audit
           docker run --rm --init --volume "$PWD/artifacts/3d-audit:/output" clipmaker-ci:audit \
             blender --background --factory-startup --python-exit-code 1 \
             --python /app/scripts/audit-soft-body-3d.py -- \
-            --seeds 910103 --obstacles '${{ matrix.obstacle }}' --softness 0,25,55,75,100 \
+            --seeds "$AUDIT_SEEDS" --obstacles '${{ matrix.obstacle }}' --softness 0,25,55,75,100 \
             --sample-fps 3 --check-surface --output /output/report.json
       - uses: actions/upload-artifact@v6
         if: ${{ always() }}

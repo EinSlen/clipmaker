@@ -10,6 +10,7 @@ import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue
 import { loadState, saveState, withStateLock } from './state.mjs';
 import { buildPublisherSummary } from './summary.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
+import { assertNative3dQuality } from './native-3d-quality.mjs';
 
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'clipmaker-publisher-'));
@@ -40,6 +41,40 @@ function sampleChannel() {
     tiktok: { enabled: false, username: null, musicId: null, visibility: 'private', confirmPublic: false },
   };
 }
+
+function native3dEvidence(seed) {
+  const stages = [0, 25, 55, 75, 100];
+  return {
+    physics_preflight: 'passed', game: 'soft-body-slide', seed, duration: 30,
+    render_width: 1080, render_height: 1920, render_fps: 30, output_fps: 30,
+    frames: 900, variant_obstacle: 'peg-grid', softness_stages: stages,
+    attempt_quality: stages.flatMap((softness, index) => [1, 2].map((body) => ({
+      stage: index + 1, softness, attempt: 1, body,
+      start_frame: index * 180 + 1, end_frame: (index + 1) * 180,
+      issues: [], surface: { inside_contacts: 0 },
+      inter_body_contact: { frames_checked: 180, issues: [] },
+    }))),
+  };
+}
+
+test('3D upload evidence rejects missing bodies, overlaps, defects and old low-fps renders', () => {
+  const expected = { seed: 123, duration: 30, obstacle: 'auto' };
+  const good = native3dEvidence(123);
+  assert.doesNotThrow(() => assertNative3dQuality(good, expected));
+  const corrupted = [
+    {}, { ...good, physics_preflight: 'failed' }, { ...good, seed: 124 },
+    { ...good, render_fps: 6 }, { ...good, render_width: 432 },
+    { ...good, attempt_quality: good.attempt_quality.slice(1) },
+    { ...good, attempt_quality: [...good.attempt_quality, good.attempt_quality[0]] },
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, issues: ['constraint-tear'] } : r) },
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, surface: { inside_contacts: 1 } } : r) },
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, inter_body_contact: { frames_checked: 180, issues: ['specimens-interpenetrate'] } } : r) },
+    { ...good, attempt_quality: good.attempt_quality.map((r) => r.stage === 2 ? { ...r, start_frame: 180 } : r) },
+  ];
+  for (const evidence of corrupted) {
+    assert.throws(() => assertNative3dQuality(evidence, expected), /3D publication blocked/u);
+  }
+});
 
 test('date helpers are deterministic across month boundaries', () => {
   assert.equal(addDays('2026-08-31', 1), '2026-09-01');
@@ -310,13 +345,32 @@ test('a native 3D artifact is imported with the deterministic daily seed', async
     channelId: channel.id,
     seed: plan.seed,
     filename: `soft-body-peg-grid-${plan.seed}.mp4`,
-    render: { title: 'HOW SOFT CAN IT GET?', duration: 30, outcome: 'comparison-complete', variantKey: 'peg-grid' },
+    render: { title: 'HOW SOFT CAN IT GET?', duration: 30, outcome: 'comparison-complete', variantKey: 'peg-grid', raw: native3dEvidence(plan.seed) },
   });
   assert.equal(result.job.render.status, 'ready');
   assert.equal(result.job.render.filename, `soft-body-peg-grid-${plan.seed}.mp4`);
   await assert.rejects(() => importRenderedJob(config, {
     date, channelId: channel.id, seed: plan.seed + 1, filename: `soft-body-peg-grid-${plan.seed + 1}.mp4`, render: {},
   }), /Seed mismatch/u);
+  await assert.rejects(() => importRenderedJob(config, {
+    date, channelId: channel.id, seed: plan.seed, filename: `soft-body-peg-grid-${plan.seed}.mp4`, render: {},
+  }), /3D publication blocked/u);
+});
+
+test('a restored 3D ready job cannot upload without valid physics evidence', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const channel = sampleChannel();
+  channel.game = { game: 'soft-body-slide', duration: 30, obstacle: 'auto' };
+  channel.youtube.enabled = true;
+  const config = { dryRun: false, stateDir: directory, seedNamespace: 'test', channels: [channel] };
+  const date = '2026-08-27';
+  const plan = planForDate(config, channel, date);
+  const state = await loadState(directory);
+  state.jobs.push({ ...plan, status: 'ready', render: { status: 'ready', filename: 'old.mp4', game: 'soft-body-slide', raw: {} },
+    platforms: { youtube: { status: 'pending', attempts: 0 } } });
+  await saveState(directory, state);
+  await assert.rejects(() => publishChannel(config, channel, date), /3D publication blocked/u);
+  assert.equal((await loadState(directory)).jobs[0].platforms.youtube.attempts, 0);
 });
 
 test('a partial platform failure retries only the missing upload', async (t) => {

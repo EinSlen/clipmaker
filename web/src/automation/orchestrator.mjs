@@ -10,6 +10,7 @@ import {
 } from './state.mjs';
 import { doctorEndpoints, renderVideo, uploadTiktok, uploadYoutube } from './api-client.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
+import { assertNative3dQuality } from './native-3d-quality.mjs';
 
 function deterministicSeed(date, channelId, namespace) {
   const digest = crypto.createHash('sha256').update(`${namespace}:${channelId}:${date}`).digest();
@@ -121,6 +122,9 @@ export async function generateChannel(config, channel, date, options = {}) {
       // prevents a config edit after a failed attempt from changing the video
       // attached to the same daily idempotency key.
       const result = await renderVideo(config, renderPayload(job));
+      if (job.renderRequest.game === 'soft-body-slide') {
+        assertNative3dQuality(result.native3d, { seed: job.seed, ...job.renderRequest });
+      }
       job.render = {
         ...job.render,
         status: 'ready',
@@ -213,6 +217,10 @@ export async function publishChannel(config, channel, date, options = {}) {
       return { ok: true, skipped: true, reason: 'no-enabled-targets', jobId: job.id };
     }
     const forced = new Set(options.forcePlatforms || []);
+    if ((job.render.game === 'soft-body-slide' || job.renderRequest.game === 'soft-body-slide')
+      && (forced.size || enabled.some((platform) => job.platforms[platform].status !== 'published'))) {
+      assertNative3dQuality(job.render.raw?.native3d || job.render.raw, { seed: job.seed, ...job.renderRequest });
+    }
     for (const platform of forced) {
       if (!enabled.includes(platform)) {
         throw new Error(`Cannot force disabled platform ${platform} for ${channel.id}.`);
@@ -289,6 +297,7 @@ export async function importRenderedJob(config, manifest) {
     const job = ensureJob(state, plan, channel);
     if (job.status === 'published') return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
     const render = manifest.render && typeof manifest.render === 'object' ? manifest.render : {};
+    assertNative3dQuality(render.raw, { seed: plan.seed, ...plan.renderRequest });
     job.render = {
       ...job.render,
       status: 'ready',
