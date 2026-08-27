@@ -41,6 +41,7 @@ from soft_body_variants import (
     variant_for_seed,
 )
 from soft_body_framing import camera_location, inspect_simulation_framing
+from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
 
 
 
@@ -1902,6 +1903,12 @@ class ObstacleSurface:
         )
         self.cached_frame = None
         self.tree = None
+        self.render_targets = None
+
+    def final_contact_targets(self):
+        if self.render_targets is None:
+            self.render_targets = build_contact_targets(self.objects)
+        return self.render_targets
 
     def at_frame(self, frame):
         key = frame if self.animated else 0
@@ -2152,6 +2159,8 @@ def add_capsule(
     subdivision.subdivision_type = "CATMULL_CLARK"
     subdivision.levels = min(2, render_subdivision)
     subdivision.render_levels = render_subdivision
+    if obstacle_surface is not None:
+        add_final_surface_contact(capsule, obstacle_surface.final_contact_targets())
     return capsule, events, quality
 
 
@@ -2362,6 +2371,10 @@ def main() -> None:
                 report["inter_body_contact"] = intersections
                 report["issues"].extend(intersections["issues"])
                 attempt_quality.append(report)
+            for capsule, report in zip(attempt_objects, attempt_reports):
+                rendered_surface = inspect_rendered_surface(capsule, obstacle_surface, attempt_start, attempt_end)
+                report["rendered_surface"] = rendered_surface
+                report["issues"].extend(rendered_surface["issues"])
 
     if args.events:
         events_path = Path(args.events)

@@ -65,6 +65,69 @@ class SurfaceContactTests(unittest.TestCase):
         _shape, report = self.constrain((0.0, -0.04, 0.3), anchor_z=0.0)
         self.assertEqual(report["inside_contacts"], 1)
 
+    def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
+        self.box_surface()
+        box = bpy.context.object
+        surface = renderer.ObstacleSurface((box,))
+        body = renderer.add_mesh("Test subdivided skin", [
+            (-0.1, -0.1, 0.08), (0.1, -0.1, 0.08), (0.1, 0.1, 0.08), (-0.1, 0.1, 0.08),
+        ], [(0, 1, 2, 3)], self.material)
+        subdivision = body.modifiers.new("Render subdivision", "SUBSURF")
+        subdivision.levels, subdivision.render_levels = 1, 3
+        before = renderer.inspect_rendered_surface(body, surface, 1, 2)
+        self.assertEqual(before["issues"], ["rendered-skin-inside-obstacle"])
+        self.assertGreater(before["maximum_penetration"], 0.019)
+        renderer.add_final_surface_contact(body, surface.final_contact_targets())
+        after = renderer.inspect_rendered_surface(body, surface, 1, 2)
+        self.assertEqual(after["issues"], [])
+        self.assertEqual(after["maximum_penetration"], 0)
+        self.assertEqual(after["frames_checked"], 2)
+        self.assertEqual(after["subdivision"], 3)
+        self.assertGreater(after["vertices_checked"], 8)
+        self.assertEqual(subdivision.levels, 1, "the viewport level is restored")
+        body.location.z = 1
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        free_mesh = body.evaluated_get(depsgraph).to_mesh()
+        try:
+            self.assertTrue(all(abs(vertex.co.z - 0.08) < 1e-6 for vertex in free_mesh.vertices),
+                            "free flight must not be snapped toward an obstacle")
+        finally:
+            body.evaluated_get(depsgraph).to_mesh_clear()
+
+    def test_final_contact_target_follows_the_animated_obstacle(self):
+        self.box_surface()
+        box = bpy.context.object
+        box.location.x = 0
+        box.keyframe_insert("location", frame=1)
+        box.location.x = 2
+        box.keyframe_insert("location", frame=31)
+        surface = renderer.ObstacleSurface((box,))
+        targets = surface.final_contact_targets()
+        self.assertEqual(len(targets), 1)
+        self.assertTrue(targets[0].hide_render)
+        for frame in (1, 15, 31):
+            bpy.context.scene.frame_set(frame)
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            expected = box.evaluated_get(depsgraph).matrix_world.translation
+            actual = targets[0].evaluated_get(depsgraph).matrix_world.translation
+            self.assertLess((actual - expected).length, 1e-6)
+
+    def test_final_contact_groups_static_targets_without_filling_the_gap(self):
+        import numpy as np
+        from soft_body_render_contact import possible_inside_vertices
+        self.box_surface()
+        first = bpy.context.object
+        second = first.copy()
+        bpy.context.collection.objects.link(second)
+        second.location.x = 2
+        surface = renderer.ObstacleSurface((first, second))
+        targets = surface.final_contact_targets()
+        self.assertEqual(len(targets), 1)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        candidates = possible_inside_vertices(np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 0, 1]]),
+                                             surface.objects, depsgraph)
+        self.assertEqual(candidates.tolist(), [True, False, True, False])
+
     def test_two_visible_bodies_cannot_pass_through_each_other(self):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5)
         first = bpy.context.object

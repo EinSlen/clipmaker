@@ -36,6 +36,14 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
       || !Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > frames
       || !Array.isArray(report.issues) || report.issues.length
       || report.surface?.inside_contacts !== 0) fail();
+    const renderedSurface = report.rendered_surface;
+    if (renderedSurface?.frames_checked !== end - start + 1
+      || !Number.isInteger(renderedSurface?.vertices_checked) || renderedSurface.vertices_checked <= 0
+      || renderedSurface.subdivision !== 3 || !Array.isArray(renderedSurface.issues) || renderedSurface.issues.length
+      || !Number.isFinite(renderedSurface.maximum_penetration)
+      || renderedSurface.maximum_penetration < 0 || renderedSurface.maximum_penetration > 0.003
+      || !Number.isFinite(renderedSurface.maximum_correction)
+      || renderedSurface.maximum_correction < 0 || renderedSurface.maximum_correction > 0.08) fail();
     const framing = report.framing;
     if (framing?.frames_checked !== end - start + 1 || !Array.isArray(framing?.issues) || framing.issues.length
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1

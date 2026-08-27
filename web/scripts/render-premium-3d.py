@@ -53,6 +53,18 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
         surface = item.get("surface")
         if not isinstance(surface, dict) or surface.get("inside_contacts") != 0:
             raise ValueError("Native 3D surface contacts were not validated")
+        rendered_surface = item.get("rendered_surface")
+        if (not isinstance(rendered_surface, dict) or rendered_surface.get("issues") != []
+            or rendered_surface.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1
+            or not isinstance(rendered_surface.get("vertices_checked"), int) or rendered_surface["vertices_checked"] <= 0
+            or rendered_surface.get("subdivision") != 3
+            or not isinstance(rendered_surface.get("maximum_penetration"), (int, float))
+            or not math.isfinite(rendered_surface["maximum_penetration"])
+            or not 0 <= rendered_surface["maximum_penetration"] <= 0.003
+            or not isinstance(rendered_surface.get("maximum_correction"), (int, float))
+            or not math.isfinite(rendered_surface["maximum_correction"])
+            or not 0 <= rendered_surface["maximum_correction"] <= 0.08):
+            raise ValueError("Native 3D final subdivided surface was not validated")
         framing = item.get("framing")
         if (not isinstance(framing, dict) or framing.get("issues") != []
             or framing.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1
