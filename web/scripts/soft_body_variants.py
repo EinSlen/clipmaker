@@ -403,13 +403,13 @@ RECEIVERS = (
 
 
 OBSTACLES = (
-    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.0, 3.12, 9.10),
-    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, 1.55, 0.30, 3.35, 9.30),
+    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.55, 3.12, 11.80),
+    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, 1.55, -0.45, 3.35, 11.80),
     ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.90, 0.0, 0.0, 2.80, 12.80),
-    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 8.05),
-    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 8.05),
-    ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 8.00),
-    ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 8.00),
+    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 9.50),
+    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 10.10),
+    ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 9.50),
+    ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 9.50),
 )
 OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
 AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid")

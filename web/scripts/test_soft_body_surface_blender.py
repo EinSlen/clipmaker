@@ -112,6 +112,27 @@ class SurfaceContactTests(unittest.TestCase):
             self.assertGreater(projected.y, 0.06)
             self.assertLess(projected.y, 0.91)
 
+    def test_all_spawned_capsules_fit_below_the_label(self):
+        for obstacle in OBSTACLES:
+            for seed in (910103, 910104, 910105):
+                with self.subTest(obstacle=obstacle.key, seed=seed):
+                    renderer.reset_scene()
+                    variant = variant_for_seed(seed, obstacle.key)
+                    scene = bpy.context.scene
+                    scene.render.resolution_x, scene.render.resolution_y = 1080, 1920
+                    camera = renderer.add_camera(variant)
+                    bpy.context.view_layer.update()
+                    base, _faces = renderer.capsule_geometry(variant)
+                    for offset, depth in zip(obstacle_specimen_offsets(obstacle.key), obstacle_specimen_depth_offsets(obstacle.key)):
+                        points, impact, nodes, *_rest = renderer.simulate_chain(55, 0, 30, variant, 0, offset)[0]
+                        shape = renderer.skin_capsule(base, points, 0.55, impact, nodes, 0, variant)
+                        for x, y, z in shape[::16]:
+                            projected = world_to_camera_view(scene, camera, Vector((x, y + depth, z)))
+                            self.assertGreater(projected.x, 0.02)
+                            self.assertLess(projected.x, 0.98)
+                            self.assertGreater(projected.y, 0.06)
+                            self.assertLess(projected.y, 0.91)
+
 
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(SurfaceContactTests))

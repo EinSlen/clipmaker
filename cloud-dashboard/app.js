@@ -41,10 +41,10 @@
     { id: 'soft-body-slide', name: 'Souplesse 3D', description: 'Simulation Blender', preview: 'assets/games/soft-body-slide.webp', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
   ];
   const OBSTACLES = [
-    ['auto', 'Automatique (change chaque jour)'], ['moving-slide', 'Rampe mobile'],
+    ['auto', 'Automatique — sélection principale'], ['moving-slide', 'Rampe mobile'],
     ['stair-cascade', 'Cascade d’escaliers'], ['v-stairs', 'Barres en V'],
-    ['pipe-bend', 'Tube courbé'], ['peg-grid', 'Grille de barres'],
-    ['twin-gears', 'Double engrenage'], ['compression-ring', 'Anneau de compression'],
+    ['pipe-bend', 'Tube courbé — expérimental'], ['peg-grid', 'Grille de barres'],
+    ['twin-gears', 'Double engrenage — expérimental'], ['compression-ring', 'Anneau — expérimental'],
   ];
   let publisherConfig = null;
   let accountCatalog = { tiktok: [], youtube: [] };
