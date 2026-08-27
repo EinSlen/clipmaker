@@ -25,7 +25,7 @@ COPY web/tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
 # ffmpeg + Python + Blender for rendering, Chromium for the uploaders.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
-      python3 python3-pip python3-venv python3-pil \
+      python3 python3-pip python3-venv python3-pil python3-numpy \
       blender \
       gh \
       chromium chromium-driver \
