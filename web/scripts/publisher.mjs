@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { readPublisherConfig } from '../src/automation/config.mjs';
+import { cleanupPublishedRenders } from '../src/automation/render-cleanup.mjs';
 import { assertDate, dateInTimeZone } from '../src/automation/time.mjs';
 import { doctor, generate, importRenderedJob, publish, runDue, status, validateRenderedManifest } from '../src/automation/orchestrator.mjs';
 
@@ -57,6 +58,7 @@ async function main() {
 
   if (command === 'doctor') return output(await doctor(config));
   if (command === 'status') return output(await status(config));
+  if (command === 'cleanup') return output(await cleanupPublishedRenders(config, { dryRun: forcedDryRun }));
   if (command === 'generate') return output(await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] }));
   if (command === 'publish') {
     return output(await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms }));

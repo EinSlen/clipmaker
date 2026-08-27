@@ -1,4 +1,6 @@
 name: Daily TikTok and YouTube publisher
+run-name: >-
+  ${{ github.event_name == 'schedule' && (github.event.schedule == '37 0 * * *' && 'ClipMaker · scheduled generate' || 'ClipMaker · scheduled publish') || (inputs.scheduled_publish && format('ClipMaker · publish {0}', inputs.publish_slot) || format('ClipMaker · {0}', inputs.action)) }}
 
 on:
   schedule:
@@ -28,6 +30,21 @@ on:
         required: true
         default: false
         type: boolean
+      scheduled_publish:
+        description: Respect the saved account publication times (cloud scheduler)
+        required: false
+        default: false
+        type: boolean
+      publish_slot:
+        description: Publish only accounts assigned to this HH:MM slot
+        required: false
+        default: ''
+        type: string
+      schedule_date:
+        description: Expected local date; abort an expired scheduled run
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -162,10 +179,31 @@ jobs:
           fi
           echo "command=$command" >> "$GITHUB_OUTPUT"
 
+      - name: Scope publication to the accounts due now
+        id: scope
+        if: ${{ steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run' }}
+        env:
+          SCHEDULED_PUBLISH: ${{ github.event_name == 'schedule' || inputs.scheduled_publish }}
+          PUBLISH_SLOT: ${{ inputs.publish_slot }}
+          EXPECTED_DATE: ${{ inputs.schedule_date }}
+        run: |
+          node web/scripts/scope-publisher.mjs --config web/config/publisher.json \
+            --scheduled "$SCHEDULED_PUBLISH" --slot "$PUBLISH_SLOT" --date "$EXPECTED_DATE" \
+            > artifacts/schedule-scope.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scope = json.loads(Path("artifacts/schedule-scope.json").read_text())
+          print("Comptes de ce créneau : " + (", ".join(scope["channels"]) or "aucun"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("date=" + scope["date"] + "\n")
+          PY
+
       - name: Import today's completed 3D renders
         if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PUBLISH_DATE: ${{ steps.scope.outputs.date }}
         run: |
           expected="$(python3 - <<'PY'
           import json
@@ -176,7 +214,8 @@ jobs:
           PY
           )"
           if [ "$expected" -eq 0 ]; then exit 0; fi
-          today="$(TZ=Europe/Paris date +%F)"
+          today="$PUBLISH_DATE"
+          test -n "$today" || { echo "Date de publication absente." >&2; exit 1; }
           mkdir -p artifacts/soft-body-imports
           imported=0
           declare -A imported_channels=()
@@ -254,8 +293,10 @@ jobs:
         env:
           COMMAND: ${{ steps.operation.outputs.command }}
           MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+          PUBLISH_DATE: ${{ steps.scope.outputs.date }}
         run: |
           extra=()
+          if [ -n "$PUBLISH_DATE" ]; then extra+=(--date "$PUBLISH_DATE"); fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
             extra+=(--dry-run)
           fi
@@ -333,7 +374,9 @@ jobs:
 
       - name: Remove videos that were fully published
         if: ${{ success() && (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') }}
-        run: find web/renders -maxdepth 1 -type f -name '*.mp4' -delete
+        run: |
+          docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs cleanup \
+            --config /repo/web/config/publisher.json > artifacts/cleanup.json
 
       - name: Encrypt state and pending videos for the next run
         if: always()

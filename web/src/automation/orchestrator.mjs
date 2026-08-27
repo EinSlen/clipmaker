@@ -409,7 +409,7 @@ export async function doctor(config) {
         youtube: channel.youtube.enabled,
         tiktok: channel.tiktok.enabled,
       },
-      endpoints: await doctorEndpoints(config, channel),
+      endpoints: channel.enabled ? await doctorEndpoints(config, channel) : {},
     });
   }
   return {
