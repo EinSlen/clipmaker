@@ -139,7 +139,7 @@ const softBodyObstacles: { id: SoftBodyObstacle; label: string; description: str
   { id: "pipe-bend", label: "Coude de tuyau · bêta", description: "Test manuel : la forme boule de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/pipe-bend.webp" },
   { id: "peg-grid", label: "Grille de plots", description: "Compression et déviation entre plusieurs plots.", image: "/game-previews/soft-body-obstacles/peg-grid.webp" },
   { id: "twin-gears", label: "Doubles engrenages · bêta", description: "Test manuel : la forme croix de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/twin-gears.webp" },
-  { id: "compression-ring", label: "Anneau · bêta", description: "Test manuel : l’anneau sur sculpture de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/compression-ring.webp" },
+  { id: "compression-ring", label: "Rouleaux · bêta", description: "Test manuel de compression entre deux rouleaux. L’anneau sur sculpture de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/compression-ring.webp" },
 ];
 
 const softBodyObstacleLabels = Object.fromEntries(

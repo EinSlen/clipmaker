@@ -128,6 +128,26 @@ class SurfaceContactTests(unittest.TestCase):
                                              surface.objects, depsgraph)
         self.assertEqual(candidates.tolist(), [True, False, True, False])
 
+    def test_rotating_gear_teeth_do_not_pull_free_skin_up_to_a_corner(self):
+        # Exact native frame-60 regression: a sharp tooth's nearest corner
+        # used to classify a point 1.8 units below it as inside, teleporting
+        # the final smoothed skin even though the physics spine was sound.
+        variant = variant_for_seed(910105, "twin-gears")
+        renderer.add_obstacle_geometry(self.material, self.material, variant, 60, 30)
+        teeth = tuple(obj for obj in bpy.context.scene.objects if " tooth " in obj.name)
+        self.assertEqual(len(teeth), 32)
+        surface = renderer.ObstacleSurface(teeth)
+        x, y, z = -0.23887897, -0.03319658, 1.91055274
+        body = renderer.add_mesh("Free skin below gear", [
+            (x, y, z), (x + 0.00001, y, z),
+            (x + 0.00001, y + 0.00001, z), (x, y + 0.00001, z),
+        ], [(0, 1, 2, 3)], self.material)
+        renderer.add_final_surface_contact(body, surface.final_contact_targets())
+        report = renderer.inspect_rendered_surface(body, surface, 60, 60)
+        self.assertEqual(report["issues"], [])
+        self.assertLess(report["maximum_correction"], 0.0001,
+                        "a body in free fall must not be snapped to a distant gear tooth")
+
     def test_two_visible_bodies_cannot_pass_through_each_other(self):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5)
         first = bpy.context.object

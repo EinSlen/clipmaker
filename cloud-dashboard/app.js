@@ -44,7 +44,7 @@
     ['auto', 'Automatique — sélection principale'], ['moving-slide', 'Rampe mobile'],
     ['stair-cascade', 'Cascade d’escaliers'], ['v-stairs', 'Barres en V'],
     ['pipe-bend', 'Tube courbé — expérimental'], ['peg-grid', 'Grille de barres'],
-    ['twin-gears', 'Double engrenage — expérimental'], ['compression-ring', 'Anneau — expérimental'],
+    ['twin-gears', 'Double engrenage — expérimental'], ['compression-ring', 'Rouleaux — expérimental'],
   ];
   let publisherConfig = null;
   let accountCatalog = { tiktok: [], youtube: [] };

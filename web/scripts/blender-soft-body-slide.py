@@ -658,6 +658,12 @@ def add_obstacle_geometry(
                 tooth_obj.dimensions = (0.22, variant.ramp.half_width * 1.8, 0.10)
                 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
                 tooth_obj.data.materials.append(marble)
+                # Round the actual rendered/contact edge. At a sharp 90-degree
+                # corner Shrinkwrap can misclassify distant outside vertices
+                # and snap free-falling skin up to this rotating tooth.
+                bevel = tooth_obj.modifiers.new("Rounded tooth edge", "BEVEL")
+                bevel.width = 0.006
+                bevel.segments = 3
                 tooth_obj.parent = gear_root
                 tooth_obj.location = (
                     math.cos(angle) * (radius - 0.10),
@@ -2322,6 +2328,9 @@ def main() -> None:
         for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
             attempt_objects = []
             attempt_reports = []
+            print(json.dumps({"phase": "simulate", "obstacle": variant.obstacle.key,
+                              "softness": softness, "attempt": attempt_index + 1,
+                              "start_frame": attempt_start, "end_frame": attempt_end}), flush=True)
             if attempt_index:
                 attempt_cut_frames.append(attempt_start)
             specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
@@ -2375,6 +2384,9 @@ def main() -> None:
                 rendered_surface = inspect_rendered_surface(capsule, obstacle_surface, attempt_start, attempt_end)
                 report["rendered_surface"] = rendered_surface
                 report["issues"].extend(rendered_surface["issues"])
+                print(json.dumps({"phase": "native-surface-checked", "body": capsule.name,
+                                  "start_frame": attempt_start, "end_frame": attempt_end,
+                                  **rendered_surface}), flush=True)
 
     if args.events:
         events_path = Path(args.events)
