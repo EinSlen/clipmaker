@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       deep_3d:
-        description: Audit all seven 3D obstacle families at five softness levels
+        description: Audit all seven 3D families at baseline levels and every seed preset
         type: boolean
         default: false
       audit_seeds:
@@ -125,7 +125,7 @@ jobs:
             blender --background --factory-startup --python-exit-code 1 \
             --python /app/scripts/audit-soft-body-3d.py -- \
             --seeds "$AUDIT_SEEDS" --obstacles '${{ matrix.obstacle }}' --softness 0,25,55,75,100 \
-            --sample-fps 3 --check-surface --output /output/report.json
+            --sample-fps 3 --check-surface --include-presets --output /output/report.json
       - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:

@@ -1999,17 +1999,96 @@ def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, de
     }
 
 
+def capsule_frame_shape(base_vertices, faces, simulated, index, softness, variant,
+                        obstacle_surface, frame, depth=0.0, companions=()):
+    """Shared production/audit cage deformation and visible contact skin."""
+    points, impact, nodes, *_rest = simulated[index]
+    shape = skin_capsule(base_vertices, points, softness / 100.0, impact, nodes, index, variant)
+    quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    if obstacle_surface is None:
+        return shape, quality
+    tree = obstacle_surface.at_frame(frame)
+    shape, quality = constrain_visible_skin(shape, base_vertices, points, variant, tree, depth)
+    for companion, companion_depth in companions:
+        other_points, other_impact, other_nodes, *_other = companion[index]
+        other_shape = skin_capsule(base_vertices, other_points, softness / 100.0,
+                                   other_impact, other_nodes, index, variant)
+        other_shape, _other_quality = constrain_visible_skin(
+            other_shape, base_vertices, other_points, variant, tree, companion_depth)
+        other_tree = BVHTree.FromPolygons(
+            [(x, y + companion_depth, z) for x, y, z in other_shape], faces, all_triangles=False)
+        shape, contact = constrain_visible_skin(shape, base_vertices, points, variant, other_tree, depth)
+        quality["inside_contacts"] += contact["inside_contacts"]
+        quality["maximum_correction"] = max(quality["maximum_correction"], contact["maximum_correction"])
+        quality["corrected_vertices"] += contact["corrected_vertices"]
+    return shape, quality
+
+
+def specimen_geometry(vertices, faces, bounds_points=()):
+    points = list(vertices) + list(bounds_points)
+    low = tuple(min(vertex[axis] for vertex in points) for axis in range(3))
+    high = tuple(max(vertex[axis] for vertex in points) for axis in range(3))
+    return vertices, faces, low, high
+
+
+def specimen_bounds_overlap(first, second):
+    return all(first[3][axis] >= second[2][axis] and second[3][axis] >= first[2][axis] for axis in range(3))
+
+
+def specimen_geometry_penetration(bodies):
+    maximum = 0.0
+    for first_index, first in enumerate(bodies):
+        for second in bodies[first_index + 1:]:
+            if not specimen_bounds_overlap(first, second):
+                continue
+            for source, target in ((first, second), (second, first)):
+                tree = BVHTree.FromPolygons(target[0], target[1], all_triangles=False)
+                for point in source[0]:
+                    if any(point[axis] < target[2][axis] or point[axis] > target[3][axis] for axis in range(3)):
+                        continue
+                    hit, _normal, _face, distance = tree.find_nearest(point)
+                    if hit is not None and distance > maximum and point_inside_closed_surface(tree, point):
+                        maximum = distance
+    return maximum
+
+
+def point_inside_closed_surface(tree, point):
+    """Confirm volume membership independently of the nearest triangle normal.
+
+    A concave contact crease can put an exterior point behind its nearest
+    face. Three non-axis-aligned parity rays avoid treating that local normal
+    as proof of penetration. An unresolved ray fails conservatively.
+    """
+    inside_votes = 0
+    for direction in (Vector((1.0, 0.173, 0.317)),
+                      Vector((-0.31, 1.0, 0.127)),
+                      Vector((0.219, -0.341, 1.0))):
+        direction.normalize()
+        origin, crossings = point.copy(), 0
+        for _ in range(64):
+            hit, _normal, _face, _distance = tree.ray_cast(origin, direction)
+            if hit is None:
+                break
+            crossings += 1
+            origin = hit + direction * 0.00001
+        else:
+            return True
+        inside_votes += crossings % 2
+    return inside_votes >= 2
+
+
 def inspect_specimen_intersections(objects, start, end):
     """Reject visible interpenetration between independently released bodies.
 
     The dense contact-corrected cage is checked at every output frame. AABB
-    rejection keeps disjoint stair lanes cheap; signed nearest-surface tests
-    distinguish a real penetration from harmless touching bounding boxes.
+    rejection keeps disjoint stair lanes cheap; closed-volume parity tests
+    distinguish penetration from a point beside a concave contact crease.
     """
     if len(objects) < 2:
         return {"frames_checked": 0, "maximum_penetration": 0.0, "issues": []}
     modifiers = [(modifier, modifier.show_viewport) for obj in objects for modifier in obj.modifiers]
     maximum = 0.0
+    peak_frame = None
     try:
         for modifier, _value in modifiers:
             modifier.show_viewport = False
@@ -2023,29 +2102,19 @@ def inspect_specimen_intersections(objects, start, end):
                 try:
                     vertices = [evaluated.matrix_world @ vertex.co for vertex in mesh.vertices]
                     faces = [tuple(face.vertices) for face in mesh.polygons]
-                    low = tuple(min(vertex[axis] for vertex in vertices) for axis in range(3))
-                    high = tuple(max(vertex[axis] for vertex in vertices) for axis in range(3))
-                    bodies.append((vertices, faces, low, high))
+                    bodies.append(specimen_geometry(vertices, faces))
                 finally:
                     evaluated.to_mesh_clear()
-            for first_index, first in enumerate(bodies):
-                for second in bodies[first_index + 1:]:
-                    if any(first[3][axis] < second[2][axis] or second[3][axis] < first[2][axis] for axis in range(3)):
-                        continue
-                    for source, target in ((first, second), (second, first)):
-                        tree = BVHTree.FromPolygons(target[0], target[1], all_triangles=False)
-                        for point in source[0]:
-                            if any(point[axis] < target[2][axis] or point[axis] > target[3][axis] for axis in range(3)):
-                                continue
-                            hit, normal, _face, _distance = tree.find_nearest(point)
-                            if hit is not None:
-                                maximum = max(maximum, -(point - hit).dot(normal))
+            penetration = specimen_geometry_penetration(bodies)
+            if penetration > maximum:
+                maximum, peak_frame = penetration, frame
     finally:
         for modifier, value in modifiers:
             modifier.show_viewport = value
     return {
         "frames_checked": end - start + 1,
         "maximum_penetration": round(maximum, 6),
+        "peak_frame": peak_frame,
         "issues": ["specimens-interpenetrate"] if maximum > 0.008 else [],
     }
 
@@ -2101,41 +2170,16 @@ def add_capsule(
     visible_simulated = simulated[:-1]
     shapes = []
     surface_quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
-    for index, (points, impact, node_impacts, _ramp_hit, _receiver_hit, _center_x) in enumerate(visible_simulated):
-        shape = skin_capsule(
-            base_vertices,
-            points,
-            softness / 100.0,
-            impact,
-            node_impacts,
-            index,
-            variant,
+    for index in range(len(visible_simulated)):
+        shape, surface_sample = capsule_frame_shape(
+            base_vertices, faces, simulated, index, softness, variant,
+            obstacle_surface, start + index, instance_offset_y, companion_simulations,
         )
-        if obstacle_surface is not None:
-            shape, surface_sample = constrain_visible_skin(
-                shape, base_vertices, points, variant,
-                obstacle_surface.at_frame(start + index), instance_offset_y,
-            )
-            surface_quality["corrected_vertices"] += surface_sample["corrected_vertices"]
-            surface_quality["maximum_correction"] = max(
-                surface_quality["maximum_correction"], surface_sample["maximum_correction"],
-            )
-            surface_quality["inside_contacts"] += surface_sample["inside_contacts"]
-            for companion, companion_depth in companion_simulations:
-                other_points, other_impact, other_nodes, *_other = companion[index]
-                other_shape = skin_capsule(base_vertices, other_points, softness / 100.0, other_impact, other_nodes, index, variant)
-                other_shape, _other_quality = constrain_visible_skin(
-                    other_shape, base_vertices, other_points, variant,
-                    obstacle_surface.at_frame(start + index), companion_depth,
-                )
-                other_tree = BVHTree.FromPolygons(
-                    [(x, y + companion_depth, z) for x, y, z in other_shape], faces,
-                    all_triangles=False,
-                )
-                shape, contact = constrain_visible_skin(shape, base_vertices, points, variant, other_tree, instance_offset_y)
-                surface_quality["inside_contacts"] += contact["inside_contacts"]
-                surface_quality["maximum_correction"] = max(surface_quality["maximum_correction"], contact["maximum_correction"])
-                surface_quality["corrected_vertices"] += contact["corrected_vertices"]
+        surface_quality["corrected_vertices"] += surface_sample["corrected_vertices"]
+        surface_quality["maximum_correction"] = max(
+            surface_quality["maximum_correction"], surface_sample["maximum_correction"],
+        )
+        surface_quality["inside_contacts"] += surface_sample["inside_contacts"]
         shapes.append(shape)
     quality["surface"] = surface_quality
     if surface_quality["inside_contacts"]:

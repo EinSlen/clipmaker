@@ -150,6 +150,7 @@ class SurfaceContactTests(unittest.TestCase):
                         "a body in free fall must not be snapped to a distant gear tooth")
 
     def test_two_visible_bodies_cannot_pass_through_each_other(self):
+        # Genuine overlaps must still fail after the concave-normal fix.
         bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5)
         first = bpy.context.object
         bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5, location=(0.5, 0.0, 0.0))
@@ -161,6 +162,19 @@ class SurfaceContactTests(unittest.TestCase):
         report = renderer.inspect_specimen_intersections((first, second), 1, 2)
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["frames_checked"], 2)
+
+    def test_closed_volume_check_handles_holes_and_reversed_face_normals(self):
+        from mathutils.bvhtree import BVHTree
+        bpy.ops.mesh.primitive_torus_add(major_radius=0.6, minor_radius=0.2,
+                                        major_segments=32, minor_segments=16)
+        mesh = bpy.context.object.data
+        vertices = [vertex.co.copy() for vertex in mesh.vertices]
+        for reverse in (False, True):
+            faces = [tuple(reversed(face.vertices)) if reverse else tuple(face.vertices) for face in mesh.polygons]
+            tree = BVHTree.FromPolygons(vertices, faces)
+            self.assertTrue(renderer.point_inside_closed_surface(tree, Vector((0.6, 0.0, 0.0))))
+            self.assertFalse(renderer.point_inside_closed_surface(tree, Vector((0.0, 0.0, 0.0))))
+            self.assertFalse(renderer.point_inside_closed_surface(tree, Vector((0.75, 0.75, 0.0))))
 
     def test_equal_mass_specimens_resolve_contact_without_receiver_steering(self):
         def state(x, previous_x):
@@ -176,11 +190,56 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertGreater(second["points"][0].x - second["previous"][0].x, 0.0)
         self.assertGreater(first["coupled_impacts"][0], 0.0)
 
+    def test_v_stairs_fifty_percent_visible_bodies_do_not_interpenetrate(self):
+        # Production seed 910104 contains 50%, not the 55% used by the old
+        # extended audit. Check the complete simultaneous take before any
+        # expensive full-subdivision inspection/rendering.
+        variant = variant_for_seed(910104, "v-stairs")
+        frames, softness, stage = 159, 50, 2
+        renderer.add_receiver(self.material, self.material, variant)
+        renderer.add_obstacle_geometry(self.material, self.material, variant, frames, 30, ((stage, 1, frames),))
+        surface = renderer.ObstacleSurface(bpy.context.collection.objects)
+        simulations = renderer.simulate_specimens(softness, frames, 30, variant, stage)
+        depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+        objects = []
+        for index, offset in enumerate(obstacle_specimen_offsets(variant.obstacle.key)):
+            body, _events, quality = renderer.add_capsule(
+                self.material, softness, 1, frames, frames, 30, variant, stage,
+                index, offset, depths[index], 0.045 if index == 0 else -0.045,
+                3, surface, simulations[index],
+                tuple((simulation, depths[other]) for other, simulation in enumerate(simulations) if other != index),
+            )
+            self.assertEqual(quality["issues"], [])
+            objects.append(body)
+        intersections = renderer.inspect_specimen_intersections(objects, 1, frames)
+        self.assertEqual(intersections["issues"], [], intersections)
+
     def test_parallel_depth_lanes_do_not_collide(self):
         first = {"radius": 0.25, "points": [Vector((0.0, 0.0))]}
         second = {"radius": 0.25, "points": [Vector((0.0, 0.0))]}
         renderer.resolve_specimen_contacts((first, second), (-1.15, 1.15))
         self.assertEqual(tuple(first["points"][0]), (0.0, 0.0))
+
+    def test_extended_audit_includes_actual_seed_percentages(self):
+        spec = importlib.util.spec_from_file_location("audit", ROOT / "audit-soft-body-3d.py")
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        stages = variant_for_seed(910104, "v-stairs").stages
+        self.assertEqual(stages, (0, 25, 50, 75, 100))
+        selected = audit.select_audit_stages(stages, {0, 25, 55, 75, 100}, True)
+        self.assertEqual(selected, ((0, 0), (1, 25), (2, 50), (2, 55), (3, 75), (4, 100)))
+        self.assertEqual(audit.select_audit_stages(stages), tuple(enumerate(stages)))
+
+    def test_extended_audit_rejects_overlapping_visible_specimens(self):
+        spec = importlib.util.spec_from_file_location("audit", ROOT / "audit-soft-body-3d.py")
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        sample = renderer.simulate_chain(0, 0, 30, self.variant, 0)[0]
+        # Two deliberately identical bodies: this is invalid regardless of
+        # whether both have independently passed the obstacle-only checks.
+        report = audit.audit_specimen_contacts(renderer, self.variant, ([sample, sample], [sample, sample]), 0, 0, 30)
+        self.assertEqual(report["frames_checked"], 1)
+        self.assertTrue(report["issues"], report)
 
     def test_coupled_solver_uses_one_clock_at_preview_and_production_rates(self):
         preview = renderer.simulate_specimens(55, 1, 5, self.variant, 2)

@@ -49,6 +49,8 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--output")
     parser.add_argument("--check-surface", action="store_true")
+    parser.add_argument("--include-presets", action="store_true",
+                        help="Also audit every softness level selected by the production seed")
     values = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -178,6 +180,69 @@ def audit_attempt(
     }
 
 
+def select_audit_stages(stages, requested=None, include_presets=False):
+    if requested is None:
+        return tuple(enumerate(stages))
+    selected = set(requested) | (set(stages) if include_presets else set())
+    return tuple((min(range(len(stages)), key=lambda index: abs(stages[index] - softness)), softness)
+                 for softness in sorted(selected))
+
+
+def audit_specimen_contacts(renderer, variant, simulations, softness, motion_index, fps):
+    """Check the production contact cages at every output frame, not 3 fps.
+
+    The raw skin/spine bounds contain every possible radial contact correction,
+    so disjoint bodies can be rejected without constructing obstacle queries.
+    """
+    frame_count = len(simulations[0]) - 1
+    if len(simulations) < 2:
+        return {"frames_checked": 0, "maximum_penetration": 0.0,
+                "peak_frame": None, "issues": []}
+    renderer.reset_scene()
+    material = renderer.material("Contact audit", (0.7, 0.7, 0.7, 1.0))
+    renderer.add_receiver(material, material, variant)
+    spans = ((motion_index, 1, frame_count),)
+    if variant.obstacle.key == "moving-slide":
+        renderer.add_ramp(material, material, variant, frame_count, fps, spans)
+    else:
+        renderer.add_obstacle_geometry(material, material, variant, frame_count, fps, spans)
+    surface = renderer.ObstacleSurface(renderer.bpy.context.collection.objects)
+    base, faces = renderer.capsule_geometry(variant)
+    depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+    maximum, peak, overlap_frames, inside = 0.0, None, 0, 0
+    for index in range(frame_count):
+        bounds = []
+        for instance, simulated in enumerate(simulations):
+            points, impact, nodes, *_rest = simulated[index]
+            shape = renderer.skin_capsule(base, points, softness / 100.0, impact, nodes, index, variant)
+            vertices = [renderer.Vector((x, y + depths[instance], z)) for x, y, z in shape]
+            anchors = [renderer.Vector((point.x, depths[instance] - 0.04, point.y)) for point in points]
+            bounds.append(renderer.specimen_geometry(vertices, faces, anchors))
+        if not any(renderer.specimen_bounds_overlap(first, second)
+                   for first_index, first in enumerate(bounds) for second in bounds[first_index + 1:]):
+            continue
+        overlap_frames += 1
+        bodies = []
+        for instance, simulated in enumerate(simulations):
+            shape, quality = renderer.capsule_frame_shape(
+                base, faces, simulated, index, softness, variant, surface, index + 1, depths[instance],
+                tuple((other, depths[other_index]) for other_index, other in enumerate(simulations) if other_index != instance),
+            )
+            inside += quality["inside_contacts"]
+            bodies.append(renderer.specimen_geometry(
+                [renderer.Vector((x, y + depths[instance], z)) for x, y, z in shape], faces))
+        penetration = renderer.specimen_geometry_penetration(bodies)
+        if penetration > maximum:
+            maximum, peak = penetration, index + 1
+    return {
+        "frames_checked": frame_count, "frames_with_overlapping_bounds": overlap_frames,
+        "maximum_penetration": round(maximum, 6), "peak_frame": peak,
+        "spine_inside_contacts": inside,
+        "issues": (["specimens-interpenetrate"] if maximum > 0.008 else [])
+                  + (["spine-inside-visible-obstacle"] if inside else []),
+    }
+
+
 def main() -> int:
     args = arguments()
     if args.sample_fps <= 0 or args.production_fps <= 0 or args.duration <= 0:
@@ -204,6 +269,8 @@ def main() -> int:
         },
         "sample_fps": args.sample_fps,
         "surface_checked": args.check_surface,
+        "preset_coverage": args.include_presets or softness_filter is None,
+        "inter_body_contact_checked": args.check_surface,
         "complete": False,
         "runs": [],
     }
@@ -225,14 +292,11 @@ def main() -> int:
             run = {
                 "seed": seed,
                 "obstacle": obstacle.key,
+                "preset_stages": list(variant.stages),
                 "stages": [],
             }
             report["runs"].append(run)
-            selected_stages = (
-                tuple(enumerate(variant.stages)) if softness_filter is None else
-                tuple((min(range(len(variant.stages)), key=lambda index: abs(variant.stages[index] - softness)), softness)
-                      for softness in sorted(softness_filter))
-            )
+            selected_stages = select_audit_stages(variant.stages, softness_filter, args.include_presets)
             for stage_index, softness in selected_stages:
                 # An explicit audited percentage uses that percentage's edit
                 # duration, rather than inheriting the neighbouring preset's
@@ -263,6 +327,10 @@ def main() -> int:
                         variant, stage_index + attempt_index * len(variant.stages),
                     )
                     framing = renderer.inspect_simulation_framing(simulations, variant, args.production_fps)
+                    contacts = audit_specimen_contacts(
+                        renderer, variant, simulations, softness,
+                        stage_index + attempt_index * len(variant.stages), args.production_fps,
+                    ) if args.check_surface else None
                     for instance_index, instance_offset in enumerate(
                         obstacle_specimen_offsets(obstacle.key)
                     ):
@@ -284,6 +352,9 @@ def main() -> int:
                         )
                         stage["attempts"][-1]["framing"] = framing
                         stage["attempts"][-1]["issues"].extend(framing["issues"])
+                        stage["attempts"][-1]["inter_body_contact"] = contacts
+                        if contacts:
+                            stage["attempts"][-1]["issues"].extend(contacts["issues"])
                         checkpoint()
                         print("CLIPMAKER_AUDIT_PROGRESS=" + json.dumps({
                             "seed": seed, "obstacle": obstacle.key, "softness": softness,
