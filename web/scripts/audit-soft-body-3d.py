@@ -65,10 +65,11 @@ def audit_attempt(
     instance_index,
     instance_offset,
     check_surface,
+    precomputed_simulation=None,
 ):
     frame_count = max(1, round(duration * production_fps))
     motion_index = stage_index + attempt_index * len(variant.stages)
-    simulated = renderer.simulate_chain(
+    simulated = precomputed_simulation if precomputed_simulation is not None else renderer.simulate_chain(
         softness,
         frame_count,
         production_fps,
@@ -249,6 +250,10 @@ def main() -> int:
                 run["stages"].append(stage)
                 for attempt_index, attempt_span in enumerate(attempt_spans):
                     duration = (attempt_span[1] - attempt_span[0] + 1) / args.production_fps
+                    simulations = renderer.simulate_specimens(
+                        softness, attempt_span[1] - attempt_span[0] + 1, args.production_fps,
+                        variant, stage_index + attempt_index * len(variant.stages),
+                    )
                     for instance_index, instance_offset in enumerate(
                         obstacle_specimen_offsets(obstacle.key)
                     ):
@@ -265,6 +270,7 @@ def main() -> int:
                                 instance_index,
                                 instance_offset,
                                 args.check_surface,
+                                simulations[instance_index],
                             )
                         )
                         checkpoint()

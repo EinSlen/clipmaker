@@ -63,6 +63,47 @@ class SurfaceContactTests(unittest.TestCase):
         _shape, report = self.constrain((0.0, -0.04, 0.3), anchor_z=0.0)
         self.assertEqual(report["inside_contacts"], 1)
 
+    def test_two_visible_bodies_cannot_pass_through_each_other(self):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5)
+        first = bpy.context.object
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.5, location=(0.5, 0.0, 0.0))
+        second = bpy.context.object
+        report = renderer.inspect_specimen_intersections((first, second), 1, 2)
+        self.assertEqual(report["issues"], ["specimens-interpenetrate"])
+        self.assertGreater(report["maximum_penetration"], 0.1)
+        second.location.y = 1.5
+        report = renderer.inspect_specimen_intersections((first, second), 1, 2)
+        self.assertEqual(report["issues"], [])
+        self.assertEqual(report["frames_checked"], 2)
+
+    def test_equal_mass_specimens_resolve_contact_without_receiver_steering(self):
+        def state(x, previous_x):
+            return {"points": [Vector((x, 10.0))], "previous": [Vector((previous_x, 10.0))],
+                "radius": 0.25, "rest": 1.0, "variant": self.variant,
+                "time": 0.0, "dt": 1 / 240, "softness": 0.55,
+                "trial_duration": 7.0, "phase": 0.0, "collision_radii": [0.25], "coupled_impacts": [0.0]}
+        first, second = state(-0.20, -0.21), state(0.20, 0.21)
+        renderer.resolve_specimen_contacts((first, second), (0.0, 0.0))
+        self.assertGreaterEqual((second["points"][0] - first["points"][0]).length, 0.4999)
+        self.assertAlmostEqual(first["points"][0].x + second["points"][0].x, 0.0)
+        self.assertLess(first["points"][0].x - first["previous"][0].x, 0.0)
+        self.assertGreater(second["points"][0].x - second["previous"][0].x, 0.0)
+        self.assertGreater(first["coupled_impacts"][0], 0.0)
+
+    def test_parallel_depth_lanes_do_not_collide(self):
+        first = {"radius": 0.25, "points": [Vector((0.0, 0.0))]}
+        second = {"radius": 0.25, "points": [Vector((0.0, 0.0))]}
+        renderer.resolve_specimen_contacts((first, second), (-1.15, 1.15))
+        self.assertEqual(tuple(first["points"][0]), (0.0, 0.0))
+
+    def test_coupled_solver_uses_one_clock_at_preview_and_production_rates(self):
+        preview = renderer.simulate_specimens(55, 1, 5, self.variant, 2)
+        native = renderer.simulate_specimens(55, 6, 30, self.variant, 2)
+        for first, second in zip(preview, native):
+            self.assertEqual(len(first.physics_samples), len(second.physics_samples))
+            for a, b in zip(first[-1][0], second[-1][0]):
+                self.assertLess((a - b).length, 1e-6)
+
     def test_second_attempt_restarts_the_visible_ramp_clock(self):
         variant = variant_for_seed(910103, "moving-slide")
         ramp = renderer.add_ramp(

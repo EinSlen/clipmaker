@@ -29,7 +29,7 @@ def softness_stages(seed: int) -> tuple[int, ...]:
 def validate_motion_preflight(payload, variant, frame_count, fps):
     """Require native physics/surface evidence for every body of every take."""
     if (
-        payload.get("preflight_schema") != 1
+        payload.get("preflight_schema") != 2
         or payload.get("obstacle") != variant.obstacle.key
         or payload.get("stages") != list(variant.stages)
         or payload.get("fps") != fps
@@ -53,6 +53,10 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
         surface = item.get("surface")
         if not isinstance(surface, dict) or surface.get("inside_contacts") != 0:
             raise ValueError("Native 3D surface contacts were not validated")
+        if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
+            between = item.get("inter_body_contact")
+            if not isinstance(between, dict) or between.get("issues") != [] or between.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1:
+                raise ValueError("Native 3D contacts between specimens were not validated")
         actual.add(tuple(item.get(key) for key in (
             "stage", "softness", "attempt", "body", "start_frame", "end_frame",
         )))

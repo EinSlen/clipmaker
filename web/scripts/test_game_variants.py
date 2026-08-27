@@ -171,8 +171,9 @@ class SoftBodyVariantTests(unittest.TestCase):
         for stage, (softness, (start, end)) in enumerate(zip(variant.stages, stage_frame_spans(900, 5, "v-stairs")), start=1):
             for body in (1, 2):
                 quality.append({"stage": stage, "softness": softness, "attempt": 1, "body": body,
-                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0}})
-        payload = {"preflight_schema": 1, "obstacle": "v-stairs", "stages": list(variant.stages),
+                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "inter_body_contact": {"issues": [], "frames_checked": end - start + 1}})
+        payload = {"preflight_schema": 2, "obstacle": "v-stairs", "stages": list(variant.stages),
             "fps": 30, "duration": 30, "attempt_quality": quality}
         self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
         with self.assertRaisesRegex(ValueError, "Incomplete"):

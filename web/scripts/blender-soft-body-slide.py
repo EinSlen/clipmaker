@@ -366,7 +366,7 @@ def static_obstacle_circles(key: str):
                 circles.append((Vector((-1.60 + column * 0.64, z)), 0.115, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
-        speed = math.tau / 1.38
+        speed = math.tau / 3.40
         return (
             (Vector((-0.80, 3.78)), 0.60, Vector((0.0, 0.0)), -speed),
             (Vector((0.80, 3.78)), 0.60, Vector((0.0, 0.0)), speed),
@@ -942,7 +942,7 @@ def collide_point(
     # a capsule, but there is no invisible floor or sticky catch volume.
     wall_center_offset = (receiver.outer_radius + receiver.inner_radius) * 0.5
     wall_half_thickness = (receiver.outer_radius - receiver.inner_radius) * 0.5
-    wall_bottom = -3.55
+    wall_bottom = 0.40 if variant.obstacle.key == "stair-cascade" else -3.55
     wall_top = receiver.top - rim_minor * 0.18
     if wall_bottom < point.y < wall_top:
         for side in (-1.0, 1.0):
@@ -984,7 +984,7 @@ def collide_point(
     return point, previous, ramp_intensity, receiver_intensity, ramp_contact
 
 
-def simulate_chain(
+def _chain_ticks(
     softness_percent: int,
     frame_count: int,
     fps: int,
@@ -1063,6 +1063,7 @@ def simulate_chain(
         "stair-cascade": 0.62,
         "v-stairs": 0.25,
         "peg-grid": 0.42,
+        "twin-gears": 0.36,
     }.get(variant.obstacle.key, 1.0)
     exit_time = effective_ramp_exit_time(
         variant,
@@ -1205,6 +1206,45 @@ def simulate_chain(
                         frame_ramp_intensity = max(frame_ramp_intensity, ramp_hit)
                         frame_receiver_intensity = max(frame_receiver_intensity, receiver_hit)
                         node_intensity[index] = max(node_intensity[index], intensity)
+                if variant.obstacle.key in {"pipe-bend", "twin-gears"}:
+                    # In a tight bend the final collider projection can undo
+                    # an adjacent length constraint. Finish to convergence
+                    # without bending targets fighting the narrow passage.
+                    # This numerical cleanup must not inject a new velocity.
+                    before_cleanup = [point.copy() for point in points]
+                    for cleanup in range(80):
+                        error = max(abs((second - first).length / rest - 1.0)
+                                    for first, second in zip(points, points[1:]))
+                        if error < 0.035:
+                            break
+                        direction = range(node_count - 1) if cleanup % 2 == 0 else range(node_count - 2, -1, -1)
+                        for index in direction:
+                            constrain_distance(points, index, index + 1, rest)
+                        if softness >= 0.45 and cleanup % 8 == 0:
+                            constrain_self_collision(points, collision_radii, neighbor_skip, softness)
+                        for index in range(node_count):
+                            points[index], _unused, *_telemetry = collide_point(
+                                points[index], points[index].copy(), collision_radii[index],
+                                softness, time, dt, variant, trial_duration,
+                                stage_motion.ramp_phase_offset, False,
+                            )
+                    for index, origin in enumerate(before_cleanup):
+                        previous[index] += points[index] - origin
+                shared_tick = {
+                    "points": points, "previous": previous,
+                    "radius": variant.shape.radius, "rest": rest,
+                    "variant": variant, "time": time, "dt": dt,
+                    "softness": softness, "trial_duration": trial_duration,
+                    "phase": stage_motion.ramp_phase_offset,
+                    "collision_radii": collision_radii,
+                    "coupled_impacts": [0.0] * node_count,
+                }
+                yield shared_tick
+                for index, strength in enumerate(shared_tick["coupled_impacts"]):
+                    node_intensity[index] = max(node_intensity[index], strength)
+                    frame_intensity = max(frame_intensity, strength)
+                    frame_ramp_intensity = max(frame_ramp_intensity, strength)
+                    substep_ramp_intensity = max(substep_ramp_intensity, strength)
                 if not released:
                     if substep_ramp_contact:
                         ramp_clear_substeps = 0
@@ -1295,6 +1335,99 @@ def simulate_chain(
             )
         )
     return frames
+
+
+def resolve_specimen_contacts(states, depths):
+    """Resolve equal-mass body contacts on the same fixed physics tick."""
+    pairs = []
+    for first_index, first in enumerate(states):
+        for second_index in range(first_index + 1, len(states)):
+            second = states[second_index]
+            minimum = first["radius"] + second["radius"]
+            depth = depths[second_index] - depths[first_index]
+            if abs(depth) >= minimum:
+                continue
+            separation = math.sqrt(minimum * minimum - depth * depth)
+            a, b = first["points"], second["points"]
+            if any(max(point[axis] for point in a) + separation < min(point[axis] for point in b)
+                   or max(point[axis] for point in b) + separation < min(point[axis] for point in a)
+                   for axis in range(2)):
+                continue
+            pairs.append((first, second, separation))
+    if not pairs:
+        return
+    for iteration in range(16):
+        for first, second, separation in pairs:
+            for a_index, a in enumerate(first["points"]):
+                for b_index, b in enumerate(second["points"]):
+                    delta = b - a
+                    if abs(delta.x) >= separation or abs(delta.y) >= separation:
+                        continue
+                    distance = delta.length
+                    if distance >= separation:
+                        continue
+                    normal = delta / distance if distance > 1e-8 else Vector((1.0, 0.0))
+                    correction = normal * ((separation - distance) * 0.5)
+                    a -= correction
+                    b += correction
+                    first["previous"][a_index] -= correction
+                    second["previous"][b_index] += correction
+                    if iteration == 0:
+                        a_velocity = a - first["previous"][a_index]
+                        b_velocity = b - second["previous"][b_index]
+                        closing = (b_velocity - a_velocity).dot(normal)
+                        if closing < 0.0:
+                            impulse = -closing * (1.15 - first["softness"] * 0.10) * 0.5
+                            first["previous"][a_index] += normal * impulse
+                            second["previous"][b_index] -= normal * impulse
+                            strength = -closing / first["dt"]
+                            first["coupled_impacts"][a_index] = max(first["coupled_impacts"][a_index], strength)
+                            second["coupled_impacts"][b_index] = max(second["coupled_impacts"][b_index], strength)
+        # Contact impulses must respect each rod's inextensible spine and the
+        # same static obstacles; neither body can push the other into a step.
+        for state in states:
+            points, previous = state["points"], state["previous"]
+            direction = range(len(points) - 1) if iteration % 2 == 0 else range(len(points) - 2, -1, -1)
+            for index in direction:
+                constrain_distance(points, index, index + 1, state["rest"])
+            for index in range(len(points)):
+                points[index], previous[index], *_unused = collide_point(
+                    points[index], previous[index], state["collision_radii"][index],
+                    state["softness"], state["time"], state["dt"], state["variant"],
+                    state["trial_duration"], state["phase"], False,
+                )
+
+
+def simulate_chain(*args, **kwargs):
+    """Single-body compatibility wrapper around the shared 240 Hz solver."""
+    ticks = _chain_ticks(*args, **kwargs)
+    while True:
+        try:
+            next(ticks)
+        except StopIteration as completed:
+            return completed.value
+
+
+def simulate_specimens(softness, frame_count, fps, variant, stage_index):
+    offsets = obstacle_specimen_offsets(variant.obstacle.key)
+    depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+    generators = [
+        _chain_ticks(softness, frame_count, fps, variant, stage_index, offset,
+                     (0.045 if index == 0 else -0.045) if len(offsets) > 1 else 0.0)
+        for index, offset in enumerate(offsets)
+    ]
+    while True:
+        states, completed = [], []
+        for ticks in generators:
+            try:
+                states.append(next(ticks))
+            except StopIteration as result:
+                completed.append(result.value)
+        if completed:
+            if states:
+                raise RuntimeError("Specimen physics clocks diverged")
+            return completed
+        resolve_specimen_contacts(states, depths)
 
 
 def contact_events(
@@ -1791,6 +1924,57 @@ def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, de
     }
 
 
+def inspect_specimen_intersections(objects, start, end):
+    """Reject visible interpenetration between independently released bodies.
+
+    The dense contact-corrected cage is checked at every output frame. AABB
+    rejection keeps disjoint stair lanes cheap; signed nearest-surface tests
+    distinguish a real penetration from harmless touching bounding boxes.
+    """
+    if len(objects) < 2:
+        return {"frames_checked": 0, "maximum_penetration": 0.0, "issues": []}
+    modifiers = [(modifier, modifier.show_viewport) for obj in objects for modifier in obj.modifiers]
+    maximum = 0.0
+    try:
+        for modifier, _value in modifiers:
+            modifier.show_viewport = False
+        for frame in range(start, end + 1):
+            bpy.context.scene.frame_set(frame)
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            bodies = []
+            for obj in objects:
+                evaluated = obj.evaluated_get(depsgraph)
+                mesh = evaluated.to_mesh()
+                try:
+                    vertices = [evaluated.matrix_world @ vertex.co for vertex in mesh.vertices]
+                    faces = [tuple(face.vertices) for face in mesh.polygons]
+                    low = tuple(min(vertex[axis] for vertex in vertices) for axis in range(3))
+                    high = tuple(max(vertex[axis] for vertex in vertices) for axis in range(3))
+                    bodies.append((vertices, faces, low, high))
+                finally:
+                    evaluated.to_mesh_clear()
+            for first_index, first in enumerate(bodies):
+                for second in bodies[first_index + 1:]:
+                    if any(first[3][axis] < second[2][axis] or second[3][axis] < first[2][axis] for axis in range(3)):
+                        continue
+                    for source, target in ((first, second), (second, first)):
+                        tree = BVHTree.FromPolygons(target[0], target[1], all_triangles=False)
+                        for point in source[0]:
+                            if any(point[axis] < target[2][axis] or point[axis] > target[3][axis] for axis in range(3)):
+                                continue
+                            hit, normal, _face, _distance = tree.find_nearest(point)
+                            if hit is not None:
+                                maximum = max(maximum, -(point - hit).dot(normal))
+    finally:
+        for modifier, value in modifiers:
+            modifier.show_viewport = value
+    return {
+        "frames_checked": end - start + 1,
+        "maximum_penetration": round(maximum, 6),
+        "issues": ["specimens-interpenetrate"] if maximum > 0.008 else [],
+    }
+
+
 def keyframe_visibility(obj, start: int, end: int, frame_end: int) -> None:
     obj.hide_render = start > 1
     obj.keyframe_insert("hide_render", frame=1)
@@ -1819,9 +2003,11 @@ def add_capsule(
     instance_rotation_offset: float = 0.0,
     render_subdivision: int = 3,
     obstacle_surface=None,
+    precomputed_simulation=None,
+    companion_simulations=(),
 ):
     base_vertices, faces = capsule_geometry(variant)
-    simulated = simulate_chain(
+    simulated = precomputed_simulation if precomputed_simulation is not None else simulate_chain(
         softness,
         end - start + 1,
         fps,
@@ -1860,6 +2046,21 @@ def add_capsule(
                 surface_quality["maximum_correction"], surface_sample["maximum_correction"],
             )
             surface_quality["inside_contacts"] += surface_sample["inside_contacts"]
+            for companion, companion_depth in companion_simulations:
+                other_points, other_impact, other_nodes, *_other = companion[index]
+                other_shape = skin_capsule(base_vertices, other_points, softness / 100.0, other_impact, other_nodes, index, variant)
+                other_shape, _other_quality = constrain_visible_skin(
+                    other_shape, base_vertices, other_points, variant,
+                    obstacle_surface.at_frame(start + index), companion_depth,
+                )
+                other_tree = BVHTree.FromPolygons(
+                    [(x, y + companion_depth, z) for x, y, z in other_shape], faces,
+                    all_triangles=False,
+                )
+                shape, contact = constrain_visible_skin(shape, base_vertices, points, variant, other_tree, instance_offset_y)
+                surface_quality["inside_contacts"] += contact["inside_contacts"]
+                surface_quality["maximum_correction"] = max(surface_quality["maximum_correction"], contact["maximum_correction"])
+                surface_quality["corrected_vertices"] += contact["corrected_vertices"]
         shapes.append(shape)
     quality["surface"] = surface_quality
     if surface_quality["inside_contacts"]:
@@ -1901,10 +2102,24 @@ def add_capsule(
 def add_receiver(marble, gold, variant: SoftBodyVariant):
     if variant.obstacle.key == "peg-grid":
         return
+    if variant.obstacle.key == "stair-cascade":
+        glass = material("Clear stair receiver glass", (0.70, 0.84, 0.94, 0.26), roughness=0.12, clearcoat=0.45)
+        glass.node_tree.nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.26
+        glass.blend_method = "BLEND"
+        glass.use_screen_refraction = True
+        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
+            for obj in add_receiver_tube(glass, gold, variant):
+                obj.location.y = depth
+        return
+    add_receiver_tube(marble, gold, variant)
+
+
+def add_receiver_tube(marble, gold, variant: SoftBodyVariant):
     segments = 128
     receiver = variant.receiver
     outer_radius, inner_radius = receiver.outer_radius, receiver.inner_radius
-    top, bottom = receiver.top, -3.40
+    top = receiver.top
+    bottom = 0.40 if variant.obstacle.key == "stair-cascade" else -3.40
     vertices = []
     for segment in range(segments):
         angle = math.tau * segment / segments
@@ -1943,6 +2158,7 @@ def add_receiver(marble, gold, variant: SoftBodyVariant):
     rim.data.materials.append(gold)
     for polygon in rim.data.polygons:
         polygon.use_smooth = True
+    return wall, rim
 
 
 def look_at(obj, target) -> None:
@@ -1970,7 +2186,9 @@ def add_background(value):
     bpy.ops.mesh.primitive_plane_add(size=2, location=(0.0, 3.2, 3.25), rotation=(math.pi / 2, 0.0, 0.0))
     backdrop = bpy.context.object
     backdrop.name = "Horizonless clouded backdrop"
-    backdrop.scale = (7.5, 6.5, 1.0)
+    # The complete backdrop must cover the widened multi-body cameras too;
+    # otherwise its lower edge exposes a dark world-colour "floor".
+    backdrop.scale = (20.0, 20.0, 1.0)
     backdrop.data.materials.append(value)
     return backdrop
 
@@ -1994,6 +2212,7 @@ def add_camera(variant: SoftBodyVariant):
 
 def main() -> None:
     args = arguments()
+    args.frames = str(Path(args.frames).resolve())
     reset_scene()
     variant = variant_for_seed(args.seed, args.obstacle)
     frame_end = max(5, round(args.duration * args.fps))
@@ -2047,10 +2266,16 @@ def main() -> None:
             softness,
         )
         for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
+            attempt_objects = []
+            attempt_reports = []
             if attempt_index:
                 attempt_cut_frames.append(attempt_start)
             specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
             specimen_depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+            simulations = simulate_specimens(
+                softness, attempt_end - attempt_start + 1, args.fps, variant,
+                stage_index + attempt_index * len(variant.stages),
+            )
             for instance_index, instance_offset in enumerate(specimen_offsets):
                 rotation_offset = 0.0
                 if len(specimen_offsets) > 1:
@@ -2070,10 +2295,12 @@ def main() -> None:
                     rotation_offset,
                     1 if args.width < 360 else 3,
                     obstacle_surface,
+                    simulations[instance_index],
+                    tuple((simulation, specimen_depths[index]) for index, simulation in enumerate(simulations) if index != instance_index),
                 )
                 all_events.extend(events)
-                attempt_quality.append(
-                    {
+                attempt_objects.append(_capsule)
+                attempt_reports.append({
                         "stage": stage_index + 1,
                         "softness": softness,
                         "attempt": attempt_index + 1,
@@ -2081,8 +2308,12 @@ def main() -> None:
                         "start_frame": attempt_start,
                         "end_frame": attempt_end,
                         **quality,
-                    }
-                )
+                })
+            intersections = inspect_specimen_intersections(attempt_objects, attempt_start, attempt_end)
+            for report in attempt_reports:
+                report["inter_body_contact"] = intersections
+                report["issues"].extend(intersections["issues"])
+                attempt_quality.append(report)
 
     if args.events:
         events_path = Path(args.events)
@@ -2090,7 +2321,7 @@ def main() -> None:
         events_path.write_text(
             json.dumps(
                 {
-                    "preflight_schema": 1,
+                    "preflight_schema": 2,
                     "obstacle": variant.obstacle.key,
                     "fps": args.fps,
                     "duration": frame_end / args.fps,
