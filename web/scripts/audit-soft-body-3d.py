@@ -222,11 +222,6 @@ def main() -> int:
             if obstacle_filter is not None and obstacle.key not in obstacle_filter:
                 continue
             variant = variant_for_seed(seed, obstacle.key)
-            stage_spans = stage_frame_spans(
-                production_frames,
-                len(variant.stages),
-                obstacle.key,
-            )
             run = {
                 "seed": seed,
                 "obstacle": obstacle.key,
@@ -239,7 +234,15 @@ def main() -> int:
                       for softness in sorted(softness_filter))
             )
             for stage_index, softness in selected_stages:
-                stage_span = stage_spans[stage_index]
+                # An explicit audited percentage uses that percentage's edit
+                # duration, rather than inheriting the neighbouring preset's
+                # longer hold. All other stages keep their production values.
+                timing_stages = list(variant.stages)
+                timing_stages[stage_index] = softness
+                stage_span = stage_frame_spans(
+                    production_frames, len(variant.stages), obstacle.key,
+                    tuple(timing_stages),
+                )[stage_index]
                 attempt_spans = stage_attempt_frame_spans(
                     stage_span[0],
                     stage_span[1],

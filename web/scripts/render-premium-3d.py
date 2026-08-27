@@ -38,7 +38,7 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
         raise ValueError("Missing or mismatched native 3D preflight evidence")
     expected = set()
     for stage_index, (softness, (start, end)) in enumerate(zip(
-        variant.stages, stage_frame_spans(frame_count, len(variant.stages), variant.obstacle.key),
+        variant.stages, stage_frame_spans(frame_count, len(variant.stages), variant.obstacle.key, variant.stages),
     ), start=1):
         for attempt, (first, last) in enumerate(stage_attempt_frame_spans(start, end, fps, variant.obstacle.key, softness), start=1):
             for body in range(1, len(obstacle_specimen_offsets(variant.obstacle.key)) + 1):
@@ -90,10 +90,11 @@ def repair_stage_cut_frames(
     stage_count: int,
     extra_boundaries: tuple[int, ...] = (),
     obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
 ) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
-    spans = stage_frame_spans(frame_count, stage_count, obstacle_key)
+    spans = stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values)
     boundaries = {spans[stage_index][0] for stage_index in range(1, stage_count)}
     boundaries.update(
         boundary for boundary in extra_boundaries if 1 < boundary < frame_count
@@ -365,7 +366,7 @@ def build_video_filter(
         "fps=30:round=up",
     ]
     for index, (softness, (start, stop)) in enumerate(
-        zip(stages, stage_time_spans(duration, len(stages), obstacle_key))
+        zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages))
     ):
         end = duration if index == len(stages) - 1 else stop - 0.001
         filters.append(
@@ -439,6 +440,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             len(stages),
             attempt_cuts,
             variant.obstacle.key,
+            stages,
         )
         if not events:
             # Silence is truthful here: Foley must correspond to a measured

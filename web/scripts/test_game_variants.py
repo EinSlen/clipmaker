@@ -209,6 +209,37 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "v-stairs"),
                              (139, 304, 463, 688))
 
+    def test_v_stairs_75_moves_empty_tail_to_the_final_comparison(self):
+        for fourth in (65, 70, 75):
+            stages = (0, 25, 55, fourth, 100)
+            spans = stage_frame_spans(900, 5, "v-stairs", stages)
+            self.assertEqual(tuple(end - start + 1 for start, end in spans),
+                             (138, 165, 159, 201, 237))
+            self.assertEqual(sum(end - start + 1 for start, end in spans), 900)
+        unchanged = stage_frame_spans(900, 5, "v-stairs", (0, 30, 55, 85, 100))
+        self.assertEqual(tuple(end - start + 1 for start, end in unchanged),
+                         (138, 165, 159, 225, 213))
+        with self.assertRaisesRegex(ValueError, "stage_values"):
+            stage_frame_spans(900, 5, "v-stairs", (0, 75, 100))
+        with self.assertRaisesRegex(ValueError, "stage_values"):
+            stage_frame_spans(900, 5, "v-stairs", (0, 25, 55, 101, 100))
+
+    def test_v_stairs_75_cut_repair_and_labels_share_the_shortened_clock(self):
+        stages = variant_for_seed(910104, "v-stairs").stages
+        self.assertEqual(stages[3], 75)
+        value = PREMIUM_RENDERER.build_video_filter(30.0, stages, "v-stairs")
+        self.assertIn("22.100", value)
+        self.assertNotIn("22.900", value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (139, 304, 463, 664, 688):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(
+                frames, 900, 5, (), "v-stairs", stages), (139, 304, 463, 664))
+            self.assertEqual((frames / "frame_0664.png").read_bytes(), b"665")
+            self.assertEqual((frames / "frame_0688.png").read_bytes(), b"688")
+
     def test_minimum_preview_gives_every_stage_a_visible_frame(self):
         for count in range(5, 25):
             for obstacle in (None, "peg-grid"):
@@ -242,6 +273,22 @@ class SoftBodyVariantTests(unittest.TestCase):
         payload = {"preflight_schema": 3, "obstacle": "v-stairs", "stages": list(variant.stages),
             "fps": 30, "duration": 30, "attempt_quality": quality}
         self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
+        # Another seed's 75% comparison must not silently reuse the old 85%
+        # edit. Every proof, label and native span must follow the new clock.
+        shorter = variant_for_seed(910104, "v-stairs")
+        obsolete = [{**item, "softness": shorter.stages[item["stage"] - 1]} for item in quality]
+        shorter_payload = {**payload, "stages": list(shorter.stages), "attempt_quality": obsolete}
+        with self.assertRaisesRegex(ValueError, "timeline"):
+            PREMIUM_RENDERER.validate_motion_preflight(shorter_payload, shorter, 900, 30)
+        corrected = []
+        shorter_spans = stage_frame_spans(900, 5, "v-stairs", shorter.stages)
+        for item in obsolete:
+            start, end = shorter_spans[item["stage"] - 1]
+            corrected.append({**item, "start_frame": start, "end_frame": end,
+                **{name: {**item[name], "frames_checked": end - start + 1}
+                   for name in ("framing", "rendered_surface", "inter_body_contact")}})
+        self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(
+            {**shorter_payload, "attempt_quality": corrected}, shorter, 900, 30), corrected)
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_quality": quality[:-1]}, variant, 900, 30)
         with self.assertRaisesRegex(ValueError, "surface"):

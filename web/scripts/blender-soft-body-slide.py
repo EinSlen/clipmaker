@@ -2291,7 +2291,7 @@ def main() -> None:
     frame_end = max(5, round(args.duration * args.fps))
     stages, stage_indices = stage_selection_for(variant, args.stage_softness)
     if args.stage_softness is None:
-        spans = stage_frame_spans(frame_end, len(stages), variant.obstacle.key)
+        spans = stage_frame_spans(frame_end, len(stages), variant.obstacle.key, stages)
     else:
         spans = ((1, frame_end),)
 

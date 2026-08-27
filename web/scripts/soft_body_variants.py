@@ -37,25 +37,43 @@ def stage_release_delay(duration: float, obstacle_key: str) -> float:
     return 0.0
 
 
-def stage_duration_weights(stage_count: int, obstacle_key: str | None = None):
+def stage_duration_weights(
+    stage_count: int,
+    obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
+):
+    if stage_values is not None and (
+        len(stage_values) != stage_count
+        or any(not isinstance(value, int) or not 0 <= value <= 100 for value in stage_values)
+    ):
+        raise ValueError("stage_values must contain one valid percentage per stage")
     if stage_count != 5:
         return (1.0,) * stage_count
-    return REFERENCE_STAGE_DURATIONS_BY_OBSTACLE.get(
+    weights = REFERENCE_STAGE_DURATIONS_BY_OBSTACLE.get(
         obstacle_key,
         REFERENCE_STAGE_DURATIONS,
     )
+    if obstacle_key == "v-stairs" and stage_values is not None:
+        # 75% completes sooner than the 85% comparison used to calibrate the
+        # base edit. Keep its full landing, but move the otherwise empty tail
+        # to the slower 100% trial. This changes only the edit, not gravity,
+        # friction or the trajectory; the complete movie remains 30 seconds.
+        transfer = 0.8 * max(0.0, min(1.0, (85 - stage_values[3]) / 10.0))
+        return (*weights[:3], weights[3] - transfer, weights[4] + transfer)
+    return weights
 
 
 def stage_frame_spans(
     frame_count: int,
     stage_count: int = 5,
     obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
 ) -> tuple[tuple[int, int], ...]:
     """Return one-based inclusive spans matching the reference's edit rhythm."""
 
     if frame_count < stage_count or stage_count <= 0:
         raise ValueError("frame_count must provide at least one frame per stage")
-    weights = stage_duration_weights(stage_count, obstacle_key)
+    weights = stage_duration_weights(stage_count, obstacle_key, stage_values)
     total = sum(weights)
     boundaries = [0]
     cumulative = 0.0
@@ -76,12 +94,13 @@ def stage_time_spans(
     duration: float,
     stage_count: int = 5,
     obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
 ) -> tuple[tuple[float, float], ...]:
     """Return second-based label spans with the same reference timing."""
 
     if duration <= 0.0 or stage_count <= 0:
         raise ValueError("duration and stage_count must be positive")
-    weights = stage_duration_weights(stage_count, obstacle_key)
+    weights = stage_duration_weights(stage_count, obstacle_key, stage_values)
     total = sum(weights)
     boundaries = [0.0]
     cumulative = 0.0

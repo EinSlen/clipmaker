@@ -106,7 +106,7 @@ def main() -> None:
         staged_frames = root / "frames"
         stage_frame_sequence(frames, staged_frames, frame_count)
         repaired = renderer.repair_stage_cut_frames(
-            staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key
+            staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key, stages
         )
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
