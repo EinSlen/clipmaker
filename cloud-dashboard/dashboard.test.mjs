@@ -78,6 +78,8 @@ test('every game has a real gameplay preview in the account editor', async () =>
   assert.match(app, /Aperçu gameplay/u);
   assert.match(css, /\.game-picker-list/u);
   assert.match(css, /\.game-choice\.selected/u);
+  assert.match(app, /list\.querySelector\('\.game-choice\.selected'\)/u);
+  assert.match(app, /list\.scrollLeft \+=/u);
 });
 
 test('current assignment and last published game are presented separately', async () => {
@@ -99,4 +101,12 @@ test('manual 3D renders default to the reliable 15-frame chunks', async () => {
   const html = await source('index.html');
   assert.match(html, /<option value="15" selected>15 images · recommandé<\/option>/u);
   assert.doesNotMatch(html, /<option value="30" selected>/u);
+});
+
+test('generation explains saved assignments and shows the server-selected pipeline', async () => {
+  const html = await source('index.html');
+  const app = await source('app.js');
+  assert.match(html, /vidéos 2D\/3D du planning sauvegardé/u);
+  assert.match(app, /comptes et jeux du planning sauvegardé/u);
+  assert.match(app, /notify\(result\.message \|\| successMessage\)/u);
 });
