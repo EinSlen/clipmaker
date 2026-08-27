@@ -34,6 +34,7 @@ from soft_body_variants import (
     stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
+    stage_release_delay,
     stage_selection_for,
     supported_body_damping,
     variant_for_seed,
@@ -177,12 +178,36 @@ class SoftBodyVariantTests(unittest.TestCase):
                 self.assertGreaterEqual(spans[-1][1] - spans[-1][0] + 1, 27)
 
     def test_multi_body_references_use_their_observed_stage_rhythm(self):
-        for obstacle in ("stair-cascade", "v-stairs", "peg-grid"):
+        for obstacle in ("stair-cascade", "peg-grid"):
             spans = stage_frame_spans(900, 5, obstacle)
             self.assertEqual(
                 tuple(end - start + 1 for start, end in spans),
                 (120, 180, 210, 210, 180),
             )
+
+    def test_v_stairs_uses_hold_time_for_complete_landings(self):
+        spans = stage_frame_spans(900, 5, "v-stairs")
+        self.assertEqual(tuple(end - start + 1 for start, end in spans),
+                         (138, 165, 159, 225, 213))
+        for start, end in spans:
+            self.assertEqual(stage_release_delay((end - start + 1) / 30, "v-stairs"), 0)
+        # The unrelated stair and peg scenes retain their existing timing.
+        self.assertEqual(stage_release_delay(7, "stair-cascade"), 0.65)
+        self.assertEqual(stage_release_delay(7, "peg-grid"), 0.65)
+        self.assertEqual(stage_release_delay(4, "peg-grid"), 0)
+        self.assertEqual(stage_release_delay(7, "moving-slide"), 0)
+
+    def test_v_stairs_labels_and_cut_repairs_follow_landing_timing(self):
+        value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 30, 55, 85, 100), "v-stairs")
+        for time in ("4.600", "10.100", "15.400", "22.900"):
+            self.assertIn(time, value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (139, 304, 463, 688):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "v-stairs"),
+                             (139, 304, 463, 688))
 
     def test_minimum_preview_gives_every_stage_a_visible_frame(self):
         for count in range(5, 25):

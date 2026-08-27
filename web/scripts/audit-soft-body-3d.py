@@ -111,6 +111,7 @@ def audit_attempt(
     minimum_ratio = math.inf
     maximum_ratio = 0.0
     maximum_coordinate = 0.0
+    maximum_side_or_top = 0.0
     finite = True
     centers = []
     for points, *_rest in simulated:
@@ -120,6 +121,7 @@ def audit_attempt(
         for point in points:
             finite = finite and math.isfinite(point.x) and math.isfinite(point.y)
             maximum_coordinate = max(maximum_coordinate, abs(point.x), abs(point.y))
+            maximum_side_or_top = max(maximum_side_or_top, abs(point.x), point.y)
         for first, second in zip(points, points[1:]):
             ratio = (second - first).length / expected_rest
             minimum_ratio = min(minimum_ratio, ratio)
@@ -138,7 +140,9 @@ def audit_attempt(
     issues = []
     if not finite:
         issues.append("non-finite-coordinate")
-    if maximum_coordinate > 25.0:
+    # Match production: a legitimate lower exit is evaluated by the complete
+    # multi-body framing gate, with teleport/constraint checks still enforced.
+    if maximum_side_or_top > 25.0:
         issues.append("left-scene-before-cut")
     if minimum_ratio < 0.82 or maximum_ratio > 1.18:
         issues.append("constraint-tear")
@@ -165,6 +169,7 @@ def audit_attempt(
         "minimum_segment_ratio": round(minimum_ratio, 4),
         "maximum_segment_ratio": round(maximum_ratio, 4),
         "maximum_coordinate": round(maximum_coordinate, 4),
+        "maximum_side_or_top": round(maximum_side_or_top, 4),
         "vertical_drop": round(start_y - minimum_y, 4),
         "maximum_physics_step": round(travelled, 4),
         "terminal_center": [round(value, 4) for value in centers[-1]],

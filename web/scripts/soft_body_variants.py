@@ -23,9 +23,18 @@ REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
     # The multi-specimen references dwell longer on 25/50/75% so viewers can
     # follow every body through the complete obstacle, then close briskly.
     "stair-cascade": (4.0, 6.0, 7.0, 7.0, 6.0),
-    "v-stairs": (4.0, 6.0, 7.0, 7.0, 6.0),
+    # Match the observed complete landings with static contact friction.
+    # Reuse the former release holds for the two slower final comparisons.
+    "v-stairs": (4.6, 5.5, 5.3, 7.5, 7.1),
     "peg-grid": (4.0, 6.0, 7.0, 7.0, 6.0),
 }
+
+
+def stage_release_delay(duration: float, obstacle_key: str) -> float:
+    """Authored hold before gravity starts; never derived from the outcome."""
+    if obstacle_key in {"stair-cascade", "peg-grid"}:
+        return min(0.65, max(0.0, duration - 4.50))
+    return 0.0
 
 
 def stage_duration_weights(stage_count: int, obstacle_key: str | None = None):

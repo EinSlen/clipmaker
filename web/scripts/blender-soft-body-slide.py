@@ -36,6 +36,7 @@ from soft_body_variants import (
     stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
+    stage_release_delay,
     stage_selection_for,
     supported_body_damping,
     variant_for_seed,
@@ -1098,11 +1099,7 @@ def _chain_ticks(
     impact_memory = 0.0
     node_impact_memory = [0.0] * node_count
     trial_duration = frame_count / fps
-    release_delay = (
-        min(0.65, max(0.0, trial_duration - 4.50))
-        if variant.obstacle.key in {"stair-cascade", "v-stairs", "peg-grid"}
-        else 0.0
-    )
+    release_delay = stage_release_delay(trial_duration, variant.obstacle.key)
     gravity_multiplier = {
         "stair-cascade": 0.62,
         "v-stairs": 0.25,
@@ -1114,7 +1111,10 @@ def _chain_ticks(
         # empty portrait frame.
         "compression-ring": 0.14,
     }.get(variant.obstacle.key, 1.0)
-    exit_time = effective_ramp_exit_time(
+    # Static V-stairs already apply contact friction in collide_point. They
+    # must not inherit the moving ramp's extra hold until a duration-derived
+    # release window: changing the edit used to change the preceding fall.
+    exit_time = 0.0 if variant.obstacle.key == "v-stairs" else effective_ramp_exit_time(
         variant,
         trial_duration,
         stage_motion.ramp_phase_offset,
@@ -1619,6 +1619,7 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
     minimum_ratio = math.inf
     maximum_ratio = 0.0
     maximum_coordinate = 0.0
+    maximum_side_or_top = 0.0
     finite = True
     centers_y = []
     for points, *_rest in simulated:
@@ -1626,6 +1627,7 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
         for point in points:
             finite = finite and math.isfinite(point.x) and math.isfinite(point.y)
             maximum_coordinate = max(maximum_coordinate, abs(point.x), abs(point.y))
+            maximum_side_or_top = max(maximum_side_or_top, abs(point.x), point.y)
         for first, second in zip(points, points[1:]):
             ratio = (second - first).length / expected_rest
             minimum_ratio = min(minimum_ratio, ratio)
@@ -1649,7 +1651,10 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
     issues = []
     if not finite:
         issues.append("non-finite-coordinate")
-    if maximum_coordinate > 25.0:
+    # The receiver is open underneath; a finished/missed specimen may keep
+    # falling while its partners remain on screen. Lower exits are checked
+    # by the shared framing gate, not mistaken for an upward/side escape.
+    if maximum_side_or_top > 25.0:
         issues.append("left-scene-before-cut")
     if minimum_ratio < 0.82 or maximum_ratio > 1.18:
         issues.append("constraint-tear")
@@ -1666,6 +1671,7 @@ def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]
         "maximum_physics_step": round(maximum_physics_step, 4),
         "vertical_drop": round(vertical_drop, 4),
         "maximum_coordinate": round(maximum_coordinate, 4),
+        "maximum_side_or_top": round(maximum_side_or_top, 4),
         "receiver_entries": len(getattr(simulated, "receiver_entries", ())),
         "first_receiver_entry": (
             round(float(simulated.receiver_entries[0][0]), 4)

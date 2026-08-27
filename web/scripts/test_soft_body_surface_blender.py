@@ -1,6 +1,7 @@
 """Fast integration regressions executed inside Blender, without rendering."""
 
 import importlib.util
+import math
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -308,6 +309,54 @@ class SurfaceContactTests(unittest.TestCase):
             self.assertLess(projected.x, 0.975)
             self.assertGreater(projected.y, 0.06)
             self.assertLess(projected.y, 0.91)
+
+    def test_static_v_stairs_motion_does_not_depend_on_the_future_cut(self):
+        def prefix(frame_count):
+            ticks = renderer._chain_ticks(0, frame_count, 30, self.variant, 0,
+                                          obstacle_specimen_offsets("v-stairs")[0], 0.045)
+            # Observe exactly four physical seconds in two longer timelines.
+            # Stop the generator instead of simulating an irrelevant tail.
+            for _ in range(4 * 240):
+                state = next(ticks)
+            points = [point.copy() for point in state["points"]]
+            ticks.close()
+            return points
+
+        short, long = prefix(144), prefix(240)
+        for first, second in zip(short, long):
+            self.assertLess((first - second).length, 1e-6,
+                            "a future edit must not change friction on static stairs")
+
+    def test_downward_exit_is_not_confused_with_side_escape_or_teleport(self):
+        class Trace(list):
+            pass
+
+        rest = 2.0 * self.variant.shape.cylinder_half / 40
+        def falling_trace(offset_x=0.0, initial_y=8.0):
+            trace = Trace()
+            for frame in range(61):
+                height = initial_y - frame * 0.8
+                trace.append(([Vector((offset_x + (index - 20) * rest, height))
+                               for index in range(41)],))
+            # Synthetic low-speed physics telemetry isolates the envelope rule.
+            trace.physics_samples = [(index / 240, 1.0, 0.0, offset_x, initial_y - index * 0.1)
+                                     for index in range(481)]
+            return trace
+
+        trace = falling_trace()
+        report = renderer.simulation_quality(trace, self.variant)
+        self.assertGreater(report["maximum_coordinate"], 25)
+        self.assertEqual(report["issues"], [])
+        for invalid in (falling_trace(offset_x=26), falling_trace(initial_y=26)):
+            self.assertIn("left-scene-before-cut", renderer.simulation_quality(invalid, self.variant)["issues"])
+        trace.physics_samples[-1] = (2.0, 1.0, 0.0, 0.0, -100.0)
+        self.assertIn("solver-teleport", renderer.simulation_quality(trace, self.variant)["issues"])
+        trace = falling_trace()
+        trace[1][0][0].x = math.nan
+        self.assertIn("non-finite-coordinate", renderer.simulation_quality(trace, self.variant)["issues"])
+        trace = falling_trace()
+        trace[1][0][10].x += rest * 0.5
+        self.assertIn("constraint-tear", renderer.simulation_quality(trace, self.variant)["issues"])
 
     def test_all_spawned_capsules_fit_below_the_label(self):
         for obstacle in OBSTACLES:
