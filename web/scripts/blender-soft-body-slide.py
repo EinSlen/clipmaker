@@ -36,6 +36,7 @@ from soft_body_variants import (
     stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
+    stage_selection_for,
     supported_body_damping,
     variant_for_seed,
 )
@@ -2259,17 +2260,10 @@ def main() -> None:
     reset_scene()
     variant = variant_for_seed(args.seed, args.obstacle)
     frame_end = max(5, round(args.duration * args.fps))
+    stages, stage_indices = stage_selection_for(variant, args.stage_softness)
     if args.stage_softness is None:
-        stages = variant.stages
-        stage_indices = tuple(range(len(stages)))
         spans = stage_frame_spans(frame_end, len(stages), variant.obstacle.key)
     else:
-        stage_index = min(
-            range(len(variant.stages)),
-            key=lambda index: abs(variant.stages[index] - args.stage_softness),
-        )
-        stages = (variant.stages[stage_index],)
-        stage_indices = (stage_index,)
         spans = ((1, frame_end),)
 
     stage_spans = tuple(

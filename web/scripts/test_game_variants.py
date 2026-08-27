@@ -34,6 +34,7 @@ from soft_body_variants import (
     stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
+    stage_selection_for,
     supported_body_damping,
     variant_for_seed,
 )
@@ -129,6 +130,15 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_requested_preview_softness_is_exact_even_between_presets(self):
+        variant = variant_for_seed(910105, "moving-slide")
+        self.assertNotIn(55, variant.stages)
+        self.assertEqual(stage_selection_for(variant, 55), ((55,), (2,)))
+        self.assertEqual(stage_selection_for(variant), (variant.stages, (0, 1, 2, 3, 4)))
+        for invalid in (-1, 101, 55.5):
+            with self.assertRaises(ValueError):
+                stage_selection_for(variant, invalid)
+
     def test_framing_blocks_sustained_side_exits_and_empty_comparisons(self):
         variant = variant_for_seed(910103, "moving-slide")
         def frames(position, count=61):

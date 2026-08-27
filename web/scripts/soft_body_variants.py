@@ -442,6 +442,16 @@ def stage_motion_for(variant: SoftBodyVariant, stage_index: int) -> StageMotion:
     )
 
 
+def stage_selection_for(variant: SoftBodyVariant, softness: int | None = None):
+    """An explicit preview percentage is exact, not rounded to a preset."""
+    if softness is None:
+        return variant.stages, tuple(range(len(variant.stages)))
+    if not isinstance(softness, int) or not 0 <= softness <= 100:
+        raise ValueError("Preview softness must be an integer between 0 and 100")
+    motion_index = min(range(len(variant.stages)), key=lambda index: abs(variant.stages[index] - softness))
+    return (softness,), (motion_index,)
+
+
 def ramp_sweep_state(
     time: float,
     variant: SoftBodyVariant,
