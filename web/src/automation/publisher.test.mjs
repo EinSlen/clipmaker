@@ -98,6 +98,27 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
   }
 });
 
+test('stair upload requires a complete outlet beat for all three specimens', () => {
+  const base = native3dEvidence(123);
+  const good = { ...base, variant_obstacle: 'stair-cascade',
+    attempt_quality: base.attempt_quality.filter((report) => report.body === 1).flatMap((report) =>
+      [1, 2, 3].map((body) => ({ ...structuredClone(report), body,
+        framing: { ...report.framing, outlet: { minimum_observation_seconds: 0.35, issues: [], bodies:
+          [1, 2, 3].map((id) => ({ body: id, first_outlet_frame: 150, observation_seconds: 1, observed: true })) } },
+      }))) };
+  assert.doesNotThrow(() => assertNative3dQuality(good, { seed: 123 }));
+  const outlet = good.attempt_quality[0].framing.outlet;
+  const invalid = [undefined, { ...outlet, bodies: outlet.bodies.slice(1) }, { ...outlet, minimum_observation_seconds: 0.1 },
+    ...[{ body: 2 }, { observed: false }, { first_outlet_frame: 175 }, { first_outlet_frame: 0 },
+      { first_outlet_frame: true }, { observation_seconds: NaN }, { observation_seconds: 2 }].map((patch) =>
+      ({ ...outlet, bodies: [{ ...outlet.bodies[0], ...patch }, ...outlet.bodies.slice(1)] }))];
+  for (const proof of invalid) {
+    const broken = structuredClone(good);
+    broken.attempt_quality[0].framing.outlet = proof;
+    assert.throws(() => assertNative3dQuality(broken, { seed: 123 }), /3D publication blocked/u);
+  }
+});
+
 test('daily 3D import prefers the latest default-branch render and accepts the cloud scheduler', async () => {
   const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
   const source = await fs.readFile(workflow, 'utf8');

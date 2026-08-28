@@ -19,6 +19,7 @@ from soft_body_variants import (
     OBSTACLE_KEYS, obstacle_specimen_offsets, stage_attempt_frame_spans,
     stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary,
 )
+from soft_body_framing import validate_stair_outlet_evidence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -72,6 +73,8 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
                    or not math.isfinite(framing[key]) or not 0 <= framing[key] <= limit
                    for key, limit in (("maximum_empty_seconds", 1.0), ("maximum_side_exit_seconds", 0.5)))):
             raise ValueError("Native 3D camera framing was not validated")
+        if variant.obstacle.key == "stair-cascade":
+            validate_stair_outlet_evidence(framing.get("outlet"), framing["frames_checked"], fps)
         if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
             between = item.get("inter_body_contact")
             if not isinstance(between, dict) or between.get("issues") != [] or between.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1:

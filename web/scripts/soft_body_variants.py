@@ -20,9 +20,10 @@ REFERENCE_SWEEP_SCALE = 1.35
 REFERENCE_SCENE_OFFSET_X = 2.44
 REFERENCE_STAGE_DURATIONS = (4.438, 3.804, 7.173, 7.675, 6.841)
 REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
-    # The multi-specimen references dwell longer on 25/50/75% so viewers can
-    # follow every body through the complete obstacle, then close briskly.
-    "stair-cascade": (4.0, 6.0, 7.0, 7.0, 6.0),
+    # Reuse the former frozen release holds for the slow final descent.
+    # Keep the physical action in the first four comparisons essentially the
+    # same length, and let 100% reach the outlet before the 30-second cut.
+    "stair-cascade": (4.0, 5.4, 6.3, 6.3, 8.0),
     # Match the observed complete landings with static contact friction.
     # Reuse the former release holds for the two slower final comparisons.
     "v-stairs": (4.6, 5.5, 5.3, 7.5, 7.1),
@@ -32,7 +33,7 @@ REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
 
 def stage_release_delay(duration: float, obstacle_key: str) -> float:
     """Authored hold before gravity starts; never derived from the outcome."""
-    if obstacle_key in {"stair-cascade", "peg-grid"}:
+    if obstacle_key == "peg-grid":
         return min(0.65, max(0.0, duration - 4.50))
     return 0.0
 
@@ -53,6 +54,12 @@ def stage_duration_weights(
         obstacle_key,
         REFERENCE_STAGE_DURATIONS,
     )
+    if obstacle_key == "stair-cascade" and stage_values is not None:
+        # The 85% capsule reaches the outlet slightly later than 75%.
+        # Reuse 0.2 s of the middle stage's completed tail, keeping the full
+        # 100% descent and the complete 30-second edit unchanged.
+        transfer = 0.2 * max(0.0, min(1.0, (stage_values[3] - 75) / 10.0))
+        return (weights[0], weights[1], weights[2] - transfer, weights[3] + transfer, weights[4])
     if obstacle_key == "v-stairs" and stage_values is not None:
         # 75% completes sooner than the 85% comparison used to calibrate the
         # base edit. Keep its full landing, but move the otherwise empty tail
