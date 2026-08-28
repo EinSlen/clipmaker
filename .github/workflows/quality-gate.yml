@@ -15,6 +15,11 @@ on:
         description: Comma-separated deterministic seeds for the deep 3D audit
         type: string
         default: "910103,910104,910105"
+      audit_obstacle:
+        description: Audit all families or only the obstacle affected by a fix
+        type: choice
+        default: all
+        options: [all, moving-slide, stair-cascade, v-stairs, peg-grid, pipe-bend, twin-gears, compression-ring]
 
 permissions:
   contents: read
@@ -112,7 +117,7 @@ jobs:
       fail-fast: false
       max-parallel: 7
       matrix:
-        obstacle: [moving-slide, stair-cascade, v-stairs, peg-grid, pipe-bend, twin-gears, compression-ring]
+        obstacle: ${{ fromJSON(inputs.audit_obstacle && inputs.audit_obstacle != 'all' && format('["{0}"]', inputs.audit_obstacle) || '["moving-slide","stair-cascade","v-stairs","peg-grid","pipe-bend","twin-gears","compression-ring"]') }}
     steps:
       - uses: actions/checkout@v6
       - name: Build the production Blender environment

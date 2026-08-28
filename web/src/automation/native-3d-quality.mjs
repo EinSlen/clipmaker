@@ -48,6 +48,20 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
     if (framing?.frames_checked !== end - start + 1 || !Array.isArray(framing?.issues) || framing.issues.length
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
       || !Number.isFinite(framing.maximum_side_exit_seconds) || framing.maximum_side_exit_seconds < 0 || framing.maximum_side_exit_seconds > 0.5) fail();
+    if (metadata.variant_obstacle === 'stair-cascade') {
+      const outlet = framing.outlet;
+      if (outlet?.minimum_observation_seconds !== 0.35
+        || !Array.isArray(outlet?.issues) || outlet.issues.length
+        || !Array.isArray(outlet?.bodies) || outlet.bodies.length !== 3) fail();
+      const ids = new Set();
+      for (const observation of outlet.bodies) {
+        const { body: id, first_outlet_frame: first, observation_seconds: seconds, observed } = observation || {};
+        if (!Number.isInteger(id) || id < 1 || id > 3 || ids.has(id) || observed !== true
+          || !Number.isInteger(first) || first < 1 || first > framing.frames_checked - Math.ceil(0.35 * 30)
+          || !Number.isFinite(seconds) || Math.abs(seconds - (framing.frames_checked - first) / 30) > 0.000051) fail();
+        ids.add(id);
+      }
+    }
     if (specimens > 1 && (report.inter_body_contact?.frames_checked !== end - start + 1
       || !Array.isArray(report.inter_body_contact?.issues) || report.inter_body_contact.issues.length
       || !Number.isFinite(report.inter_body_contact.maximum_penetration)

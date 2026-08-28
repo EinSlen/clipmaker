@@ -39,7 +39,7 @@ from soft_body_variants import (
     supported_body_damping,
     variant_for_seed,
 )
-from soft_body_framing import inspect_simulation_framing
+from soft_body_framing import inspect_simulation_framing, inspect_stair_outlet, validate_stair_outlet_evidence
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -178,12 +178,8 @@ class SoftBodyVariantTests(unittest.TestCase):
                 self.assertGreaterEqual(spans[-1][1] - spans[-1][0] + 1, 27)
 
     def test_multi_body_references_use_their_observed_stage_rhythm(self):
-        for obstacle in ("stair-cascade", "peg-grid"):
-            spans = stage_frame_spans(900, 5, obstacle)
-            self.assertEqual(
-                tuple(end - start + 1 for start, end in spans),
-                (120, 180, 210, 210, 180),
-            )
+        spans = stage_frame_spans(900, 5, "peg-grid")
+        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 180, 210,210, 180))
 
     def test_v_stairs_uses_hold_time_for_complete_landings(self):
         spans = stage_frame_spans(900, 5, "v-stairs")
@@ -191,11 +187,61 @@ class SoftBodyVariantTests(unittest.TestCase):
                          (138, 165, 159, 225, 213))
         for start, end in spans:
             self.assertEqual(stage_release_delay((end - start + 1) / 30, "v-stairs"), 0)
-        # The unrelated stair and peg scenes retain their existing timing.
-        self.assertEqual(stage_release_delay(7, "stair-cascade"), 0.65)
+        self.assertEqual(stage_release_delay(7, "stair-cascade"), 0)
         self.assertEqual(stage_release_delay(7, "peg-grid"), 0.65)
         self.assertEqual(stage_release_delay(4, "peg-grid"), 0)
         self.assertEqual(stage_release_delay(7, "moving-slide"), 0)
+
+    def test_stair_edit_reuses_frozen_holds_for_the_final_descent(self):
+        spans = stage_frame_spans(900, 5, "stair-cascade")
+        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 162, 189, 189, 240))
+        for (start, end), previous_active_seconds in zip(spans[:4], (4, 5.35, 6.35, 6.35)):
+            duration = (end - start + 1) / 30
+            self.assertEqual(stage_release_delay(duration, "stair-cascade"), 0)
+            self.assertLessEqual(abs(duration - previous_active_seconds), 0.051)
+        value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 25, 55, 75, 100), "stair-cascade")
+        for time in ("4.000", "9.400", "15.700", "22.000"):
+            self.assertIn(time, value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (121, 283, 472, 661):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "stair-cascade"),
+                             (121, 283, 472, 661))
+
+    def test_stair_outlet_beat_checks_all_bodies_and_only_rendered_frames(self):
+        variant = variant_for_seed(734193085, "stair-cascade")
+        def trace(first, x=0):
+            return [([(x, variant.receiver.top + variant.shape.radius + (0.1 if frame < first else -0.1))],)
+                    for frame in range(61)]
+        complete = [trace(35, x) for x in (-2, 0, 2)]
+        report = inspect_stair_outlet(complete, variant, 30)
+        self.assertEqual(report["issues"], [])
+        self.assertEqual([body["first_outlet_frame"] for body in report["bodies"]], [36] * 3)
+        validate_stair_outlet_evidence(report, 60, 30)
+        for first in (50, 59, 60, 61):
+            failed = inspect_stair_outlet([*complete[:2], trace(first)], variant, 30)
+            self.assertEqual(failed["issues"], ["unfinished-stair-descent"])
+        with self.assertRaises(ValueError):
+            inspect_stair_outlet(complete[:2], variant, 30)
+        with self.assertRaises(ValueError):
+            inspect_stair_outlet([*complete[:2], trace(35)[:-1]], variant, 30)
+        self.assertIsNone(inspect_stair_outlet([], variant_for_seed(1, "peg-grid"), 30))
+
+    def test_imported_stair_outlet_proof_cannot_hide_an_unfinished_body(self):
+        good = {"minimum_observation_seconds": 0.35, "issues": [], "bodies": [
+            {"body": body, "first_outlet_frame": 36, "observation_seconds": 0.8, "observed": True}
+            for body in (1, 2, 3)]}
+        validate_stair_outlet_evidence(good, 60, 30)
+        invalid = [None, {**good, "bodies": good["bodies"][:2]}, {**good, "minimum_observation_seconds": 0.1}]
+        for patch in ({"body": 2}, {"observed": False}, {"first_outlet_frame": 50},
+                      {"first_outlet_frame": 0}, {"first_outlet_frame": True},
+                      {"observation_seconds": float("nan")}, {"observation_seconds": 1.5}):
+            invalid.append({**good, "bodies": [{**good["bodies"][0], **patch}, *good["bodies"][1:]]})
+        for report in invalid:
+            with self.assertRaisesRegex(ValueError, "outlet"):
+                validate_stair_outlet_evidence(report, 60, 30)
 
     def test_v_stairs_labels_and_cut_repairs_follow_landing_timing(self):
         value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 30, 55, 85, 100), "v-stairs")
@@ -311,6 +357,31 @@ class SoftBodyVariantTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "framing"):
                 PREMIUM_RENDERER.validate_motion_preflight({**payload,
                     "attempt_quality": [{**quality[0], "framing": invalid}, *quality[1:]]}, variant, 900, 30)
+
+    def test_native_stair_assembly_requires_outlet_evidence(self):
+        variant = variant_for_seed(734193085, "stair-cascade")
+        reports = []
+        for stage, (softness, (start, end)) in enumerate(zip(
+                variant.stages, stage_frame_spans(900, 5, "stair-cascade")), 1):
+            count = end - start + 1
+            outlet = {"minimum_observation_seconds": 0.35, "issues": [], "bodies": [
+                {"body": body, "observed": True, "first_outlet_frame": count - 15, "observation_seconds": 0.5}
+                for body in (1, 2, 3)]}
+            for body in (1, 2, 3):
+                reports.append({"stage": stage, "softness": softness, "attempt": 1, "body": body,
+                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": count, "maximum_empty_seconds": 0,
+                                "maximum_side_exit_seconds": 0, "issues": [], "outlet": outlet},
+                    "rendered_surface": {"frames_checked": count, "vertices_checked": 210946 * count,
+                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.01, "issues": []},
+                    "inter_body_contact": {"issues": [], "frames_checked": count}})
+        payload = {"preflight_schema": 3, "obstacle": "stair-cascade", "stages": list(variant.stages),
+                   "fps": 30, "duration": 30, "attempt_quality": reports}
+        PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30)
+        broken = {**payload, "attempt_quality": [{**reports[0],
+                  "framing": {**reports[0]["framing"], "outlet": None}}, *reports[1:]]}
+        with self.assertRaisesRegex(ValueError, "outlet"):
+            PREMIUM_RENDERER.validate_motion_preflight(broken, variant, 900, 30)
 
     def test_fast_obstacles_repeat_during_long_levels(self):
         for obstacle in ("moving-slide", "pipe-bend", "twin-gears", "compression-ring"):

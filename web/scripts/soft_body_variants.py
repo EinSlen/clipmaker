@@ -20,9 +20,10 @@ REFERENCE_SWEEP_SCALE = 1.35
 REFERENCE_SCENE_OFFSET_X = 2.44
 REFERENCE_STAGE_DURATIONS = (4.438, 3.804, 7.173, 7.675, 6.841)
 REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
-    # The multi-specimen references dwell longer on 25/50/75% so viewers can
-    # follow every body through the complete obstacle, then close briskly.
-    "stair-cascade": (4.0, 6.0, 7.0, 7.0, 6.0),
+    # Reuse the former frozen release holds for the slow final descent.
+    # Keep the physical action in the first four comparisons essentially the
+    # same length, and let 100% reach the outlet before the 30-second cut.
+    "stair-cascade": (4.0, 5.4, 6.3, 6.3, 8.0),
     # Match the observed complete landings with static contact friction.
     # Reuse the former release holds for the two slower final comparisons.
     "v-stairs": (4.6, 5.5, 5.3, 7.5, 7.1),
@@ -32,7 +33,7 @@ REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
 
 def stage_release_delay(duration: float, obstacle_key: str) -> float:
     """Authored hold before gravity starts; never derived from the outcome."""
-    if obstacle_key in {"stair-cascade", "peg-grid"}:
+    if obstacle_key == "peg-grid":
         return min(0.65, max(0.0, duration - 4.50))
     return 0.0
 

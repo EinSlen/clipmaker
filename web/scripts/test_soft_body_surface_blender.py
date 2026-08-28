@@ -336,6 +336,19 @@ class SurfaceContactTests(unittest.TestCase):
         simulations = renderer.simulate_specimens(0, 120, 30, variant, 0)
         self.assertEqual(renderer.inspect_simulation_framing(simulations, variant, 30)["issues"], [])
 
+    def test_daily_stair_final_descent_reaches_the_outlet_before_the_cut(self):
+        variant = variant_for_seed(734193085, "stair-cascade")
+        simulations = renderer.simulate_specimens(100, 240, 30, variant, 4)
+        framing = renderer.inspect_simulation_framing(simulations, variant, 30)
+        self.assertEqual(framing["issues"], [], framing)
+        self.assertTrue(all(body["observed"] for body in framing["outlet"]["bodies"]))
+        for simulation in simulations:
+            self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
+        # Same trajectories cut at the old six-second duration: no numerical
+        # collision defect, but the slow bodies have not reached the outlet.
+        premature = renderer.inspect_simulation_framing([trace[:181] for trace in simulations], variant, 30)
+        self.assertIn("unfinished-stair-descent", premature["issues"])
+
     def test_portrait_projection_matches_blender_for_every_camera(self):
         scene = bpy.context.scene
         scene.render.resolution_x, scene.render.resolution_y = 1080, 1920
