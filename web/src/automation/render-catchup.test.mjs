@@ -129,6 +129,36 @@ test('untrusted event exits before loading any credential or configuration', asy
   assert.equal(calls.length, 0);
 });
 
+test('runner finds the final artifact beyond the first hundred native chunks', async () => {
+  const { calls, args } = fixture();
+  const original = args.request;
+  args.request = async (url, options) => {
+    if (url.includes('/artifacts?') && url.endsWith('page=1')) {
+      calls.push({ url, options });
+      return Response.json({ total_count: 101, artifacts: Array.from({ length: 100 },
+        (_, index) => ({ ...artifact(), name: `native-chunk-${index}` })) });
+    }
+    return original(url, options);
+  };
+  await catchUpRender(args);
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+  assert.ok(calls.some(call => call.url.includes('/artifacts?') && call.url.endsWith('page=2')));
+});
+
+test('a dispatch HTTP failure is reported without retrying or forcing a platform', async () => {
+  const { calls, args } = fixture();
+  const original = args.request;
+  args.request = async (url, options) => {
+    if (url.endsWith('/dispatches')) {
+      calls.push({ url, options });
+      return new Response('sensitive response must not be included', { status: 403 });
+    }
+    return original(url, options);
+  };
+  await assert.rejects(catchUpRender(args), /^Error: GitHub request failed \(403\).$/);
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+});
+
 test('changed GitHub provenance fails before the cloud bootstrap', async () => {
   const { calls, args } = fixture();
   args.request = async (url) => { calls.push(url); return Response.json({ ...run, head_branch: 'preview' }); };
