@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const root = new URL('./', import.meta.url);
 
@@ -117,4 +118,31 @@ test('changing a game explains regeneration and the in-flight publication bounda
   assert.match(html, /Sauvegarde, puis lance « Générer maintenant »/u);
   assert.match(html, /Si un envoi a déjà commencé/u);
   assert.match(html, /le nouveau choix servira le lendemain/u);
+});
+
+test('cloud activity shows an ongoing 3D render instead of a successful doctor', async () => {
+  const app = await source('app.js');
+  const functions = app.slice(app.indexOf('  function runLabel('), app.indexOf('  function renderRuns('));
+  const activity = vm.runInNewContext(`${functions}; runActivity`);
+  const doctor = { id: 1, status: 'completed', conclusion: 'success', display_title: 'ClipMaker · doctor',
+    created_at: '2026-08-28T14:00:00Z', path: '.github/workflows/daily-publisher.yml' };
+  const render = { id: 2, status: 'in_progress', created_at: '2026-08-28T13:00:00Z',
+    path: '.github/workflows/soft-body-artifact.yml' };
+  const current = activity([doctor, render]);
+  assert.equal(current.run.id, 2);
+  assert.equal(current.label, 'En cours');
+  assert.equal(current.operation, 'Rendu 3D');
+  assert.equal(activity([doctor]).operation, 'Vérification des comptes');
+  assert.equal(activity([{ ...doctor, display_title: 'ClipMaker · publish 18:00' }]).operation, 'Publication');
+  assert.equal(activity([{ ...doctor, display_title: 'ClipMaker · generate' }]).operation, 'Génération');
+  assert.equal(activity([render, doctor, { ...render, status: 'completed', conclusion: 'failure',
+    created_at: '2026-08-28T15:00:00Z' }]).label, 'En cours');
+  assert.equal(activity([{ ...render, status: 'completed', conclusion: 'failure' }]).label, 'Échec');
+  assert.equal(activity([]), null);
+  assert.match(app, /runs\?per_page=5&branch=main/u);
+  assert.match(app, /runs\?per_page=3&branch=main/u);
+  const html = await source('index.html');
+  assert.match(html, /Activité cloud/u);
+  assert.doesNotMatch(html, /Dernier cron|rattraper automatiquement toute panne/u);
+  assert.match(html, /L’envoi dépend d’un rendu validé/u);
 });
