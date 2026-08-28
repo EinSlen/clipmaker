@@ -498,6 +498,20 @@
     return ['Échec', 'failure'];
   }
 
+  function runActivity(runs) {
+    const ordered = [...runs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const run = ordered.find((item) => item.status !== 'completed') || ordered[0];
+    if (!run) return null;
+    const title = String(run.display_title || '').toLowerCase();
+    let operation = 'Traitement quotidien';
+    if (String(run.path || '').includes('soft-body-artifact.yml') || String(run.name || '').includes('3D')) {
+      operation = 'Rendu 3D';
+    } else if (title.includes('doctor')) operation = 'Vérification des comptes';
+    else if (title.includes('generate')) operation = 'Génération';
+    else if (title.includes('publish')) operation = 'Publication';
+    return { run, operation, label: runLabel(run)[0] };
+  }
+
   function renderRuns(runs) {
     if (!runs.length) {
       elements.runs.innerHTML = '<div class="run-row"><span class="run-state"></span><span class="run-name"><strong>Aucune exécution</strong><small>Le premier cron apparaîtra ici.</small></span></div>';
@@ -532,18 +546,16 @@
 
   async function loadRuns() {
     const [daily, soft] = await Promise.all([
-      github('/actions/workflows/daily-publisher.yml/runs?per_page=5'),
-      github('/actions/workflows/soft-body-artifact.yml/runs?per_page=3'),
+      github('/actions/workflows/daily-publisher.yml/runs?per_page=5&branch=main'),
+      github('/actions/workflows/soft-body-artifact.yml/runs?per_page=3&branch=main'),
     ]);
     const runs = [...(daily.workflow_runs || []), ...(soft.workflow_runs || [])]
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     renderRuns(runs);
-    const latest = daily.workflow_runs?.[0];
-    if (latest) {
-      const [label] = runLabel(latest);
-      elements.latestStatus.textContent = label;
-      elements.latestTime.textContent = formatDate(latest.updated_at || latest.created_at);
-    }
+    const activity = runActivity(runs);
+    elements.latestStatus.textContent = activity?.label || 'Aucune exécution';
+    elements.latestTime.textContent = activity
+      ? `${activity.operation} · ${formatDate(activity.run.updated_at || activity.run.created_at)}` : '—';
   }
 
   function extract(body, expression, fallback) {
