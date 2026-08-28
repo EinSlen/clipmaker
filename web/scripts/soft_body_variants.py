@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import random
+from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, INNER_RADIUS
 
 
 Color = tuple[float, float, float]
@@ -439,7 +440,7 @@ RECEIVERS = (
 
 OBSTACLES = (
     ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.55, 3.12, 11.80),
-    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, 1.55, 0.30, 3.35, 14.20),
+    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, RECEIVER_X, 0.30, 3.35, 14.20),
     ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.90, 0.0, 0.0, 2.80, 12.80),
     ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 9.50),
     ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 10.10),
@@ -565,11 +566,9 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
         receiver.bowl_depth,
     )
     if obstacle.key == "stair-cascade":
-        # One visible tube for each depth lane. A single central cup gave the
-        # outer bodies a 2D collider where no corresponding 3D opening exists.
-        outer = 0.42 + (positive % 3) * 0.01
-        receiver = ReceiverPreset(receiver.key + "-triple", "Triple clear receivers",
-                                  obstacle.receiver_x, outer, outer - 0.075, 1.40, 0.0)
+        # The three hollow elbows and their collision walls share dimensions.
+        receiver = ReceiverPreset(receiver.key + "-curved-triple", "Triple curved clear receivers",
+                                  RECEIVER_X, OUTER_RADIUS, INNER_RADIUS, RECEIVER_TOP, 0.0)
     stage_key, stages = STAGE_PRESETS[(positive * 11 + positive // 13 + 3) % len(STAGE_PRESETS)]
     rng = random.Random(positive ^ 0x5F7B0D17)
     start_x = obstacle.start_x + rng.uniform(-0.12, 0.12)

@@ -2,6 +2,7 @@
 
 import importlib.util
 import math
+import random
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -36,6 +37,106 @@ class SurfaceContactTests(unittest.TestCase):
         box.dimensions = (1.0, 1.0, 0.2)
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         return renderer.ObstacleSurface((box,)).at_frame(1)
+
+    def stair_surface(self):
+        variant = variant_for_seed(734193085, "stair-cascade")
+        renderer.add_obstacle_geometry(self.material, self.material, variant, 240, 30)
+        renderer.add_receiver(self.material, self.material, variant)
+        objects = tuple(bpy.context.collection.objects)
+        return variant, objects, renderer.ObstacleSurface(objects)
+
+    def test_solid_stairs_and_curved_pipes_are_watertight_and_open_inside(self):
+        from soft_body_stair_geometry import pipe_path, path_normals, inside_stair, VOLUME_CONTACT
+        variant, objects, surface = self.stair_surface()
+        self.assertEqual(len(objects), 4)
+        for obj in objects:
+            self.assertEqual(obj.get("contact_model"), VOLUME_CONTACT)
+            bm = renderer.bmesh.new()
+            try:
+                bm.from_mesh(obj.data)
+                self.assertTrue(all(edge.is_manifold and edge.is_contiguous for edge in bm.edges), obj.name)
+                self.assertGreater(bm.calc_volume(signed=True), 0, obj.name)
+            finally:
+                bm.free()
+        tree = surface.at_frame(1)
+        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
+            for (x, z), (nx, nz) in zip(pipe_path()[1:-1], path_normals(pipe_path())[1:-1]):
+                self.assertFalse(renderer.point_inside_closed_surface(tree, Vector((x, depth, z))))
+                for side in (-1, 1):
+                    self.assertTrue(renderer.point_inside_closed_surface(tree,
+                        Vector((x + nx * .4025 * side, depth, z + nz * .4025 * side))))
+        for x, z in (*pipe_path(), (4.5, .45), (3, -1)):
+            point = Vector((x, z))
+            position, previous, ramp, receiver, contact = renderer.collide_point(
+                point.copy(), point.copy(), .18, 1, 1, 1 / 240, variant, 8, 0, True)
+            self.assertLess((position - point).length, 1e-6)
+            self.assertLess((previous - point).length, 1e-6)
+            self.assertEqual((ramp, receiver, contact), (0, 0, False))
+        point = Vector((-2, 5.4))
+        position, previous, *_ = renderer.collide_point(
+            point.copy(), point.copy(), .18, 1, 1, 1 / 240, variant, 8, 0, True)
+        self.assertFalse(inside_stair(position))
+        self.assertLess((position - previous).length, 1e-6, "projection must not create kinetic energy")
+
+    def test_closed_volume_contact_preserves_outside_points_in_all_three_lanes(self):
+        from soft_body_stair_geometry import pipe_path
+        _variant, _objects, surface = self.stair_surface()
+        targets = surface.final_contact_targets()
+        tree = surface.at_frame(1)
+        rng = random.Random(40)
+        counts = [0, 0]
+        for depth in (0, -1.15, 1.15):
+            points = [Vector((rng.uniform(-3, 4.2), rng.uniform(-.5, .5), rng.uniform(0, 6))) for _ in range(1500)]
+            points.extend(Vector((x, 0, z)) for x, z in pipe_path())
+            # Exact native frame-83 point: ray-origin ambiguity must not move
+            # a vertex sideways along its supporting face. Include both sides.
+            edge_point = Vector((-.4619292914867401, -.11880992352962494, 4.619999885559082))
+            boundary_index = len(points)
+            points.extend(edge_point + Vector((0, 0, dz)) for dz in (0, .00005, -.00005))
+            body = renderer.add_mesh("Independent volume query", points, [], self.material)
+            body.location.y = depth
+            renderer.add_final_surface_contact(body, targets)
+            self.assertTrue(all(modifier.type == "NODES" for modifier in body.modifiers))
+            bpy.context.view_layer.update()
+            evaluated = body.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            mesh = evaluated.to_mesh()
+            try:
+                self.assertLess((mesh.vertices[boundary_index].co - edge_point).length, .00001)
+                for before, vertex in zip(points, mesh.vertices):
+                    before = body.matrix_world @ before
+                    after = evaluated.matrix_world @ vertex.co
+                    if tree.find_nearest(before)[3] < .00005:
+                        continue
+                    inside = renderer.point_inside_closed_surface(tree, before)
+                    counts[int(inside)] += 1
+                    if inside:
+                        self.assertGreater((after - before).length, 0)
+                        self.assertFalse(renderer.point_inside_closed_surface(tree, after))
+                    else:
+                        self.assertLess((after - before).length, .00001, "air beside a concave corner must not move")
+            finally:
+                evaluated.to_mesh_clear()
+            # Independent inspection must measure the NODES modifier too,
+            # including excessive corrections of our deliberately deep points.
+            report = renderer.inspect_rendered_surface(body, surface, 1, 1)
+            self.assertGreater(report["maximum_correction"], .08)
+            self.assertIn("excessive-final-skin-correction", report["issues"])
+            self.assertEqual(report["outside_vertices_moved"], 0)
+            self.assertEqual(report["maximum_penetration"], 0)
+            bpy.data.objects.remove(body, do_unlink=True)
+        self.assertGreater(counts[0], 4000)
+        self.assertGreater(counts[1], 300)
+
+    def test_closed_volume_mode_rejects_open_or_mixed_geometry(self):
+        from soft_body_stair_geometry import VOLUME_CONTACT
+        open_mesh = renderer.add_mesh("Unclosed contact", [(0, 0, 0), (1, 0, 0), (0, 1, 0)],
+                                      [(0, 1, 2)], self.material)
+        open_mesh["contact_model"] = VOLUME_CONTACT
+        with self.assertRaisesRegex(ValueError, "watertight"):
+            renderer.build_contact_targets((open_mesh,))
+        bpy.ops.mesh.primitive_cube_add(size=1)
+        with self.assertRaisesRegex(ValueError, "mix"):
+            renderer.build_contact_targets((open_mesh, bpy.context.object))
 
     def constrain(self, target, anchor_z=0.3):
         return renderer.constrain_visible_skin(

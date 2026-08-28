@@ -49,6 +49,9 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
       || !Number.isFinite(framing.maximum_side_exit_seconds) || framing.maximum_side_exit_seconds < 0 || framing.maximum_side_exit_seconds > 0.5) fail();
     if (metadata.variant_obstacle === 'stair-cascade') {
+      if (renderedSurface.contact_model !== 'closed-stair-volume-v1'
+        || renderedSurface.classification !== 'independent-three-ray-parity'
+        || renderedSurface.outside_vertices_moved !== 0) fail();
       const outlet = framing.outlet;
       if (outlet?.minimum_observation_seconds !== 0.35
         || !Array.isArray(outlet?.issues) || outlet.issues.length

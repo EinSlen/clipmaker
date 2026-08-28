@@ -103,6 +103,8 @@ test('stair upload requires a complete outlet beat for all three specimens', () 
   const good = { ...base, variant_obstacle: 'stair-cascade',
     attempt_quality: base.attempt_quality.filter((report) => report.body === 1).flatMap((report) =>
       [1, 2, 3].map((body) => ({ ...structuredClone(report), body,
+        rendered_surface: { ...report.rendered_surface, contact_model: 'closed-stair-volume-v1',
+          classification: 'independent-three-ray-parity', outside_vertices_moved: 0 },
         framing: { ...report.framing, outlet: { minimum_observation_seconds: 0.35, issues: [], bodies:
           [1, 2, 3].map((id) => ({ body: id, first_outlet_frame: 150, observation_seconds: 1, observed: true })) } },
       }))) };
@@ -115,6 +117,13 @@ test('stair upload requires a complete outlet beat for all three specimens', () 
   for (const proof of invalid) {
     const broken = structuredClone(good);
     broken.attempt_quality[0].framing.outlet = proof;
+    assert.throws(() => assertNative3dQuality(broken, { seed: 123 }), /3D publication blocked/u);
+  }
+  for (const patch of [{ contact_model: undefined }, { contact_model: 'old-shrinkwrap' },
+    { classification: undefined }, { outside_vertices_moved: undefined },
+    { outside_vertices_moved: 1 }, { outside_vertices_moved: false }, { outside_vertices_moved: NaN }]) {
+    const broken = structuredClone(good);
+    Object.assign(broken.attempt_quality[0].rendered_surface, patch);
     assert.throws(() => assertNative3dQuality(broken, { seed: 123 }), /3D publication blocked/u);
   }
 });

@@ -392,7 +392,9 @@ class SoftBodyVariantTests(unittest.TestCase):
                     "framing": {"frames_checked": count, "maximum_empty_seconds": 0,
                                 "maximum_side_exit_seconds": 0, "issues": [], "outlet": outlet},
                     "rendered_surface": {"frames_checked": count, "vertices_checked": 210946 * count,
-                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.01, "issues": []},
+                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.01, "issues": [],
+                                         "contact_model": "closed-stair-volume-v1", "outside_vertices_moved": 0,
+                                         "classification": "independent-three-ray-parity"},
                     "inter_body_contact": {"issues": [], "frames_checked": count}})
         payload = {"preflight_schema": 3, "obstacle": "stair-cascade", "stages": list(variant.stages),
                    "fps": 30, "duration": 30, "attempt_quality": reports}
@@ -401,6 +403,13 @@ class SoftBodyVariantTests(unittest.TestCase):
                   "framing": {**reports[0]["framing"], "outlet": None}}, *reports[1:]]}
         with self.assertRaisesRegex(ValueError, "outlet"):
             PREMIUM_RENDERER.validate_motion_preflight(broken, variant, 900, 30)
+        for patch in ({"contact_model": None}, {"contact_model": "old-shrinkwrap"},
+                      {"outside_vertices_moved": None}, {"outside_vertices_moved": 1},
+                      {"outside_vertices_moved": False}, {"classification": None}):
+            broken = {**payload, "attempt_quality": [{**reports[0],
+                      "rendered_surface": {**reports[0]["rendered_surface"], **patch}}, *reports[1:]]}
+            with self.assertRaisesRegex(ValueError, "closed-volume"):
+                PREMIUM_RENDERER.validate_motion_preflight(broken, variant, 900, 30)
 
     def test_fast_obstacles_repeat_during_long_levels(self):
         for obstacle in ("moving-slide", "pipe-bend", "twin-gears", "compression-ring"):
