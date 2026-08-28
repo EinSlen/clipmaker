@@ -54,6 +54,12 @@ def stage_duration_weights(
         obstacle_key,
         REFERENCE_STAGE_DURATIONS,
     )
+    if obstacle_key == "stair-cascade" and stage_values is not None:
+        # The 85% capsule reaches the outlet slightly later than 75%.
+        # Reuse 0.2 s of the middle stage's completed tail, keeping the full
+        # 100% descent and the complete 30-second edit unchanged.
+        transfer = 0.2 * max(0.0, min(1.0, (stage_values[3] - 75) / 10.0))
+        return (weights[0], weights[1], weights[2] - transfer, weights[3] + transfer, weights[4])
     if obstacle_key == "v-stairs" and stage_values is not None:
         # 75% completes sooner than the 85% comparison used to calibrate the
         # base edit. Keep its full landing, but move the otherwise empty tail

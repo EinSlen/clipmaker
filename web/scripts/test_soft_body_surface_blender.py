@@ -349,6 +349,16 @@ class SurfaceContactTests(unittest.TestCase):
         premature = renderer.inspect_simulation_framing([trace[:181] for trace in simulations], variant, 30)
         self.assertIn("unfinished-stair-descent", premature["issues"])
 
+    def test_stair_85_outlet_contact_is_visible_long_enough_at_the_cut(self):
+        variant = variant_for_seed(910103, "stair-cascade")
+        simulations = renderer.simulate_specimens(85, 195, 30, variant, 3)
+        framing = renderer.inspect_simulation_framing(simulations, variant, 30)
+        self.assertEqual(framing["issues"], [], framing)
+        for simulation in simulations:
+            self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
+        premature = renderer.inspect_simulation_framing([trace[:190] for trace in simulations], variant, 30)
+        self.assertIn("unfinished-stair-descent", premature["issues"])
+
     def test_portrait_projection_matches_blender_for_every_camera(self):
         scene = bpy.context.scene
         scene.render.resolution_x, scene.render.resolution_y = 1080, 1920

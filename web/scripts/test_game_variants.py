@@ -229,6 +229,25 @@ class SoftBodyVariantTests(unittest.TestCase):
             inspect_stair_outlet([*complete[:2], trace(35)[:-1]], variant, 30)
         self.assertIsNone(inspect_stair_outlet([], variant_for_seed(1, "peg-grid"), 30))
 
+    def test_stair_85_keeps_a_visible_outlet_beat_without_shortening_100(self):
+        stages = (0, 30, 55, 85, 100)
+        spans = stage_frame_spans(900, 5, "stair-cascade", stages)
+        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 162, 183, 195, 240))
+        for fourth in (65, 75):
+            unchanged = stage_frame_spans(900, 5, "stair-cascade", (0, 25, 55, fourth, 100))
+            self.assertEqual(tuple(end - start + 1 for start, end in unchanged), (120, 162, 189, 189, 240))
+        value = PREMIUM_RENDERER.build_video_filter(30.0, stages, "stair-cascade")
+        self.assertIn("15.500", value)
+        self.assertIn("22.000", value)
+        self.assertNotIn("15.700", value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (121, 283, 466, 661):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(
+                frames, 900, 5, (), "stair-cascade", stages), (121, 283, 466, 661))
+
     def test_imported_stair_outlet_proof_cannot_hide_an_unfinished_body(self):
         good = {"minimum_observation_seconds": 0.35, "issues": [], "bodies": [
             {"body": body, "first_outlet_frame": 36, "observation_seconds": 0.8, "observed": True}
