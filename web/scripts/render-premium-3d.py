@@ -15,7 +15,10 @@ import wave
 from array import array
 from pathlib import Path
 
-from soft_body_variants import OBSTACLE_KEYS, stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary
+from soft_body_variants import (
+    OBSTACLE_KEYS, obstacle_specimen_offsets, stage_attempt_frame_spans,
+    stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -23,15 +26,75 @@ def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
 
 
+def validate_motion_preflight(payload, variant, frame_count, fps):
+    """Require native physics/surface evidence for every body of every take."""
+    if (
+        payload.get("preflight_schema") != 3
+        or payload.get("obstacle") != variant.obstacle.key
+        or payload.get("stages") != list(variant.stages)
+        or payload.get("fps") != fps
+        or abs(float(payload.get("duration", 0)) - frame_count / fps) > 1e-6
+    ):
+        raise ValueError("Missing or mismatched native 3D preflight evidence")
+    expected = set()
+    for stage_index, (softness, (start, end)) in enumerate(zip(
+        variant.stages, stage_frame_spans(frame_count, len(variant.stages), variant.obstacle.key, variant.stages),
+    ), start=1):
+        for attempt, (first, last) in enumerate(stage_attempt_frame_spans(start, end, fps, variant.obstacle.key, softness), start=1):
+            for body in range(1, len(obstacle_specimen_offsets(variant.obstacle.key)) + 1):
+                expected.add((stage_index, softness, attempt, body, first, last))
+    quality = payload.get("attempt_quality")
+    if not isinstance(quality, list) or len(quality) != len(expected):
+        raise ValueError("Incomplete native 3D preflight: a trial or body is missing")
+    actual = set()
+    for item in quality:
+        if not isinstance(item, dict) or item.get("issues") != []:
+            raise ValueError("Native 3D preflight reports a physical defect")
+        surface = item.get("surface")
+        if not isinstance(surface, dict) or surface.get("inside_contacts") != 0:
+            raise ValueError("Native 3D surface contacts were not validated")
+        rendered_surface = item.get("rendered_surface")
+        if (not isinstance(rendered_surface, dict) or rendered_surface.get("issues") != []
+            or rendered_surface.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1
+            or not isinstance(rendered_surface.get("vertices_checked"), int) or rendered_surface["vertices_checked"] <= 0
+            or rendered_surface.get("subdivision") != 3
+            or not isinstance(rendered_surface.get("maximum_penetration"), (int, float))
+            or not math.isfinite(rendered_surface["maximum_penetration"])
+            or not 0 <= rendered_surface["maximum_penetration"] <= 0.003
+            or not isinstance(rendered_surface.get("maximum_correction"), (int, float))
+            or not math.isfinite(rendered_surface["maximum_correction"])
+            or not 0 <= rendered_surface["maximum_correction"] <= 0.08):
+            raise ValueError("Native 3D final subdivided surface was not validated")
+        framing = item.get("framing")
+        if (not isinstance(framing, dict) or framing.get("issues") != []
+            or framing.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1
+            or any(not isinstance(framing.get(key), (int, float))
+                   or not math.isfinite(framing[key]) or not 0 <= framing[key] <= limit
+                   for key, limit in (("maximum_empty_seconds", 1.0), ("maximum_side_exit_seconds", 0.5)))):
+            raise ValueError("Native 3D camera framing was not validated")
+        if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
+            between = item.get("inter_body_contact")
+            if not isinstance(between, dict) or between.get("issues") != [] or between.get("frames_checked") != item.get("end_frame", 0) - item.get("start_frame", 0) + 1:
+                raise ValueError("Native 3D contacts between specimens were not validated")
+        actual.add(tuple(item.get(key) for key in (
+            "stage", "softness", "attempt", "body", "start_frame", "end_frame",
+        )))
+    if actual != expected:
+        raise ValueError("Native 3D preflight does not cover the requested timeline")
+    return quality
+
+
 def repair_stage_cut_frames(
     frames: Path,
     frame_count: int,
     stage_count: int,
     extra_boundaries: tuple[int, ...] = (),
+    obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
 ) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
-    spans = stage_frame_spans(frame_count, stage_count)
+    spans = stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values)
     boundaries = {spans[stage_index][0] for stage_index in range(1, stage_count)}
     boundaries.update(
         boundary for boundary in extra_boundaries if 1 < boundary < frame_count
@@ -292,14 +355,18 @@ def premium_font_file() -> str:
     return ffmpeg_filter_path(Path(selected))
 
 
-def build_video_filter(duration: float, stages: tuple[int, ...]) -> str:
+def build_video_filter(
+    duration: float,
+    stages: tuple[int, ...],
+    obstacle_key: str | None = None,
+) -> str:
     """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
     filters = [
         "fps=30:round=up",
     ]
     for index, (softness, (start, stop)) in enumerate(
-        zip(stages, stage_time_spans(duration, len(stages)))
+        zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages))
     ):
         end = duration if index == len(stages) - 1 else stop - 0.001
         filters.append(
@@ -326,6 +393,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
     variant = variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
     events: list[dict[str, object]] = []
+    attempt_quality: list[dict[str, object]] = []
     event_source = "simulated-collision-peaks"
 
     with tempfile.TemporaryDirectory(prefix="clipmaker-premium-", dir=str(output.parent)) as temporary:
@@ -337,7 +405,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         generated_bed = root / "original-soft-body-bed.wav"
         motion_events = root / "motion-events.json"
         blender_command = [
-            blender, "--background", "--factory-startup", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
+            blender, "--background", "--factory-startup", "--python-exit-code", "1", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
             "--frames", str(frames), "--duration", str(args.duration), "--fps", str(fps),
             "--width", str(width), "--height", str(height), "--samples", str(samples), "--seed", str(args.seed),
             "--softness", str(args.difficulty), "--theme", args.theme, "--title", args.title,
@@ -353,6 +421,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         attempt_cuts: tuple[int, ...] = ()
         if motion_events.is_file():
             payload = json.loads(motion_events.read_text(encoding="utf-8"))
+            attempt_quality = validate_motion_preflight(payload, variant, frame_count, fps)
             exported_cuts = payload.get("attempt_cuts", [])
             if isinstance(exported_cuts, list):
                 attempt_cuts = tuple(
@@ -363,13 +432,22 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             exported_events = payload.get("events", [])
             if isinstance(exported_events, list):
                 events = [event for event in exported_events if isinstance(event, dict)]
-        repair_stage_cut_frames(frames, frame_count, len(stages), attempt_cuts)
+        else:
+            raise RuntimeError("Blender produced no native 3D preflight evidence")
+        repair_stage_cut_frames(
+            frames,
+            frame_count,
+            len(stages),
+            attempt_cuts,
+            variant.obstacle.key,
+            stages,
+        )
         if not events:
             # Silence is truthful here: Foley must correspond to a measured
             # collision or a clean geometric receiver entry exported by
             # Blender.  The ambient bed still keeps the mix alive.
             event_source = "no-physical-events"
-        video_filter = build_video_filter(args.duration, stages)
+        video_filter = build_video_filter(args.duration, stages, variant.obstacle.key)
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
             "-i", str(frames / "frame_%04d.png"),
@@ -412,6 +490,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "events_per_trial": round(len(events) / max(1, len(stages)), 2),
         "event_ratios": None,
         "event_source": event_source,
+        "physics_preflight": "passed",
+        "attempt_quality": attempt_quality,
         "foley_event_times": [round(float(event["time"]), 3) for event in events],
         "foley_event_types": sorted({str(event.get("kind", "contact")) for event in events}),
         "units_completed": args.difficulty,

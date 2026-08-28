@@ -14,7 +14,9 @@ import sys
 from pathlib import Path
 
 import bpy
+import bmesh
 from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -27,15 +29,20 @@ from soft_body_variants import (
     natural_ramp_exit_time,
     obstacle_collision_radius_scale,
     obstacle_drag_retention_per_second,
+    obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
     stage_frame_spans,
     stage_motion_for,
+    stage_release_delay,
+    stage_selection_for,
     supported_body_damping,
     variant_for_seed,
 )
+from soft_body_framing import camera_location, inspect_simulation_framing
+from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
 
 
 
@@ -303,11 +310,17 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
-@lru_cache(maxsize=64)
 def obstacle_segments(variant: SoftBodyVariant):
     """Return visible/collision-aligned line obstacles in the simulation plane."""
+    return static_obstacle_segments(variant.obstacle.key)
 
-    key = variant.obstacle.key
+
+@lru_cache(maxsize=16)
+def static_obstacle_segments(key):
+    if key == "peg-grid":
+        # The source grid has a real landing rail, not a tube or an invisible
+        # catch. Bodies finish the squeeze, land and slide during the payoff.
+        return [((-3.15, 1.80), (3.15, 1.18), 0.085)]
     if key == "stair-cascade":
         return [
             ((-2.35 + index * 0.62, 5.55 - index * 0.52),
@@ -331,22 +344,50 @@ def obstacle_segments(variant: SoftBodyVariant):
             (-0.42, 3.94), (-0.08, 3.75), (0.25, 3.55), (0.36, 3.24),
             (0.36, 2.92),
         ]
+        knots = [Vector(point) for point in centerline]
+        centerline = []
+        for index in range(len(knots) - 1):
+            a, b = knots[max(0, index - 1)], knots[index]
+            c, d = knots[index + 1], knots[min(index + 2, len(knots) - 1)]
+            for sample in range(4):
+                u = sample / 4.0
+                point = 0.5 * ((2.0 * b) + (-a + c) * u
+                    + (2.0 * a - 5.0 * b + 4.0 * c - d) * u * u
+                    + (-a + 3.0 * b - 3.0 * c + d) * u * u * u)
+                centerline.append(tuple(point))
+        centerline.append(tuple(knots[-1]))
         walls = []
         half_opening = 0.47
+        normals = []
+        for start, end in zip(centerline, centerline[1:]):
+            tangent = (Vector(end) - Vector(start)).normalized()
+            normals.append(Vector((-tangent.y, tangent.x)))
+        offsets = []
+        for index in range(len(centerline)):
+            before = normals[max(0, index - 1)]
+            after = normals[min(index, len(normals) - 1)]
+            bisector = (before + after).normalized()
+            offsets.append(bisector * (half_opening / max(0.25, bisector.dot(after))))
+        # Adjacent segments share the SAME corner. Independently offset
+        # tangents left small collider gaps, while the smoothed glass took a
+        # different path altogether. Use a closed, joined polyline for both.
         for index in range(len(centerline) - 1):
-            start, end = centerline[index], centerline[index + 1]
-            dx, dz = end[0] - start[0], end[1] - start[1]
-            length = max(1e-9, math.hypot(dx, dz))
-            normal = (-dz / length, dx / length)
             for side in (-1.0, 1.0):
-                offset = (normal[0] * half_opening * side, normal[1] * half_opening * side)
-                walls.append((
-                    ((start[0] + offset[0]), (start[1] + offset[1])),
-                    ((end[0] + offset[0]), (end[1] + offset[1])),
-                    0.085,
-                ))
+                start = Vector(centerline[index]) + offsets[index] * side
+                end = Vector(centerline[index + 1]) + offsets[index + 1] * side
+                walls.append((tuple(start), tuple(end), 0.090))
         return walls
     return []
+
+
+@lru_cache(maxsize=16)
+def obstacle_segment_bounds(key):
+    # Keep the original contact order and exact bounds, but do not recalculate
+    # four min/max pairs millions of times while checking a smooth pipe.
+    return tuple((start, end, thickness,
+        min(start[0], end[0]), max(start[0], end[0]),
+        min(start[1], end[1]), max(start[1], end[1]))
+        for start, end, thickness in static_obstacle_segments(key))
 
 
 @lru_cache(maxsize=16)
@@ -356,10 +397,14 @@ def static_obstacle_circles(key: str):
         for row in range(5):
             z = 5.15 - row * 0.62
             for column in range(6):
-                circles.append((Vector((-1.60 + column * 0.64, z)), 0.115, Vector((0.0, 0.0)), 0.0))
+                # A 0.44 opening accepts the flattened 15/25% presets while
+                # remaining narrower than the rigid 0.45-0.468 diameter.
+                # The old 0.41 throat trapped the 15% section between two
+                # incompatible circle projections, folding and ejecting it.
+                circles.append((Vector((-1.60 + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
-        speed = math.tau / 1.38
+        speed = math.tau / 3.40
         return (
             (Vector((-0.80, 3.78)), 0.60, Vector((0.0, 0.0)), -speed),
             (Vector((0.80, 3.78)), 0.60, Vector((0.0, 0.0)), speed),
@@ -381,8 +426,12 @@ def obstacle_circles(time: float, variant: SoftBodyVariant):
         return static_obstacle_circles(key)
     if key == "compression-ring":
         angle = math.tau * time / 1.72 - math.pi / 2
-        half_gap = 0.92 - 0.28 * (0.5 + 0.5 * math.sin(angle))
-        velocity = -0.28 * 0.5 * math.tau / 1.72 * math.cos(angle)
+        # Keep 0.44 units between the closed rollers: the actual 45% preset
+        # needs up to 0.4301, while its unsqueezed section is up to 0.468.
+        # The former 0.40 opening had no feasible contact solution at that
+        # preset and alternating projections tore the chain at the throat.
+        half_gap = 0.92 - 0.12 * (0.5 + 0.5 * math.sin(angle))
+        velocity = -0.12 * 0.5 * math.tau / 1.72 * math.cos(angle)
         return [
             (Vector((-half_gap, 3.82)), 0.58, Vector((-velocity, 0.0)), 0.0),
             (Vector((half_gap, 3.82)), 0.58, Vector((velocity, 0.0)), 0.0),
@@ -489,12 +538,19 @@ def add_ramp(
     return ramp
 
 
-def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int):
+def add_obstacle_geometry(
+    marble, gold, variant: SoftBodyVariant, frame_end: int, fps: int,
+    trial_spans: tuple[tuple[int, int, int], ...] = (),
+):
     """Build the selected obstacle family from the same primitives as physics."""
 
     key = variant.obstacle.key
     if key == "moving-slide":
         return
+
+    def local_time(frame):
+        start = next((span[1] for span in trial_spans if span[1] <= frame <= span[2]), 1)
+        return (frame - start) / fps
 
     if key == "pipe-bend":
         glass = material("Clear pipe glass", (0.66, 0.82, 0.92, 0.34), roughness=0.10, clearcoat=0.48)
@@ -509,12 +565,13 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
             curve.resolution_u = 10
             curve.bevel_depth = 0.085
             curve.bevel_resolution = 5
-            spline = curve.splines.new("NURBS")
+            curve.use_fill_caps = True
+            # The shared path is already smoothly sampled. A second NURBS
+            # interpolation would move the visible glass off its colliders.
+            spline = curve.splines.new("POLY")
             spline.points.add(len(path) - 1)
             for point, coordinate in zip(spline.points, path):
                 point.co = (coordinate[0], 0.0, coordinate[1], 1.0)
-            spline.use_endpoint_u = True
-            spline.order_u = min(3, len(path))
             wall = bpy.data.objects.new(f"Continuous glass pipe wall {side + 1}", curve)
             bpy.context.collection.objects.link(wall)
             wall.data.materials.append(glass)
@@ -526,9 +583,14 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
             bpy.ops.mesh.primitive_cube_add(size=1.0, location=midpoint, rotation=(0.0, -angle, 0.0))
             block = bpy.context.object
             block.name = f"{variant.obstacle.label} segment {index + 1}"
-            block.dimensions = (length, variant.ramp.half_width * 2.0, thickness * 2.0)
+            lane_depth_scale = 2.90 if key == "stair-cascade" else 1.0
+            block.dimensions = (
+                length,
+                variant.ramp.half_width * 2.0 * lane_depth_scale,
+                thickness * 2.0,
+            )
             bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-            block.data.materials.append(marble)
+            block.data.materials.append(gold if key == "peg-grid" else marble)
             bevel = block.modifiers.new("Marble edge", "BEVEL")
             bevel.width = min(0.045, thickness * 0.32)
             bevel.segments = 3
@@ -601,6 +663,12 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
                 tooth_obj.dimensions = (0.22, variant.ramp.half_width * 1.8, 0.10)
                 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
                 tooth_obj.data.materials.append(marble)
+                # Round the actual rendered/contact edge. At a sharp 90-degree
+                # corner Shrinkwrap can misclassify distant outside vertices
+                # and snap free-falling skin up to this rotating tooth.
+                bevel = tooth_obj.modifiers.new("Rounded tooth edge", "BEVEL")
+                bevel.width = 0.006
+                bevel.segments = 3
                 tooth_obj.parent = gear_root
                 tooth_obj.location = (
                     math.cos(angle) * (radius - 0.10),
@@ -608,7 +676,7 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
                     math.sin(angle) * (radius - 0.10),
                 )
             for frame in range(1, frame_end + 1):
-                gear_root.rotation_euler[1] = _angular_speed * (frame - 1) / fps
+                gear_root.rotation_euler[1] = _angular_speed * local_time(frame)
                 gear_root.keyframe_insert("rotation_euler", index=1, frame=frame)
             if gear_root.animation_data and gear_root.animation_data.action:
                 for curve in gear_root.animation_data.action.fcurves:
@@ -620,7 +688,7 @@ def add_obstacle_geometry(marble, gold, variant: SoftBodyVariant, frame_end: int
         # collider. Their motion compresses the body; it never targets the cup.
         roller_objects = [obj for obj in bpy.context.collection.objects if obj.name.startswith(variant.obstacle.label)]
         for frame in range(1, frame_end + 1):
-            time = (frame - 1) / fps
+            time = local_time(frame)
             states = obstacle_circles(time, variant)
             for obj, state in zip(roller_objects, states):
                 obj.location.x = state[0].x
@@ -834,13 +902,13 @@ def collide_point(
                     previous = point - velocity
 
     if variant.obstacle.key != "moving-slide":
-        for start, end, thickness in obstacle_segments(variant):
+        for start, end, thickness, min_x, max_x, min_z, max_z in obstacle_segment_bounds(variant.obstacle.key):
             padding = radius + thickness + 0.06
             if (
-                point.x < min(start[0], end[0]) - padding
-                or point.x > max(start[0], end[0]) + padding
-                or point.y < min(start[1], end[1]) - padding
-                or point.y > max(start[1], end[1]) + padding
+                point.x < min_x - padding
+                or point.x > max_x + padding
+                or point.y < min_z - padding
+                or point.y > max_z + padding
             ):
                 continue
             point, previous, intensity, contact = resolve_obstacle_contact(
@@ -878,6 +946,9 @@ def collide_point(
             )
             ramp_intensity = max(ramp_intensity, intensity)
             ramp_contact = ramp_contact or contact
+
+    if variant.obstacle.key == "peg-grid":
+        return point, previous, ramp_intensity, receiver_intensity, ramp_contact
 
     # Thin circular rim first. The opening remains real: misses continue below
     # frame instead of landing on an invisible cylinder cap.
@@ -920,7 +991,7 @@ def collide_point(
     # a capsule, but there is no invisible floor or sticky catch volume.
     wall_center_offset = (receiver.outer_radius + receiver.inner_radius) * 0.5
     wall_half_thickness = (receiver.outer_radius - receiver.inner_radius) * 0.5
-    wall_bottom = -3.55
+    wall_bottom = 0.40 if variant.obstacle.key == "stair-cascade" else -3.55
     wall_top = receiver.top - rim_minor * 0.18
     if wall_bottom < point.y < wall_top:
         for side in (-1.0, 1.0):
@@ -962,7 +1033,7 @@ def collide_point(
     return point, previous, ramp_intensity, receiver_intensity, ramp_contact
 
 
-def simulate_chain(
+def _chain_ticks(
     softness_percent: int,
     frame_count: int,
     fps: int,
@@ -1002,13 +1073,19 @@ def simulate_chain(
     if variant.obstacle.key == "stair-cascade":
         initial_linear_velocity.x += 0.62
     elif variant.obstacle.key == "v-stairs":
-        initial_linear_velocity.x += 0.48
+        # The two reference specimens start on opposite arms and move toward
+        # the centre.  Mirroring velocity is scene geometry, not receiver
+        # steering: it depends only on which authored arm spawned the body.
+        initial_linear_velocity.x += -0.24 if instance_offset_x > 2.0 else 0.24
     previous = []
     for point in points:
         radius_from_center = point - center
+        authored_spin = variant.initial_spin + stage_motion.angular_velocity
+        if variant.obstacle.key == "v-stairs" and instance_offset_x > 2.0:
+            authored_spin *= -1.0
         angular_velocity = Vector(
             (-radius_from_center.y, radius_from_center.x)
-        ) * (variant.initial_spin + stage_motion.angular_velocity)
+        ) * authored_spin
         previous.append(point - (initial_linear_velocity + angular_velocity) * dt)
     supported_horizontal, supported_vertical = supported_body_damping(fps, softness)
     class SimulationFrames(list):
@@ -1026,7 +1103,22 @@ def simulate_chain(
     impact_memory = 0.0
     node_impact_memory = [0.0] * node_count
     trial_duration = frame_count / fps
-    exit_time = effective_ramp_exit_time(
+    release_delay = stage_release_delay(trial_duration, variant.obstacle.key)
+    gravity_multiplier = {
+        "stair-cascade": 0.62,
+        "v-stairs": 0.25,
+        "peg-grid": 0.42,
+        "pipe-bend": 0.65,
+        "twin-gears": 0.24,
+        # These close-ups use a deliberate slow-motion physical timescale so
+        # an outcome is still visible at the cut rather than 1-2 seconds of an
+        # empty portrait frame.
+        "compression-ring": 0.14,
+    }.get(variant.obstacle.key, 1.0)
+    # Static V-stairs already apply contact friction in collide_point. They
+    # must not inherit the moving ramp's extra hold until a duration-derived
+    # release window: changing the edit used to change the preceding fall.
+    exit_time = 0.0 if variant.obstacle.key == "v-stairs" else effective_ramp_exit_time(
         variant,
         trial_duration,
         stage_motion.ramp_phase_offset,
@@ -1074,6 +1166,12 @@ def simulate_chain(
                 # same 240 Hz clock and therefore the same event timeline.
                 physics_step += 1
                 time = physics_step * dt
+                if time <= release_delay:
+                    frozen_center = sum(points, Vector((0.0, 0.0))) / node_count
+                    frames.physics_samples.append(
+                        (time, 0.0, 0.0, frozen_center.x, frozen_center.y)
+                    )
+                    continue
                 previous_substep_points = [point.copy() for point in points]
                 substep_ramp_intensity = 0.0
                 substep_receiver_intensity = 0.0
@@ -1113,7 +1211,10 @@ def simulate_chain(
                 for index, velocity in enumerate(integrated_velocities):
                     previous[index] = points[index].copy()
                     points[index] += velocity + Vector(
-                        (0.0, -9.81 * variant.gravity_scale * dt * dt)
+                        (
+                            0.0,
+                            -9.81 * variant.gravity_scale * gravity_multiplier * dt * dt,
+                        )
                     )
 
                 substep_ramp_contact = False
@@ -1158,6 +1259,49 @@ def simulate_chain(
                         frame_ramp_intensity = max(frame_ramp_intensity, ramp_hit)
                         frame_receiver_intensity = max(frame_receiver_intensity, receiver_hit)
                         node_intensity[index] = max(node_intensity[index], intensity)
+                if variant.obstacle.key in {"pipe-bend", "twin-gears", "moving-slide", "compression-ring"} and any(
+                    abs((second - first).length / rest - 1.0) > 0.035
+                    for first, second in zip(points, points[1:])
+                ):
+                    # The final collider projection can undo an adjacent
+                    # length constraint in a tight bend OR a fast moving-ramp
+                    # impact. Finish without bending targets fighting the
+                    # contact surface.
+                    # Numerical cleanup must not inject a new velocity.
+                    before_cleanup = [point.copy() for point in points]
+                    for cleanup in range(80):
+                        error = max(abs((second - first).length / rest - 1.0)
+                                    for first, second in zip(points, points[1:]))
+                        if error < 0.035:
+                            break
+                        direction = range(node_count - 1) if cleanup % 2 == 0 else range(node_count - 2, -1, -1)
+                        for index in direction:
+                            constrain_distance(points, index, index + 1, rest)
+                        if softness >= 0.45 and cleanup % 8 == 0:
+                            constrain_self_collision(points, collision_radii, neighbor_skip, softness)
+                        for index in range(node_count):
+                            points[index], _unused, *_telemetry = collide_point(
+                                points[index], points[index].copy(), collision_radii[index],
+                                softness, time, dt, variant, trial_duration,
+                                stage_motion.ramp_phase_offset, False,
+                            )
+                    for index, origin in enumerate(before_cleanup):
+                        previous[index] += points[index] - origin
+                shared_tick = {
+                    "points": points, "previous": previous,
+                    "radius": variant.shape.radius, "rest": rest,
+                    "variant": variant, "time": time, "dt": dt,
+                    "softness": softness, "trial_duration": trial_duration,
+                    "phase": stage_motion.ramp_phase_offset,
+                    "collision_radii": collision_radii,
+                    "coupled_impacts": [0.0] * node_count,
+                }
+                yield shared_tick
+                for index, strength in enumerate(shared_tick["coupled_impacts"]):
+                    node_intensity[index] = max(node_intensity[index], strength)
+                    frame_intensity = max(frame_intensity, strength)
+                    frame_ramp_intensity = max(frame_ramp_intensity, strength)
+                    substep_ramp_intensity = max(substep_ramp_intensity, strength)
                 if not released:
                     if substep_ramp_contact:
                         ramp_clear_substeps = 0
@@ -1171,12 +1315,14 @@ def simulate_chain(
                                 support_grace_substeps = 0
 
                 center_x = sum(point.x for point in points) / node_count
+                center_y = sum(point.y for point in points) / node_count
                 frames.physics_samples.append(
                     (
                         time,
                         substep_ramp_intensity,
                         substep_receiver_intensity,
                         center_x,
+                        center_y,
                     )
                 )
 
@@ -1188,7 +1334,7 @@ def simulate_chain(
                 previous_low = min(point.y for point in previous_substep_points) - radius
                 current_low = min(point.y for point in points) - radius
                 drop = previous_low - current_low
-                if previous_low > receiver.top >= current_low and drop > 1e-12:
+                if variant.obstacle.key != "peg-grid" and previous_low > receiver.top >= current_low and drop > 1e-12:
                     crossing_ratio = max(
                         0.0,
                         min(1.0, (previous_low - receiver.top) / drop),
@@ -1246,6 +1392,99 @@ def simulate_chain(
             )
         )
     return frames
+
+
+def resolve_specimen_contacts(states, depths):
+    """Resolve equal-mass body contacts on the same fixed physics tick."""
+    pairs = []
+    for first_index, first in enumerate(states):
+        for second_index in range(first_index + 1, len(states)):
+            second = states[second_index]
+            minimum = first["radius"] + second["radius"]
+            depth = depths[second_index] - depths[first_index]
+            if abs(depth) >= minimum:
+                continue
+            separation = math.sqrt(minimum * minimum - depth * depth)
+            a, b = first["points"], second["points"]
+            if any(max(point[axis] for point in a) + separation < min(point[axis] for point in b)
+                   or max(point[axis] for point in b) + separation < min(point[axis] for point in a)
+                   for axis in range(2)):
+                continue
+            pairs.append((first, second, separation))
+    if not pairs:
+        return
+    for iteration in range(16):
+        for first, second, separation in pairs:
+            for a_index, a in enumerate(first["points"]):
+                for b_index, b in enumerate(second["points"]):
+                    delta = b - a
+                    if abs(delta.x) >= separation or abs(delta.y) >= separation:
+                        continue
+                    distance = delta.length
+                    if distance >= separation:
+                        continue
+                    normal = delta / distance if distance > 1e-8 else Vector((1.0, 0.0))
+                    correction = normal * ((separation - distance) * 0.5)
+                    a -= correction
+                    b += correction
+                    first["previous"][a_index] -= correction
+                    second["previous"][b_index] += correction
+                    if iteration == 0:
+                        a_velocity = a - first["previous"][a_index]
+                        b_velocity = b - second["previous"][b_index]
+                        closing = (b_velocity - a_velocity).dot(normal)
+                        if closing < 0.0:
+                            impulse = -closing * (1.15 - first["softness"] * 0.10) * 0.5
+                            first["previous"][a_index] += normal * impulse
+                            second["previous"][b_index] -= normal * impulse
+                            strength = -closing / first["dt"]
+                            first["coupled_impacts"][a_index] = max(first["coupled_impacts"][a_index], strength)
+                            second["coupled_impacts"][b_index] = max(second["coupled_impacts"][b_index], strength)
+        # Contact impulses must respect each rod's inextensible spine and the
+        # same static obstacles; neither body can push the other into a step.
+        for state in states:
+            points, previous = state["points"], state["previous"]
+            direction = range(len(points) - 1) if iteration % 2 == 0 else range(len(points) - 2, -1, -1)
+            for index in direction:
+                constrain_distance(points, index, index + 1, state["rest"])
+            for index in range(len(points)):
+                points[index], previous[index], *_unused = collide_point(
+                    points[index], previous[index], state["collision_radii"][index],
+                    state["softness"], state["time"], state["dt"], state["variant"],
+                    state["trial_duration"], state["phase"], False,
+                )
+
+
+def simulate_chain(*args, **kwargs):
+    """Single-body compatibility wrapper around the shared 240 Hz solver."""
+    ticks = _chain_ticks(*args, **kwargs)
+    while True:
+        try:
+            next(ticks)
+        except StopIteration as completed:
+            return completed.value
+
+
+def simulate_specimens(softness, frame_count, fps, variant, stage_index):
+    offsets = obstacle_specimen_offsets(variant.obstacle.key)
+    depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+    generators = [
+        _chain_ticks(softness, frame_count, fps, variant, stage_index, offset,
+                     (0.045 if index == 0 else -0.045) if len(offsets) > 1 else 0.0)
+        for index, offset in enumerate(offsets)
+    ]
+    while True:
+        states, completed = [], []
+        for ticks in generators:
+            try:
+                states.append(next(ticks))
+            except StopIteration as result:
+                completed.append(result.value)
+        if completed:
+            if states:
+                raise RuntimeError("Specimen physics clocks diverged")
+            return completed
+        resolve_specimen_contacts(states, depths)
 
 
 def contact_events(
@@ -1375,6 +1614,76 @@ def contact_events(
             )
         break
     return sorted(events, key=lambda event: event["time"])
+
+
+def simulation_quality(simulated, variant: SoftBodyVariant) -> dict[str, object]:
+    """Return a publication gate derived from the actual fixed-clock motion."""
+
+    expected_rest = 2.0 * variant.shape.cylinder_half / 40.0
+    minimum_ratio = math.inf
+    maximum_ratio = 0.0
+    maximum_coordinate = 0.0
+    maximum_side_or_top = 0.0
+    finite = True
+    centers_y = []
+    for points, *_rest in simulated:
+        centers_y.append(sum(point.y for point in points) / len(points))
+        for point in points:
+            finite = finite and math.isfinite(point.x) and math.isfinite(point.y)
+            maximum_coordinate = max(maximum_coordinate, abs(point.x), abs(point.y))
+            maximum_side_or_top = max(maximum_side_or_top, abs(point.x), point.y)
+        for first, second in zip(points, points[1:]):
+            ratio = (second - first).length / expected_rest
+            minimum_ratio = min(minimum_ratio, ratio)
+            maximum_ratio = max(maximum_ratio, ratio)
+
+    physics_samples = getattr(simulated, "physics_samples", ())
+    contact_peak = max((float(sample[1]) for sample in physics_samples), default=0.0)
+    physics_centers = [
+        (float(sample[3]), float(sample[4]))
+        for sample in physics_samples
+        if len(sample) >= 5
+    ]
+    maximum_physics_step = max(
+        (
+            math.dist(first, second)
+            for first, second in zip(physics_centers, physics_centers[1:])
+        ),
+        default=0.0,
+    )
+    vertical_drop = centers_y[0] - min(centers_y) if centers_y else 0.0
+    issues = []
+    if not finite:
+        issues.append("non-finite-coordinate")
+    # The receiver is open underneath; a finished/missed specimen may keep
+    # falling while its partners remain on screen. Lower exits are checked
+    # by the shared framing gate, not mistaken for an upward/side escape.
+    if maximum_side_or_top > 25.0:
+        issues.append("left-scene-before-cut")
+    if minimum_ratio < 0.82 or maximum_ratio > 1.18:
+        issues.append("constraint-tear")
+    if contact_peak < 0.20:
+        issues.append("missed-obstacle")
+    if vertical_drop < 0.65:
+        issues.append("stalled-at-spawn")
+    if maximum_physics_step > 0.35:
+        issues.append("solver-teleport")
+    return {
+        "contact_peak": round(contact_peak, 4),
+        "minimum_segment_ratio": round(minimum_ratio, 4),
+        "maximum_segment_ratio": round(maximum_ratio, 4),
+        "maximum_physics_step": round(maximum_physics_step, 4),
+        "vertical_drop": round(vertical_drop, 4),
+        "maximum_coordinate": round(maximum_coordinate, 4),
+        "maximum_side_or_top": round(maximum_side_or_top, 4),
+        "receiver_entries": len(getattr(simulated, "receiver_entries", ())),
+        "first_receiver_entry": (
+            round(float(simulated.receiver_entries[0][0]), 4)
+            if getattr(simulated, "receiver_entries", ())
+            else None
+        ),
+        "issues": issues,
+    }
 
 
 def skin_capsule(
@@ -1594,6 +1903,238 @@ def skin_capsule(
     return result
 
 
+class ObstacleSurface:
+    """Ray-query the evaluated, visible mesh rather than a second approximation.
+
+    Skin smoothing and pressure folds happen after the spine solver.  Rays
+    from the physical spine to that skin keep the cosmetic deformation on
+    the outside of the actual bevelled obstacle (including thin peg bars).
+    """
+
+    def __init__(self, objects):
+        self.objects = tuple(objects)
+        self.animated = any(
+            obj.animation_data or (obj.parent and obj.parent.animation_data)
+            for obj in self.objects
+        )
+        self.cached_frame = None
+        self.tree = None
+        self.render_targets = None
+
+    def final_contact_targets(self):
+        if self.render_targets is None:
+            self.render_targets = build_contact_targets(self.objects)
+        return self.render_targets
+
+    def at_frame(self, frame):
+        key = frame if self.animated else 0
+        if self.cached_frame == key:
+            return self.tree
+        bpy.context.scene.frame_set(frame)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        vertices, faces = [], []
+        for obj in self.objects:
+            if obj.type not in {"MESH", "CURVE"}:
+                continue
+            evaluated = obj.evaluated_get(depsgraph)
+            mesh = evaluated.to_mesh()
+            if mesh is None:
+                continue
+            try:
+                bm = bmesh.new()
+                bm.from_mesh(mesh)
+                # Curve bevel caps duplicate the rim vertices. Recalculating
+                # their normals as disconnected disks can turn an exterior
+                # entry into a false inside-spine report. Weld only coincident
+                # vertices in this temporary query mesh before orienting it.
+                bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
+                bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+                bm.to_mesh(mesh)
+                bm.free()
+                offset = len(vertices)
+                vertices.extend(evaluated.matrix_world @ vertex.co for vertex in mesh.vertices)
+                faces.extend(tuple(offset + index for index in face.vertices) for face in mesh.polygons)
+            finally:
+                evaluated.to_mesh_clear()
+        self.tree = BVHTree.FromPolygons(vertices, faces, all_triangles=False) if faces else None
+        self.cached_frame = key
+        return self.tree
+
+
+def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, depth_offset=0.0,
+                           verify_closed_volume=False):
+    """Clip only contact-side skin rays; leave free-flight vertices unchanged."""
+
+    if tree is None:
+        return shape, {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    half_length = variant.shape.cylinder_half
+    margin = 0.008
+    corrected = []
+    count, inside = 0, 0
+    maximum = 0.0
+    anchor_membership = {}
+    for base, position in zip(base_vertices, shape):
+        coordinate = max(0.0, min(len(chain_points) - 1.0,
+            (base[0] + half_length) / (2.0 * half_length) * (len(chain_points) - 1)))
+        first = int(coordinate)
+        second = min(first + 1, len(chain_points) - 1)
+        spine = chain_points[first].lerp(chain_points[second], coordinate - first)
+        anchor = Vector((spine.x, depth_offset - 0.04, spine.y))
+        target = Vector((position[0], position[1] + depth_offset, position[2]))
+        direction = target - anchor
+        distance = direction.length
+        if distance > 1e-8:
+            direction /= distance
+            hit, normal, _face, hit_distance = tree.ray_cast(anchor, direction, distance + margin)
+            if hit is not None:
+                starts_inside = normal.dot(direction) > 1e-4
+                if verify_closed_volume:
+                    # A folded companion can have a locally reversed face.
+                    # Test its closed volume, not that face's orientation;
+                    # all vertices in an axial ring share the same anchor.
+                    key = tuple(anchor)
+                    if key not in anchor_membership:
+                        anchor_membership[key] = point_inside_closed_surface(tree, anchor)
+                    starts_inside = anchor_membership[key]
+                if starts_inside:
+                    # This is an exit, not an entry: the physical spine is
+                    # already inside a visible obstacle. Do not hide it with
+                    # a huge cosmetic projection; fail the publication gate.
+                    inside += 1
+                else:
+                    limited = anchor + direction * max(0.0, hit_distance - margin)
+                    maximum = max(maximum, (target - limited).length)
+                    target = limited
+                    count += 1
+        corrected.append((target.x, target.y - depth_offset, target.z))
+    return corrected, {
+        "corrected_vertices": count,
+        "maximum_correction": maximum,
+        "inside_contacts": inside,
+    }
+
+
+def capsule_frame_shape(base_vertices, faces, simulated, index, softness, variant,
+                        obstacle_surface, frame, depth=0.0, companions=()):
+    """Shared production/audit cage deformation and visible contact skin."""
+    points, impact, nodes, *_rest = simulated[index]
+    shape = skin_capsule(base_vertices, points, softness / 100.0, impact, nodes, index, variant)
+    quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    if obstacle_surface is None:
+        return shape, quality
+    tree = obstacle_surface.at_frame(frame)
+    shape, quality = constrain_visible_skin(shape, base_vertices, points, variant, tree, depth)
+    for companion, companion_depth in companions:
+        other_points, other_impact, other_nodes, *_other = companion[index]
+        other_shape = skin_capsule(base_vertices, other_points, softness / 100.0,
+                                   other_impact, other_nodes, index, variant)
+        other_shape, _other_quality = constrain_visible_skin(
+            other_shape, base_vertices, other_points, variant, tree, companion_depth)
+        other_tree = BVHTree.FromPolygons(
+            [(x, y + companion_depth, z) for x, y, z in other_shape], faces, all_triangles=False)
+        shape, contact = constrain_visible_skin(
+            shape, base_vertices, points, variant, other_tree, depth, verify_closed_volume=True)
+        quality["inside_contacts"] += contact["inside_contacts"]
+        quality["maximum_correction"] = max(quality["maximum_correction"], contact["maximum_correction"])
+        quality["corrected_vertices"] += contact["corrected_vertices"]
+    return shape, quality
+
+
+def specimen_geometry(vertices, faces, bounds_points=()):
+    points = list(vertices) + list(bounds_points)
+    low = tuple(min(vertex[axis] for vertex in points) for axis in range(3))
+    high = tuple(max(vertex[axis] for vertex in points) for axis in range(3))
+    return vertices, faces, low, high
+
+
+def specimen_bounds_overlap(first, second):
+    return all(first[3][axis] >= second[2][axis] and second[3][axis] >= first[2][axis] for axis in range(3))
+
+
+def specimen_geometry_penetration(bodies):
+    maximum = 0.0
+    for first_index, first in enumerate(bodies):
+        for second in bodies[first_index + 1:]:
+            if not specimen_bounds_overlap(first, second):
+                continue
+            for source, target in ((first, second), (second, first)):
+                tree = BVHTree.FromPolygons(target[0], target[1], all_triangles=False)
+                for point in source[0]:
+                    if any(point[axis] < target[2][axis] or point[axis] > target[3][axis] for axis in range(3)):
+                        continue
+                    hit, _normal, _face, distance = tree.find_nearest(point)
+                    if hit is not None and distance > maximum and point_inside_closed_surface(tree, point):
+                        maximum = distance
+    return maximum
+
+
+def point_inside_closed_surface(tree, point):
+    """Confirm volume membership independently of the nearest triangle normal.
+
+    A concave contact crease can put an exterior point behind its nearest
+    face. Three non-axis-aligned parity rays avoid treating that local normal
+    as proof of penetration. An unresolved ray fails conservatively.
+    """
+    inside_votes = 0
+    for direction in (Vector((1.0, 0.173, 0.317)),
+                      Vector((-0.31, 1.0, 0.127)),
+                      Vector((0.219, -0.341, 1.0))):
+        direction.normalize()
+        origin, crossings = point.copy(), 0
+        for _ in range(64):
+            hit, _normal, _face, _distance = tree.ray_cast(origin, direction)
+            if hit is None:
+                break
+            crossings += 1
+            origin = hit + direction * 0.00001
+        else:
+            return True
+        inside_votes += crossings % 2
+    return inside_votes >= 2
+
+
+def inspect_specimen_intersections(objects, start, end):
+    """Reject visible interpenetration between independently released bodies.
+
+    The dense contact-corrected cage is checked at every output frame. AABB
+    rejection keeps disjoint stair lanes cheap; closed-volume parity tests
+    distinguish penetration from a point beside a concave contact crease.
+    """
+    if len(objects) < 2:
+        return {"frames_checked": 0, "maximum_penetration": 0.0, "issues": []}
+    modifiers = [(modifier, modifier.show_viewport) for obj in objects for modifier in obj.modifiers]
+    maximum = 0.0
+    peak_frame = None
+    try:
+        for modifier, _value in modifiers:
+            modifier.show_viewport = False
+        for frame in range(start, end + 1):
+            bpy.context.scene.frame_set(frame)
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            bodies = []
+            for obj in objects:
+                evaluated = obj.evaluated_get(depsgraph)
+                mesh = evaluated.to_mesh()
+                try:
+                    vertices = [evaluated.matrix_world @ vertex.co for vertex in mesh.vertices]
+                    faces = [tuple(face.vertices) for face in mesh.polygons]
+                    bodies.append(specimen_geometry(vertices, faces))
+                finally:
+                    evaluated.to_mesh_clear()
+            penetration = specimen_geometry_penetration(bodies)
+            if penetration > maximum:
+                maximum, peak_frame = penetration, frame
+    finally:
+        for modifier, value in modifiers:
+            modifier.show_viewport = value
+    return {
+        "frames_checked": end - start + 1,
+        "maximum_penetration": round(maximum, 6),
+        "peak_frame": peak_frame,
+        "issues": ["specimens-interpenetrate"] if maximum > 0.008 else [],
+    }
+
+
 def keyframe_visibility(obj, start: int, end: int, frame_end: int) -> None:
     obj.hide_render = start > 1
     obj.keyframe_insert("hide_render", frame=1)
@@ -1618,11 +2159,15 @@ def add_capsule(
     stage_index: int,
     instance_index: int = 0,
     instance_offset_x: float = 0.0,
+    instance_offset_y: float = 0.0,
     instance_rotation_offset: float = 0.0,
     render_subdivision: int = 3,
+    obstacle_surface=None,
+    precomputed_simulation=None,
+    companion_simulations=(),
 ):
     base_vertices, faces = capsule_geometry(variant)
-    simulated = simulate_chain(
+    simulated = precomputed_simulation if precomputed_simulation is not None else simulate_chain(
         softness,
         end - start + 1,
         fps,
@@ -1632,30 +2177,36 @@ def add_capsule(
         instance_rotation_offset,
     )
     events = contact_events(simulated, softness, start, fps, variant)
+    quality = simulation_quality(simulated, variant)
     for event in events:
         event["body"] = instance_index + 1
     # The final state exists for FPS-independent outcome/event auditing at the
     # exact trial boundary. Keep only the preceding N samples as N visible
     # shape keys, otherwise Blender would compress N+1 states into N frames.
     visible_simulated = simulated[:-1]
-    shapes = [
-        skin_capsule(
-            base_vertices,
-            points,
-            softness / 100.0,
-            impact,
-            node_impacts,
-            index,
-            variant,
+    shapes = []
+    surface_quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    for index in range(len(visible_simulated)):
+        shape, surface_sample = capsule_frame_shape(
+            base_vertices, faces, simulated, index, softness, variant,
+            obstacle_surface, start + index, instance_offset_y, companion_simulations,
         )
-        for index, (points, impact, node_impacts, _ramp_hit, _receiver_hit, _center_x) in enumerate(visible_simulated)
-    ]
+        surface_quality["corrected_vertices"] += surface_sample["corrected_vertices"]
+        surface_quality["maximum_correction"] = max(
+            surface_quality["maximum_correction"], surface_sample["maximum_correction"],
+        )
+        surface_quality["inside_contacts"] += surface_sample["inside_contacts"]
+        shapes.append(shape)
+    quality["surface"] = surface_quality
+    if surface_quality["inside_contacts"]:
+        quality["issues"].append("spine-inside-visible-obstacle")
     capsule = add_mesh(
         f"Sliding cylinder {softness}% body {instance_index + 1}",
         shapes[0],
         faces,
         gold,
     )
+    capsule.location.y = instance_offset_y
     basis = capsule.shape_key_add(name="Basis")
     capsule.data.shape_keys.use_relative = False
     for index, shape in enumerate(shapes[1:], start=1):
@@ -1680,14 +2231,32 @@ def add_capsule(
     subdivision.subdivision_type = "CATMULL_CLARK"
     subdivision.levels = min(2, render_subdivision)
     subdivision.render_levels = render_subdivision
-    return capsule, events
+    if obstacle_surface is not None:
+        add_final_surface_contact(capsule, obstacle_surface.final_contact_targets())
+    return capsule, events, quality
 
 
 def add_receiver(marble, gold, variant: SoftBodyVariant):
+    if variant.obstacle.key == "peg-grid":
+        return
+    if variant.obstacle.key == "stair-cascade":
+        glass = material("Clear stair receiver glass", (0.70, 0.84, 0.94, 0.26), roughness=0.12, clearcoat=0.45)
+        glass.node_tree.nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.26
+        glass.blend_method = "BLEND"
+        glass.use_screen_refraction = True
+        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
+            for obj in add_receiver_tube(glass, gold, variant):
+                obj.location.y = depth
+        return
+    add_receiver_tube(marble, gold, variant)
+
+
+def add_receiver_tube(marble, gold, variant: SoftBodyVariant):
     segments = 128
     receiver = variant.receiver
     outer_radius, inner_radius = receiver.outer_radius, receiver.inner_radius
-    top, bottom = receiver.top, -3.40
+    top = receiver.top
+    bottom = 0.40 if variant.obstacle.key == "stair-cascade" else -3.40
     vertices = []
     for segment in range(segments):
         angle = math.tau * segment / segments
@@ -1726,6 +2295,7 @@ def add_receiver(marble, gold, variant: SoftBodyVariant):
     rim.data.materials.append(gold)
     for polygon in rim.data.polygons:
         polygon.use_smooth = True
+    return wall, rim
 
 
 def look_at(obj, target) -> None:
@@ -1753,32 +2323,48 @@ def add_background(value):
     bpy.ops.mesh.primitive_plane_add(size=2, location=(0.0, 3.2, 3.25), rotation=(math.pi / 2, 0.0, 0.0))
     backdrop = bpy.context.object
     backdrop.name = "Horizonless clouded backdrop"
-    backdrop.scale = (7.5, 6.5, 1.0)
+    # The complete backdrop must cover the widened multi-body cameras too;
+    # otherwise its lower edge exposes a dark world-colour "floor".
+    backdrop.scale = (20.0, 20.0, 1.0)
     backdrop.data.materials.append(value)
     return backdrop
 
 
+def add_camera(variant: SoftBodyVariant):
+    target = variant.obstacle
+    bpy.ops.object.camera_add(location=camera_location(target))
+    camera = bpy.context.object
+    camera.name = "Fixed reference camera"
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = target.camera_scale
+    camera.data.lens = 70
+    look_at(camera, (target.camera_target_x, 0.0, target.camera_target_z))
+    bpy.context.scene.camera = camera
+    return camera
+
+
 def main() -> None:
     args = arguments()
+    args.frames = str(Path(args.frames).resolve())
     reset_scene()
     variant = variant_for_seed(args.seed, args.obstacle)
     frame_end = max(5, round(args.duration * args.fps))
+    stages, stage_indices = stage_selection_for(variant, args.stage_softness)
     if args.stage_softness is None:
-        stages = variant.stages
-        stage_indices = tuple(range(len(stages)))
-        spans = stage_frame_spans(frame_end, len(stages))
+        spans = stage_frame_spans(frame_end, len(stages), variant.obstacle.key, stages)
     else:
-        stage_index = min(
-            range(len(variant.stages)),
-            key=lambda index: abs(variant.stages[index] - args.stage_softness),
-        )
-        stages = (variant.stages[stage_index],)
-        stage_indices = (stage_index,)
         spans = ((1, frame_end),)
 
     stage_spans = tuple(
         (stage_index, start, end)
         for stage_index, (start, end) in zip(stage_indices, spans)
+    )
+    trial_spans = tuple(
+        (stage_index + attempt_index * len(variant.stages), trial_start, trial_end)
+        for softness, (stage_index, start, end) in zip(stages, stage_spans)
+        for attempt_index, (trial_start, trial_end) in enumerate(
+            stage_attempt_frame_spans(start, end, args.fps, variant.obstacle.key, softness)
+        )
     )
 
     gold = liquid_gold_material(args.seed, variant)
@@ -1787,10 +2373,15 @@ def main() -> None:
     add_background(backdrop)
     add_receiver(marble, gold, variant)
     if variant.obstacle.key == "moving-slide":
-        add_ramp(marble, gold, variant, frame_end, args.fps, stage_spans)
+        add_ramp(marble, gold, variant, frame_end, args.fps, trial_spans)
     else:
-        add_obstacle_geometry(marble, gold, variant, frame_end, args.fps)
+        add_obstacle_geometry(marble, gold, variant, frame_end, args.fps, trial_spans)
+    obstacle_surface = ObstacleSurface(
+        obj for obj in bpy.context.collection.objects
+        if obj.name != "Horizonless clouded backdrop"
+    )
     all_events = []
+    attempt_quality = []
     attempt_cut_frames = []
     for softness, (stage_index, start, end) in zip(stages, stage_spans):
         attempt_spans = stage_attempt_frame_spans(
@@ -1801,14 +2392,25 @@ def main() -> None:
             softness,
         )
         for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
+            attempt_objects = []
+            attempt_reports = []
+            print(json.dumps({"phase": "simulate", "obstacle": variant.obstacle.key,
+                              "softness": softness, "attempt": attempt_index + 1,
+                              "start_frame": attempt_start, "end_frame": attempt_end}), flush=True)
             if attempt_index:
                 attempt_cut_frames.append(attempt_start)
             specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
+            specimen_depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+            simulations = simulate_specimens(
+                softness, attempt_end - attempt_start + 1, args.fps, variant,
+                stage_index + attempt_index * len(variant.stages),
+            )
+            framing = inspect_simulation_framing(simulations, variant, args.fps)
             for instance_index, instance_offset in enumerate(specimen_offsets):
                 rotation_offset = 0.0
                 if len(specimen_offsets) > 1:
                     rotation_offset = 0.045 if instance_index == 0 else -0.045
-                _capsule, events = add_capsule(
+                _capsule, events, quality = add_capsule(
                     gold,
                     softness,
                     attempt_start,
@@ -1816,13 +2418,41 @@ def main() -> None:
                     frame_end,
                     args.fps,
                     variant,
-                    stage_index + attempt_index * len(stages),
+                    stage_index + attempt_index * len(variant.stages),
                     instance_index,
                     instance_offset,
+                    specimen_depths[instance_index],
                     rotation_offset,
                     1 if args.width < 360 else 3,
+                    obstacle_surface,
+                    simulations[instance_index],
+                    tuple((simulation, specimen_depths[index]) for index, simulation in enumerate(simulations) if index != instance_index),
                 )
                 all_events.extend(events)
+                quality["framing"] = framing
+                quality["issues"].extend(framing["issues"])
+                attempt_objects.append(_capsule)
+                attempt_reports.append({
+                        "stage": stage_index + 1,
+                        "softness": softness,
+                        "attempt": attempt_index + 1,
+                        "body": instance_index + 1,
+                        "start_frame": attempt_start,
+                        "end_frame": attempt_end,
+                        **quality,
+                })
+            intersections = inspect_specimen_intersections(attempt_objects, attempt_start, attempt_end)
+            for report in attempt_reports:
+                report["inter_body_contact"] = intersections
+                report["issues"].extend(intersections["issues"])
+                attempt_quality.append(report)
+            for capsule, report in zip(attempt_objects, attempt_reports):
+                rendered_surface = inspect_rendered_surface(capsule, obstacle_surface, attempt_start, attempt_end)
+                report["rendered_surface"] = rendered_surface
+                report["issues"].extend(rendered_surface["issues"])
+                print(json.dumps({"phase": "native-surface-checked", "body": capsule.name,
+                                  "start_frame": attempt_start, "end_frame": attempt_end,
+                                  **rendered_surface}), flush=True)
 
     if args.events:
         events_path = Path(args.events)
@@ -1830,10 +2460,13 @@ def main() -> None:
         events_path.write_text(
             json.dumps(
                 {
+                    "preflight_schema": 3,
+                    "obstacle": variant.obstacle.key,
                     "fps": args.fps,
                     "duration": frame_end / args.fps,
                     "stages": list(stages),
                     "attempt_cuts": attempt_cut_frames,
+                    "attempt_quality": attempt_quality,
                     "events": all_events,
                 },
                 indent=2,
@@ -1841,17 +2474,14 @@ def main() -> None:
             encoding="utf-8",
         )
 
-    target = variant.obstacle
-    bpy.ops.object.camera_add(location=(target.camera_target_x + 1.05, -14.8, 7.25))
-    camera = bpy.context.object
-    camera.name = "Fixed reference camera"
-    camera.data.type = "ORTHO"
-    camera.data.ortho_scale = target.camera_scale
-    camera.data.lens = 70
-    # Frame the complete unbiased left-to-right ballistic spread. The camera is
-    # fixed and never follows either the capsule or receiver during a trial.
-    look_at(camera, (target.camera_target_x, 0.0, target.camera_target_z))
-    bpy.context.scene.camera = camera
+    failed_attempts = [item for item in attempt_quality if item["issues"]]
+    if failed_attempts:
+        raise RuntimeError(
+            "Soft-body publication preflight failed: "
+            + json.dumps(failed_attempts, separators=(",", ":"))
+        )
+
+    add_camera(variant)
 
     key_color = mix_color(variant.palette.key_light, (1.0, 0.93, 0.83), 0.72)
     fill_color = mix_color(variant.palette.fill_light, (0.75, 0.86, 1.0), 0.72)

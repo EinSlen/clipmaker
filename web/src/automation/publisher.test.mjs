@@ -4,12 +4,14 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readPublisherConfig } from './config.mjs';
 import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
 import { loadState, saveState, withStateLock } from './state.mjs';
 import { buildPublisherSummary } from './summary.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
+import { assertNative3dQuality } from './native-3d-quality.mjs';
 
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'clipmaker-publisher-'));
@@ -40,6 +42,77 @@ function sampleChannel() {
     tiktok: { enabled: false, username: null, musicId: null, visibility: 'private', confirmPublic: false },
   };
 }
+
+function native3dEvidence(seed) {
+  const stages = [0, 25, 55, 75, 100];
+  return {
+    physics_preflight: 'passed', game: 'soft-body-slide', seed, duration: 30,
+    render_width: 1080, render_height: 1920, render_fps: 30, output_fps: 30,
+    frames: 900, variant_obstacle: 'peg-grid', softness_stages: stages,
+    attempt_quality: stages.flatMap((softness, index) => [1, 2].map((body) => ({
+      stage: index + 1, softness, attempt: 1, body,
+      start_frame: index * 180 + 1, end_frame: (index + 1) * 180,
+      issues: [], surface: { inside_contacts: 0 },
+      framing: { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
+      rendered_surface: { frames_checked: 180, vertices_checked: 210946 * 180, subdivision: 3, maximum_penetration: 0, maximum_correction: 0.01, issues: [] },
+      inter_body_contact: { frames_checked: 180, maximum_penetration: 0, issues: [] },
+    }))),
+  };
+}
+
+test('3D upload evidence rejects missing bodies, overlaps, defects and old low-fps renders', () => {
+  const expected = { seed: 123, duration: 30, obstacle: 'auto' };
+  const good = native3dEvidence(123);
+  assert.doesNotThrow(() => assertNative3dQuality(good, expected));
+  const corrupted = [
+    {}, { ...good, physics_preflight: 'failed' }, { ...good, seed: 124 },
+    { ...good, render_fps: 6 }, { ...good, render_width: 432 },
+    { ...good, attempt_quality: good.attempt_quality.slice(1) },
+    { ...good, attempt_quality: [...good.attempt_quality, good.attempt_quality[0]] },
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, issues: ['constraint-tear'] } : r) },
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, surface: { inside_contacts: 1 } } : r) },
+    ...[undefined, { frames_checked: 180, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: 1.5, maximum_side_exit_seconds: 0, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0.7, issues: [] },
+      { frames_checked: 180, maximum_empty_seconds: Number.NaN, maximum_side_exit_seconds: 0, issues: [] },
+      { frames_checked: 179, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
+    ].map((framing) => ({ ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, framing } : r) })),
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, inter_body_contact: { frames_checked: 180, issues: ['specimens-interpenetrate'] } } : r) },
+    ...[undefined, -0.01, 0.009, NaN, Infinity, '0'].map((maximum_penetration) => ({
+      ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0
+        ? { ...r, inter_body_contact: { frames_checked: 180, maximum_penetration, issues: [] } } : r),
+    })),
+    { ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0
+      ? { ...r, inter_body_contact: { frames_checked: 180, maximum_penetration: 0, spine_inside_contacts: 1, issues: [] } } : r) },
+    ...[
+      undefined, { ...good.attempt_quality[0].rendered_surface, frames_checked: 179 },
+      { ...good.attempt_quality[0].rendered_surface, subdivision: 2 },
+      { ...good.attempt_quality[0].rendered_surface, maximum_penetration: 0.004 },
+      { ...good.attempt_quality[0].rendered_surface, maximum_correction: 0.09 },
+      { ...good.attempt_quality[0].rendered_surface, maximum_correction: Number.NaN },
+    ].map((rendered_surface) => ({ ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, rendered_surface } : r) })),
+    { ...good, attempt_quality: good.attempt_quality.map((r) => r.stage === 2 ? { ...r, start_frame: 180 } : r) },
+  ];
+  for (const evidence of corrupted) {
+    assert.throws(() => assertNative3dQuality(evidence, expected), /3D publication blocked/u);
+  }
+});
+
+test('daily 3D import prefers the latest default-branch render and accepts the cloud scheduler', async () => {
+  const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
+  const source = await fs.readFile(workflow, 'utf8');
+  const step = source.split("- name: Import today's completed 3D renders")[1].split('- name: Check connected accounts')[0];
+  assert.match(step, /DEFAULT_BRANCH:.*github\.event\.repository\.default_branch/u);
+  assert.ok(step.includes('-f branch="$DEFAULT_BRANCH"'));
+  assert.ok(step.includes('sort_by(.created_at, .run_number) | reverse'));
+  assert.ok(step.includes('.event == "schedule" or .event == "workflow_dispatch"'));
+  assert.ok(step.includes('manifest.get("date") != sys.argv[2]'));
+  assert.ok(step.includes('channel.get("id") == channel_id'));
+  assert.ok(step.includes('select(.expired == false)'));
+  assert.doesNotMatch(step, /event=schedule|find artifacts\/soft-body-imports.*sort/u);
+  assert.ok(step.indexOf('declare -A imported_channels') < step.indexOf('for run_id'));
+  assert.ok(step.indexOf('imported_channels[$channel_id]=1') < step.indexOf('if [ "$imported" -eq "$expected" ]'));
+});
 
 test('date helpers are deterministic across month boundaries', () => {
   assert.equal(addDays('2026-08-31', 1), '2026-09-01');
@@ -310,13 +383,86 @@ test('a native 3D artifact is imported with the deterministic daily seed', async
     channelId: channel.id,
     seed: plan.seed,
     filename: `soft-body-peg-grid-${plan.seed}.mp4`,
-    render: { title: 'HOW SOFT CAN IT GET?', duration: 30, outcome: 'comparison-complete', variantKey: 'peg-grid' },
+    render: { title: 'HOW SOFT CAN IT GET?', duration: 30, outcome: 'comparison-complete', variantKey: 'peg-grid', raw: native3dEvidence(plan.seed) },
   });
   assert.equal(result.job.render.status, 'ready');
   assert.equal(result.job.render.filename, `soft-body-peg-grid-${plan.seed}.mp4`);
   await assert.rejects(() => importRenderedJob(config, {
     date, channelId: channel.id, seed: plan.seed + 1, filename: `soft-body-peg-grid-${plan.seed + 1}.mp4`, render: {},
   }), /Seed mismatch/u);
+  await assert.rejects(() => importRenderedJob(config, {
+    date, channelId: channel.id, seed: plan.seed, filename: `soft-body-peg-grid-${plan.seed}.mp4`, render: {},
+  }), /3D publication blocked/u);
+});
+
+test('a restored 3D ready job cannot upload without valid physics evidence', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const channel = sampleChannel();
+  channel.game = { game: 'soft-body-slide', duration: 30, obstacle: 'auto' };
+  channel.youtube.enabled = true;
+  const config = { dryRun: false, stateDir: directory, seedNamespace: 'test', channels: [channel] };
+  const date = '2026-08-27';
+  const plan = planForDate(config, channel, date);
+  const state = await loadState(directory);
+  state.jobs.push({ ...plan, status: 'ready', render: { status: 'ready', filename: 'old.mp4', game: 'soft-body-slide', raw: {} },
+    platforms: { youtube: { status: 'pending', attempts: 0 } } });
+  await saveState(directory, state);
+  await assert.rejects(() => publishChannel(config, channel, date), /3D publication blocked/u);
+  assert.equal((await loadState(directory)).jobs[0].platforms.youtube.attempts, 0);
+});
+
+test('an invalid 3D import cannot replace an existing ready video on disk', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configDirectory = path.join(directory, 'config');
+  const imports = path.join(directory, 'incoming');
+  const renders = path.join(directory, 'renders');
+  await Promise.all([configDirectory, imports, renders].map((dir) => fs.mkdir(dir)));
+  const configPath = path.join(configDirectory, 'publisher.json');
+  await fs.writeFile(configPath, JSON.stringify({ seedNamespace: 'test', channels: [{
+    id: 'soft-main', game: { id: 'soft-body-slide' },
+  }] }));
+  const config = await readPublisherConfig(configPath);
+  const date = '2026-08-27';
+  const plan = planForDate(config, config.channels[0], date);
+  const filename = `soft-body-peg-grid-${plan.seed}.mp4`;
+  const destination = path.join(renders, filename);
+  await fs.writeFile(destination, 'existing validated video');
+  await fs.writeFile(path.join(imports, filename), 'invalid replacement');
+  const manifest = path.join(imports, 'publisher-import.json');
+  await fs.writeFile(manifest, JSON.stringify({ date, channelId: 'soft-main', seed: plan.seed, video: filename, render: {} }));
+  const cli = await repositoryFile('web/scripts/publisher.mjs');
+  const result = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /3D publication blocked/u);
+  assert.equal(await fs.readFile(destination, 'utf8'), 'existing validated video');
+  assert.doesNotThrow(() => assertNative3dQuality(native3dEvidence(plan.seed), { seed: plan.seed }));
+  const valid = { date, channelId: 'soft-main', seed: plan.seed, filename,
+    render: { raw: native3dEvidence(plan.seed) } };
+  await importRenderedJob(config, valid);
+  await fs.writeFile(manifest, JSON.stringify({ ...valid, video: filename }));
+  await fs.writeFile(path.join(imports, filename), 'validated replacement');
+  const ready = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+  assert.equal(ready.status, 0, ready.stderr);
+  assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+  assert.equal((await fs.readdir(renders)).filter(name => name.startsWith('.import-')).length, 0);
+  await fs.writeFile(path.join(imports, filename), 'newer but different film');
+  for (const status of ['partial', 'published', 'failed']) {
+    const state = await loadState(config.stateDir);
+    state.jobs[0].status = status;
+    Object.assign(state.jobs[0].platforms.youtube, { status: status === 'failed' ? 'failed' : 'published',
+      attempts: 1, receipt: { id: 'immutable-receipt' } });
+    await saveState(config.stateDir, state);
+    const retry = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(JSON.parse(retry.stdout).skipped, true);
+    assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+    assert.equal((await loadState(config.stateDir)).jobs[0].platforms.youtube.receipt.id, 'immutable-receipt');
+  }
+  await withStateLock(config.stateDir, async () => {
+    const busy = spawnSync(process.execPath, [cli, 'import-3d', '--config', configPath, '--manifest', manifest], { encoding: 'utf8' });
+    assert.equal(busy.status, 75, busy.stderr);
+    assert.equal(await fs.readFile(destination, 'utf8'), 'validated replacement');
+  });
 });
 
 test('a partial platform failure retries only the missing upload', async (t) => {

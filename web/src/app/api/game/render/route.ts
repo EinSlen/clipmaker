@@ -262,6 +262,7 @@ export async function POST(request: Request) {
       variantSourceVideo: rendererMetadata.variant_source_video || null,
       stagePreset: rendererMetadata.stage_preset || null,
       softnessStages: rendererMetadata.softness_stages || null,
+      native3d: game === 'soft-body-slide' ? rendererMetadata : undefined,
       title,
       youtubeTitle: `${title} #shorts`,
       caption: musicCredit ? `${captionBase}\n${musicCredit}` : captionBase,

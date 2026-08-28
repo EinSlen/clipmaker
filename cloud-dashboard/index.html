@@ -102,7 +102,7 @@
             </button>
             <button class="command-card requires-token" data-command="generate">
               <span class="command-icon">✦</span>
-              <span><strong>Générer maintenant</strong><small>Prépare et chiffre la vidéo du jour</small></span>
+              <span><strong>Générer maintenant</strong><small>Prépare les vidéos 2D/3D du planning sauvegardé</small></span>
               <b>→</b>
             </button>
             <button class="command-card danger requires-token" data-command="publish">
@@ -145,6 +145,7 @@
           <button id="add-channel" class="button button-secondary requires-token" type="button">+ Ajouter un compte et son jeu</button>
           <button id="save-config" class="button button-primary requires-token" type="button">Sauvegarder le planning</button>
         </div>
+        <p id="selection-help" class="panel-intro">Jeu ou obstacle modifié ? Sauvegarde, puis lance « Générer maintenant » pour préparer la vidéo du jour. Si un envoi a déjà commencé, termine d’abord avec le même jeu ; le nouveau choix servira le lendemain. Une ancienne vidéo ne remplace jamais automatiquement le jeu choisi.</p>
         <div class="account-help">
           <div><strong>Créer puis connecter un nouveau compte</strong><small>1. Crée le compte sur TikTok ou Google. 2. Ouvre le navigateur privé ClipMaker dans le Codespace. 3. Connecte-toi puis utilise « Synchroniser avec le cloud » dans le Studio.</small></div>
           <div class="account-links">
@@ -175,9 +176,9 @@
                 <option value="moving-slide">Rampe mobile</option>
                 <option value="stair-cascade">Cascade d’escaliers</option>
                 <option value="v-stairs">Escaliers en V</option>
-                <option value="pipe-bend">Tube courbé</option>
-                <option value="twin-gears">Double engrenage</option>
-                <option value="compression-ring">Anneau de compression</option>
+                <option value="pipe-bend">Tube courbé — expérimental</option>
+                <option value="twin-gears">Double engrenage — expérimental</option>
+                <option value="compression-ring">Rouleaux — expérimental</option>
               </select>
             </label>
             <label>Seed<input id="seed" value="910104" inputmode="numeric"></label>

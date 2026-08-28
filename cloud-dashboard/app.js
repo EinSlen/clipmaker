@@ -41,10 +41,10 @@
     { id: 'soft-body-slide', name: 'Souplesse 3D', description: 'Simulation Blender', preview: 'assets/games/soft-body-slide.webp', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
   ];
   const OBSTACLES = [
-    ['auto', 'Automatique (change chaque jour)'], ['moving-slide', 'Rampe mobile'],
+    ['auto', 'Automatique — sélection principale'], ['moving-slide', 'Rampe mobile'],
     ['stair-cascade', 'Cascade d’escaliers'], ['v-stairs', 'Barres en V'],
-    ['pipe-bend', 'Tube courbé'], ['peg-grid', 'Grille de barres'],
-    ['twin-gears', 'Double engrenage'], ['compression-ring', 'Anneau de compression'],
+    ['pipe-bend', 'Tube courbé — expérimental'], ['peg-grid', 'Grille de barres'],
+    ['twin-gears', 'Double engrenage — expérimental'], ['compression-ring', 'Rouleaux — expérimental'],
   ];
   let publisherConfig = null;
   let accountCatalog = { tiktok: [], youtube: [] };
@@ -371,6 +371,19 @@
     }
     elements.globalMode.value = publisherConfig.dryRun ? 'test' : 'live';
     elements.channelList.replaceChildren(...publisherConfig.channels.map(renderChannel));
+    // On narrow screens, keep the assigned game visible instead of always
+    // showing the first thumbnail (which may be a completely different game).
+    requestAnimationFrame(() => {
+      elements.channelList.querySelectorAll('.game-picker-list').forEach((list) => {
+        const selected = list.querySelector('.game-choice.selected');
+        if (!selected) return;
+        const bounds = list.getBoundingClientRect();
+        const choice = selected.getBoundingClientRect();
+        if (choice.left < bounds.left || choice.right > bounds.right) {
+          list.scrollLeft += choice.left - bounds.left - (list.clientWidth - choice.width) / 2;
+        }
+      });
+    });
   }
 
   function newChannel() {
@@ -612,12 +625,12 @@
       notify('Connecte-toi d’abord avec GitHub.', true);
       return;
     }
-    await control('/api/dispatch', {
+    const result = await control('/api/dispatch', {
       method: 'POST',
       body: JSON.stringify({ workflow, inputs }),
       headers: { 'Content-Type': 'application/json' },
     });
-    notify(successMessage);
+    notify(result.message || successMessage);
     setTimeout(() => void refreshAll(), 2600);
   }
 
@@ -625,7 +638,7 @@
     const button = event.currentTarget;
     const action = button.dataset.command;
     if (action === 'publish' && !window.confirm('Publier maintenant la vidéo prête sur tous les comptes actifs ?')) return;
-    if (action === 'generate' && !window.confirm('Lancer maintenant le rendu réel de la vidéo du jour ?')) return;
+    if (action === 'generate' && !window.confirm('Lancer la génération pour les comptes et jeux du planning sauvegardé ?')) return;
     button.disabled = true;
     try {
       await dispatch('daily-publisher.yml', {

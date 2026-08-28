@@ -297,6 +297,27 @@ export function validateDispatch(payload) {
   throw new HttpError(400, 'Workflow non autorisé.');
 }
 
+export function generationDispatches(config) {
+  const channels = (config?.channels || []).filter((channel) => channel.enabled !== false);
+  if (!channels.length) throw new HttpError(400, 'Aucun compte actif dans le planning sauvegardé.');
+  const dryRun = Boolean(config.dryRun);
+  const commands = [];
+  if (channels.some((channel) => channel.game?.id === 'soft-body-slide')) {
+    commands.push({
+      workflow: 'soft-body-artifact.yml',
+      inputs: {
+        use_cloud_config: 'true', plan_only: String(dryRun), reuse_run_id: '',
+        obstacle: 'peg-grid', seed: '910104', samples: '64', chunk_size: '15',
+        title: 'HOW SOFT CAN IT GET?',
+      },
+    });
+  }
+  if (channels.some((channel) => channel.game?.id !== 'soft-body-slide')) {
+    commands.push({ workflow: 'daily-publisher.yml', inputs: { action: 'generate', dry_run: String(dryRun) } });
+  }
+  return commands;
+}
+
 async function setupStart(request, env) {
   const url = new URL(request.url);
   if (!await safeEqual(url.searchParams.get('key'), env.SETUP_SECRET)) throw new HttpError(404, 'Configuration introuvable.');
@@ -420,20 +441,42 @@ async function apiSession(request, env) {
 async function apiDispatch(request, env) {
   const authenticated = await authenticatedSession(request, env);
   const command = validateDispatch(await boundedJson(request));
-  const { response, payload } = await github(
-    `/repos/${encodeURIComponent(env.REPOSITORY_OWNER)}/${encodeURIComponent(env.REPOSITORY_NAME)}/actions/workflows/${encodeURIComponent(command.workflow)}/dispatches`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${authenticated.session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ref: 'main', inputs: command.inputs }),
-    },
-  );
-  if (!response.ok) throw new HttpError(response.status === 403 ? 403 : 502, payload?.message || 'GitHub a refusé le lancement du workflow.');
+  const generate = command.workflow === 'daily-publisher.yml' && command.inputs.action === 'generate';
+  // The daily publisher deliberately skips 3D renders. Route generation from
+  // the saved server-side assignments, not unsaved/browser-supplied settings.
+  const config = generate ? await env.CONFIG.get(PUBLISHER_CONFIG_KEY, 'json') : null;
+  const commands = generate ? generationDispatches(config) : [command];
+  const accepted = [];
+  for (const item of commands) {
+    let result;
+    try {
+      result = await github(
+        `/repos/${encodeURIComponent(env.REPOSITORY_OWNER)}/${encodeURIComponent(env.REPOSITORY_NAME)}/actions/workflows/${encodeURIComponent(item.workflow)}/dispatches`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${authenticated.session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ ref: 'main', inputs: item.inputs }),
+        },
+      );
+    } catch {
+      throw new HttpError(502, `${accepted.length ? `Déjà lancé : ${accepted.join(', ')}. ` : ''}Réponse GitHub indisponible pour ${item.workflow} ; vérifie l’historique avant de relancer.`);
+    }
+    if (!result.response.ok) {
+      throw new HttpError(result.response.status === 403 ? 403 : 502,
+        `${accepted.length ? `Déjà lancé : ${accepted.join(', ')}. ` : ''}GitHub a refusé ${item.workflow} (${result.response.status}).`);
+    }
+    accepted.push(item.workflow);
+  }
   const renewed = authenticated.changed ? await sealSession(authenticated.session, env) : null;
-  return json({ ok: true, workflow: command.workflow, session: renewed }, 202, request, env);
+  const message = !generate ? undefined : config.dryRun
+    ? 'Vérification sans rendu lancée pour les comptes sauvegardés.'
+    : accepted.length === 2 ? 'Rendus Blender 3D et 2D lancés pour les comptes sauvegardés.'
+      : accepted[0] === 'soft-body-artifact.yml' ? 'Rendu Blender 3D lancé pour les comptes sauvegardés.'
+        : 'Rendu 2D lancé pour les comptes sauvegardés.';
+  return json({ ok: true, workflow: accepted[0], workflows: accepted, message, session: renewed }, 202, request, env);
 }
 
 function normalizeAccounts(raw) {

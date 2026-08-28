@@ -20,20 +20,26 @@ from game_variants import (
 from soft_body_variants import (
     AIR_RETENTION_PER_SECOND,
     PHYSICS_HZ,
+    AUTO_OBSTACLE_KEYS,
     OBSTACLES,
     SHAPES,
     deformation_response,
     natural_ramp_exit_time,
     obstacle_collision_radius_scale,
     obstacle_drag_retention_per_second,
+    obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
+    stage_frame_spans,
     stage_motion_for,
+    stage_release_delay,
+    stage_selection_for,
     supported_body_damping,
     variant_for_seed,
 )
+from soft_body_framing import inspect_simulation_framing
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -125,6 +131,41 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_requested_preview_softness_is_exact_even_between_presets(self):
+        variant = variant_for_seed(910105, "moving-slide")
+        self.assertNotIn(55, variant.stages)
+        self.assertEqual(stage_selection_for(variant, 55), ((55,), (2,)))
+        self.assertEqual(stage_selection_for(variant), (variant.stages, (0, 1, 2, 3, 4)))
+        for invalid in (-1, 101, 55.5):
+            with self.assertRaises(ValueError):
+                stage_selection_for(variant, invalid)
+
+    def test_framing_blocks_sustained_side_exits_and_empty_comparisons(self):
+        variant = variant_for_seed(910103, "moving-slide")
+        def frames(position, count=61):
+            return [([position],)] * count
+        visible = frames((0.0, 3.0))
+        self.assertEqual(inspect_simulation_framing([visible], variant, 30)["issues"], [])
+        sideways = inspect_simulation_framing([frames((-20.0, 3.0))], variant, 30)
+        self.assertIn("body-left-camera-side", sideways["issues"])
+        self.assertIn("empty-comparison-tail", sideways["issues"])
+        lower_exit = frames((0.0, 3.0), 45) + frames((0.0, -20.0), 16)
+        self.assertEqual(inspect_simulation_framing([lower_exit], variant, 30)["issues"], [])
+        self.assertIn("empty-comparison-tail", inspect_simulation_framing(
+            [frames((0.0, -20.0))], variant, 30)["issues"])
+
+    def test_framing_keeps_a_multi_body_take_while_a_specimen_finishes(self):
+        variant = variant_for_seed(910103, "v-stairs")
+        visible = [([(0.0, 3.0)],)] * 61
+        finished = [([(0.0, -20.0)],)] * 61
+        report = inspect_simulation_framing([visible, finished], variant, 30)
+        self.assertEqual(report["issues"], [])
+        self.assertEqual(report["frames_checked"], 60)
+        with self.assertRaises(ValueError):
+            inspect_simulation_framing([visible], variant, 30)
+        with self.assertRaises(ValueError):
+            inspect_simulation_framing([visible, finished[:-1]], variant, 30)
+
     def test_obstacle_attempt_spans_cover_every_frame_without_empty_tails(self):
         for obstacle in OBSTACLES:
             for softness in (0, 25, 50, 75, 100):
@@ -136,8 +177,143 @@ class SoftBodyVariantTests(unittest.TestCase):
                 self.assertTrue(all(end >= start for start, end in spans))
                 self.assertGreaterEqual(spans[-1][1] - spans[-1][0] + 1, 27)
 
+    def test_multi_body_references_use_their_observed_stage_rhythm(self):
+        for obstacle in ("stair-cascade", "peg-grid"):
+            spans = stage_frame_spans(900, 5, obstacle)
+            self.assertEqual(
+                tuple(end - start + 1 for start, end in spans),
+                (120, 180, 210, 210, 180),
+            )
+
+    def test_v_stairs_uses_hold_time_for_complete_landings(self):
+        spans = stage_frame_spans(900, 5, "v-stairs")
+        self.assertEqual(tuple(end - start + 1 for start, end in spans),
+                         (138, 165, 159, 225, 213))
+        for start, end in spans:
+            self.assertEqual(stage_release_delay((end - start + 1) / 30, "v-stairs"), 0)
+        # The unrelated stair and peg scenes retain their existing timing.
+        self.assertEqual(stage_release_delay(7, "stair-cascade"), 0.65)
+        self.assertEqual(stage_release_delay(7, "peg-grid"), 0.65)
+        self.assertEqual(stage_release_delay(4, "peg-grid"), 0)
+        self.assertEqual(stage_release_delay(7, "moving-slide"), 0)
+
+    def test_v_stairs_labels_and_cut_repairs_follow_landing_timing(self):
+        value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 30, 55, 85, 100), "v-stairs")
+        for time in ("4.600", "10.100", "15.400", "22.900"):
+            self.assertIn(time, value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (139, 304, 463, 688):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "v-stairs"),
+                             (139, 304, 463, 688))
+
+    def test_v_stairs_75_moves_empty_tail_to_the_final_comparison(self):
+        for fourth in (65, 70, 75):
+            stages = (0, 25, 55, fourth, 100)
+            spans = stage_frame_spans(900, 5, "v-stairs", stages)
+            self.assertEqual(tuple(end - start + 1 for start, end in spans),
+                             (138, 165, 159, 201, 237))
+            self.assertEqual(sum(end - start + 1 for start, end in spans), 900)
+        unchanged = stage_frame_spans(900, 5, "v-stairs", (0, 30, 55, 85, 100))
+        self.assertEqual(tuple(end - start + 1 for start, end in unchanged),
+                         (138, 165, 159, 225, 213))
+        with self.assertRaisesRegex(ValueError, "stage_values"):
+            stage_frame_spans(900, 5, "v-stairs", (0, 75, 100))
+        with self.assertRaisesRegex(ValueError, "stage_values"):
+            stage_frame_spans(900, 5, "v-stairs", (0, 25, 55, 101, 100))
+
+    def test_v_stairs_75_cut_repair_and_labels_share_the_shortened_clock(self):
+        stages = variant_for_seed(910104, "v-stairs").stages
+        self.assertEqual(stages[3], 75)
+        value = PREMIUM_RENDERER.build_video_filter(30.0, stages, "v-stairs")
+        self.assertIn("22.100", value)
+        self.assertNotIn("22.900", value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (139, 304, 463, 664, 688):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(
+                frames, 900, 5, (), "v-stairs", stages), (139, 304, 463, 664))
+            self.assertEqual((frames / "frame_0664.png").read_bytes(), b"665")
+            self.assertEqual((frames / "frame_0688.png").read_bytes(), b"688")
+
+    def test_minimum_preview_gives_every_stage_a_visible_frame(self):
+        for count in range(5, 25):
+            for obstacle in (None, "peg-grid"):
+                spans = stage_frame_spans(count, 5, obstacle)
+                self.assertTrue(all(start <= end for start, end in spans))
+                self.assertEqual(sum(end - start + 1 for start, end in spans), count)
+
+    def test_multi_body_labels_and_cut_repairs_use_the_same_clock(self):
+        value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 25, 55, 75, 100), "peg-grid")
+        self.assertIn("10.000", value)
+        self.assertIn("17.000", value)
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (121, 301, 511, 721):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "peg-grid"), (121, 301, 511, 721))
+
+    def test_native_preflight_requires_every_body_and_rejects_failed_surfaces(self):
+        variant = variant_for_seed(910103, "v-stairs")
+        quality = []
+        for stage, (softness, (start, end)) in enumerate(zip(variant.stages, stage_frame_spans(900, 5, "v-stairs")), start=1):
+            for body in (1, 2):
+                quality.append({"stage": stage, "softness": softness, "attempt": 1, "body": body,
+                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": end - start + 1, "maximum_empty_seconds": 0,
+                                "maximum_side_exit_seconds": 0, "issues": []},
+                    "rendered_surface": {"frames_checked": end - start + 1, "vertices_checked": 210946 * (end - start + 1),
+                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.01, "issues": []},
+                    "inter_body_contact": {"issues": [], "frames_checked": end - start + 1}})
+        payload = {"preflight_schema": 3, "obstacle": "v-stairs", "stages": list(variant.stages),
+            "fps": 30, "duration": 30, "attempt_quality": quality}
+        self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
+        # Another seed's 75% comparison must not silently reuse the old 85%
+        # edit. Every proof, label and native span must follow the new clock.
+        shorter = variant_for_seed(910104, "v-stairs")
+        obsolete = [{**item, "softness": shorter.stages[item["stage"] - 1]} for item in quality]
+        shorter_payload = {**payload, "stages": list(shorter.stages), "attempt_quality": obsolete}
+        with self.assertRaisesRegex(ValueError, "timeline"):
+            PREMIUM_RENDERER.validate_motion_preflight(shorter_payload, shorter, 900, 30)
+        corrected = []
+        shorter_spans = stage_frame_spans(900, 5, "v-stairs", shorter.stages)
+        for item in obsolete:
+            start, end = shorter_spans[item["stage"] - 1]
+            corrected.append({**item, "start_frame": start, "end_frame": end,
+                **{name: {**item[name], "frames_checked": end - start + 1}
+                   for name in ("framing", "rendered_surface", "inter_body_contact")}})
+        self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(
+            {**shorter_payload, "attempt_quality": corrected}, shorter, 900, 30), corrected)
+        with self.assertRaisesRegex(ValueError, "Incomplete"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_quality": quality[:-1]}, variant, 900, 30)
+        with self.assertRaisesRegex(ValueError, "surface"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_quality": [{**quality[0], "surface": {"inside_contacts": 1}}, *quality[1:]]}, variant, 900, 30)
+        with self.assertRaisesRegex(ValueError, "Missing"):
+            PREMIUM_RENDERER.validate_motion_preflight({}, variant, 900, 30)
+        with self.assertRaisesRegex(ValueError, "Missing"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "preflight_schema": 2}, variant, 900, 30)
+        valid_rendered = quality[0]["rendered_surface"]
+        for invalid in (None, {**valid_rendered, "frames_checked": 1}, {**valid_rendered, "vertices_checked": 0},
+                        {**valid_rendered, "subdivision": 2}, {**valid_rendered, "maximum_penetration": 0.004},
+                        {**valid_rendered, "maximum_correction": 0.09},
+                        {**valid_rendered, "maximum_penetration": float("nan")},
+                        {**valid_rendered, "issues": ["rendered-skin-inside-obstacle"]}):
+            with self.assertRaisesRegex(ValueError, "subdivided"):
+                PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_quality": [
+                    {**quality[0], "rendered_surface": invalid}, *quality[1:]]}, variant, 900, 30)
+        for invalid in (None, {"issues": [], "frames_checked": 120},
+                        {"issues": [], "frames_checked": 120, "maximum_empty_seconds": 1.5, "maximum_side_exit_seconds": 0}):
+            with self.assertRaisesRegex(ValueError, "framing"):
+                PREMIUM_RENDERER.validate_motion_preflight({**payload,
+                    "attempt_quality": [{**quality[0], "framing": invalid}, *quality[1:]]}, variant, 900, 30)
+
     def test_fast_obstacles_repeat_during_long_levels(self):
-        for obstacle in ("pipe-bend", "peg-grid", "twin-gears", "compression-ring"):
+        for obstacle in ("moving-slide", "pipe-bend", "twin-gears", "compression-ring"):
             self.assertGreater(
                 len(stage_attempt_frame_spans(1, 230, 30, obstacle, 100)),
                 1,
@@ -158,11 +334,11 @@ class SoftBodyVariantTests(unittest.TestCase):
         peg_quarter = stage_attempt_frame_spans(1, 115, 30, "peg-grid", 25)
         self.assertGreaterEqual((peg_quarter[0][1] - peg_quarter[0][0] + 1) / 30, 3.8)
         peg_soft = stage_attempt_frame_spans(1, 206, 30, "peg-grid", 100)
-        self.assertGreater(len(peg_soft), 1)
-        self.assertLessEqual(max((end - start + 1) / 30 for start, end in peg_soft), 2.6)
+        self.assertEqual(peg_soft, ((1, 206),))
         pipe = stage_attempt_frame_spans(1, 206, 30, "pipe-bend", 100)
         self.assertGreater(len(pipe), 1)
-        self.assertLessEqual(max((end - start + 1) / 30 for start, end in pipe), 2.4)
+        self.assertGreaterEqual(min((end - start + 1) / 30 for start, end in pipe), 3.0)
+        self.assertLessEqual(max((end - start + 1) / 30 for start, end in pipe), 3.7)
 
     def test_same_seed_resolves_to_same_variant(self):
         self.assertEqual(variant_for_seed(424242), variant_for_seed(424242))
@@ -194,9 +370,12 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertIn(obstacle.key, variant.key)
             self.assertEqual(variant.receiver.x, obstacle.receiver_x)
 
-    def test_automatic_obstacles_cover_the_complete_catalog(self):
+    def test_automatic_obstacles_cover_only_reference_matched_scenes(self):
         resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}
-        self.assertEqual(resolved, {obstacle.key for obstacle in OBSTACLES})
+        self.assertEqual(resolved, set(AUTO_OBSTACLE_KEYS))
+        self.assertTrue(
+            {"pipe-bend", "twin-gears", "compression-ring"}.isdisjoint(resolved)
+        )
 
     def test_capsule_presets_remain_slender_and_reference_scaled(self):
         for shape in SHAPES:
@@ -227,9 +406,16 @@ class SoftBodyVariantTests(unittest.TestCase):
 
     def test_peg_grid_releases_two_bodies_and_matches_softness_thresholds(self):
         self.assertEqual(obstacle_specimen_offsets("peg-grid"), (-0.64, 0.64))
+        self.assertEqual(obstacle_specimen_offsets("stair-cascade"), (-0.18, 0.0, 0.18))
+        self.assertEqual(obstacle_specimen_depth_offsets("stair-cascade"), (-1.15, 0.0, 1.15))
+        self.assertEqual(obstacle_specimen_offsets("v-stairs"), (0.0, 5.50))
         for obstacle in OBSTACLES:
-            if obstacle.key != "peg-grid":
+            if obstacle.key not in {"peg-grid", "stair-cascade", "v-stairs"}:
                 self.assertEqual(obstacle_specimen_offsets(obstacle.key), (0.0,))
+            self.assertEqual(
+                len(obstacle_specimen_depth_offsets(obstacle.key)),
+                len(obstacle_specimen_offsets(obstacle.key)),
+            )
         shape = max(SHAPES, key=lambda item: item.radius)
         peg_spacing = 0.64
         peg_radius = 0.115
@@ -242,12 +428,22 @@ class SoftBodyVariantTests(unittest.TestCase):
         self.assertLess(quarter_soft_diameter - opening, rigid_diameter - opening)
         self.assertLess(half_soft_diameter, opening)
 
-    def test_peg_grid_uses_long_25_percent_and_short_repeated_soft_attempts(self):
+    def test_peg_grid_uses_one_complete_take_with_two_bodies(self):
         quarter = stage_attempt_frame_spans(1, 115, 30, "peg-grid", 25)
         half = stage_attempt_frame_spans(1, 216, 30, "peg-grid", 50)
         self.assertEqual(quarter, ((1, 115),))
-        self.assertGreaterEqual(len(half), 3)
-        self.assertLessEqual(max((end - start + 1) / 30 for start, end in half), 2.6)
+        self.assertEqual(half, ((1, 216),))
+        self.assertEqual(len(obstacle_specimen_offsets("peg-grid")), 2)
+
+    def test_long_middle_levels_repeat_without_incomplete_remainders(self):
+        for obstacle in OBSTACLES:
+            spans = stage_attempt_frame_spans(1, 216, 30, obstacle.key, 55)
+            visible_tests = len(spans) * len(obstacle_specimen_offsets(obstacle.key))
+            self.assertGreaterEqual(visible_tests, 2, obstacle.key)
+            durations = [(end - start + 1) / 30 for start, end in spans]
+            self.assertGreaterEqual(min(durations), 3.0, obstacle.key)
+            if len(spans) > 1:
+                self.assertLessEqual(max(durations) - min(durations), 1 / 30, obstacle.key)
 
     def test_peg_grid_friction_holds_25_percent_but_releases_50_percent(self):
         quarter = obstacle_drag_retention_per_second(0.25, "peg-grid")
@@ -309,7 +505,7 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_render_level_release_motion_is_neutral_and_nonzero(self):
         for seed in range(910100, 910125):
             variant = variant_for_seed(seed)
-            if variant.obstacle.key in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
+            if variant.obstacle.key in {"v-stairs", "pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
                 self.assertGreater(variant.start_rotation, 1.40)
                 self.assertLess(variant.start_rotation, 1.75)
             else:
@@ -332,6 +528,16 @@ class SoftBodyVariantTests(unittest.TestCase):
         self.assertNotIn("fall_boost", source)
         self.assertNotIn("max_horizontal_step", source)
         self.assertIn('"kind": "receiver-entry"', source)
+
+    def test_soft_body_publication_has_a_real_physics_preflight(self):
+        source = (Path(__file__).with_name("blender-soft-body-slide.py")).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("def simulation_quality(", source)
+        self.assertIn('"missed-obstacle"', source)
+        self.assertIn('"constraint-tear"', source)
+        self.assertIn('"solver-teleport"', source)
+        self.assertIn("Soft-body publication preflight failed", source)
 
     def test_soft_body_foley_timestamps_use_fixed_physics_samples(self):
         # Extract only the pure event reducer: importing the complete renderer

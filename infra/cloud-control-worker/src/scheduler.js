@@ -5,7 +5,7 @@ const MAX_DISPATCH_ATTEMPTS = 3;
 const RECORD_TTL_SECONDS = 8 * 24 * 60 * 60;
 
 function parseTime(value) {
-  const match = String(value || '').match(/^(\d{2}):(\d{2})$/u);
+  const match = String(value || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/u);
   if (!match) throw new Error(`Invalid scheduler time: ${value}`);
   return (Number(match[1]) * 60) + Number(match[2]);
 }
@@ -80,15 +80,23 @@ export function schedulerOperations(config, now) {
     });
   }
 
-  operations.push({
-    id: 'daily-publish',
-    workflow: 'daily-publisher.yml',
-    dueMinute: publishMinute,
-    windowStart: Math.max(0, publishMinute - 5),
-    windowEnd: 1439,
-    eligible: clock.minute >= publishMinute,
-    inputs: { action: 'publish', dry_run: dryRun ? 'true' : 'false', force_youtube: 'false' },
-  });
+  // A successful early account must not mark a later account's slot complete.
+  // Keep the existing default key stable while accounts are added or disabled.
+  for (const slot of [...new Set(channels.map((channel) => channel.publishTime || '18:00'))].sort()) {
+    const dueMinute = parseTime(slot);
+    operations.push({
+      id: slot === '18:00' ? 'daily-publish' : `daily-publish-${slot.replace(':', '')}`,
+      workflow: 'daily-publisher.yml',
+      dueMinute,
+      windowStart: dueMinute,
+      windowEnd: 1439,
+      eligible: clock.minute >= dueMinute,
+      inputs: {
+        action: 'publish', dry_run: dryRun ? 'true' : 'false', force_youtube: 'false',
+        scheduled_publish: 'true', publish_slot: slot, schedule_date: clock.date,
+      },
+    });
+  }
 
   return operations.map((operation) => ({ ...operation, date: clock.date, timeZone }));
 }
@@ -104,15 +112,23 @@ function clockInsideWindow(run, operation) {
 function nativeRun(runs, operation) {
   return runs
     .filter((run) => run.event === 'schedule' && clockInsideWindow(run, operation))
+    .filter((run) => operation.inputs.action !== 'publish' || !run.display_title
+      || run.display_title === 'Daily TikTok and YouTube publisher'
+      || run.display_title === 'ClipMaker · scheduled publish')
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0] || null;
 }
 
-function dispatchedRun(runs, record) {
+function dispatchedRun(runs, record, operation) {
   if (!record?.dispatchedAt) return null;
+  // Current GitHub API returns the actual run ID. Never substitute a nearby
+  // manual generation/test run when that known run is not in the response.
+  if (record.runId) return runs.find((run) => String(run.id) === String(record.runId)) || null;
   const lower = Date.parse(record.dispatchedAt) - (2 * 60 * 1000);
   const upper = Date.parse(record.dispatchedAt) + (15 * 60 * 1000);
   return runs
     .filter((run) => run.event === 'workflow_dispatch')
+    .filter((run) => operation.inputs.action !== 'publish'
+      || run.display_title === `ClipMaker · publish ${operation.inputs.publish_slot}`)
     .filter((run) => {
       const created = Date.parse(run.created_at);
       return created >= lower && created <= upper;
@@ -128,12 +144,12 @@ function runOutcome(run) {
 
 async function listRuns(env, token, workflow) {
   const path = `/repos/${encodeURIComponent(env.REPOSITORY_OWNER)}/${encodeURIComponent(env.REPOSITORY_NAME)}`
-    + `/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=30`;
+    + `/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=30&branch=main`;
   const { response, payload } = await env.github(path, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new Error(`GitHub run lookup failed (${response.status}): ${payload?.message || 'unknown error'}`);
-  return payload.workflow_runs || [];
+  return (payload.workflow_runs || []).filter((run) => !run.head_branch || run.head_branch === 'main');
 }
 
 async function dispatch(env, token, operation) {
@@ -160,7 +176,7 @@ export async function runScheduler({ env, token, now = new Date() }) {
       env.CONFIG.get(recordKey, 'json'),
       listRuns(env, token, operation.workflow),
     ]);
-    const observed = dispatchedRun(runs, record) || nativeRun(runs, operation);
+    const observed = dispatchedRun(runs, record, operation) || nativeRun(runs, operation);
     const outcome = runOutcome(observed);
 
     if (outcome === 'active' || outcome === 'success') {

@@ -19,20 +19,70 @@ REFERENCE_SWEEP_SCALE = 1.35
 # on the receiver or on the simulated body state.
 REFERENCE_SCENE_OFFSET_X = 2.44
 REFERENCE_STAGE_DURATIONS = (4.438, 3.804, 7.173, 7.675, 6.841)
+REFERENCE_STAGE_DURATIONS_BY_OBSTACLE = {
+    # The multi-specimen references dwell longer on 25/50/75% so viewers can
+    # follow every body through the complete obstacle, then close briskly.
+    "stair-cascade": (4.0, 6.0, 7.0, 7.0, 6.0),
+    # Match the observed complete landings with static contact friction.
+    # Reuse the former release holds for the two slower final comparisons.
+    "v-stairs": (4.6, 5.5, 5.3, 7.5, 7.1),
+    "peg-grid": (4.0, 6.0, 7.0, 7.0, 6.0),
+}
 
 
-def stage_frame_spans(frame_count: int, stage_count: int = 5) -> tuple[tuple[int, int], ...]:
+def stage_release_delay(duration: float, obstacle_key: str) -> float:
+    """Authored hold before gravity starts; never derived from the outcome."""
+    if obstacle_key in {"stair-cascade", "peg-grid"}:
+        return min(0.65, max(0.0, duration - 4.50))
+    return 0.0
+
+
+def stage_duration_weights(
+    stage_count: int,
+    obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
+):
+    if stage_values is not None and (
+        len(stage_values) != stage_count
+        or any(not isinstance(value, int) or not 0 <= value <= 100 for value in stage_values)
+    ):
+        raise ValueError("stage_values must contain one valid percentage per stage")
+    if stage_count != 5:
+        return (1.0,) * stage_count
+    weights = REFERENCE_STAGE_DURATIONS_BY_OBSTACLE.get(
+        obstacle_key,
+        REFERENCE_STAGE_DURATIONS,
+    )
+    if obstacle_key == "v-stairs" and stage_values is not None:
+        # 75% completes sooner than the 85% comparison used to calibrate the
+        # base edit. Keep its full landing, but move the otherwise empty tail
+        # to the slower 100% trial. This changes only the edit, not gravity,
+        # friction or the trajectory; the complete movie remains 30 seconds.
+        transfer = 0.8 * max(0.0, min(1.0, (85 - stage_values[3]) / 10.0))
+        return (*weights[:3], weights[3] - transfer, weights[4] + transfer)
+    return weights
+
+
+def stage_frame_spans(
+    frame_count: int,
+    stage_count: int = 5,
+    obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
+) -> tuple[tuple[int, int], ...]:
     """Return one-based inclusive spans matching the reference's edit rhythm."""
 
     if frame_count < stage_count or stage_count <= 0:
         raise ValueError("frame_count must provide at least one frame per stage")
-    weights = REFERENCE_STAGE_DURATIONS if stage_count == 5 else (1.0,) * stage_count
+    weights = stage_duration_weights(stage_count, obstacle_key, stage_values)
     total = sum(weights)
     boundaries = [0]
     cumulative = 0.0
-    for weight in weights[:-1]:
+    for index, weight in enumerate(weights[:-1]):
         cumulative += weight
-        boundaries.append(round(frame_count * cumulative / total))
+        remaining_stages = stage_count - index - 1
+        boundaries.append(max(boundaries[-1] + 1, min(
+            frame_count - remaining_stages, round(frame_count * cumulative / total),
+        )))
     boundaries.append(frame_count)
     return tuple(
         (boundaries[index] + 1, boundaries[index + 1])
@@ -40,12 +90,17 @@ def stage_frame_spans(frame_count: int, stage_count: int = 5) -> tuple[tuple[int
     )
 
 
-def stage_time_spans(duration: float, stage_count: int = 5) -> tuple[tuple[float, float], ...]:
+def stage_time_spans(
+    duration: float,
+    stage_count: int = 5,
+    obstacle_key: str | None = None,
+    stage_values: tuple[int, ...] | None = None,
+) -> tuple[tuple[float, float], ...]:
     """Return second-based label spans with the same reference timing."""
 
     if duration <= 0.0 or stage_count <= 0:
         raise ValueError("duration and stage_count must be positive")
-    weights = REFERENCE_STAGE_DURATIONS if stage_count == 5 else (1.0,) * stage_count
+    weights = stage_duration_weights(stage_count, obstacle_key, stage_values)
     total = sum(weights)
     boundaries = [0.0]
     cumulative = 0.0
@@ -68,62 +123,46 @@ def stage_attempt_frame_spans(
     Several source scenes release more than one specimen at the same softness.
     Doing the same prevents a body that has already left the camera from
     leaving half of a seven-second level empty. Cuts only happen between whole
-    rendered frames and the final tail is never shorter than 0.9 seconds.
+    rendered frames and never leave a short unfinished tail.
     """
 
     if fps <= 0 or start <= 0 or end < start:
         raise ValueError("invalid attempt span")
+    # These references repeat the test with multiple specimens *at once*.
+    # Splitting them again in time created four/six bodies per level and cut
+    # trajectories before their payoff.  Keep one complete physical take.
+    if obstacle_key in {"stair-cascade", "v-stairs", "peg-grid"}:
+        return ((start, end),)
+    # Keep the reference edit readable: the two short opening comparisons run
+    # once, while the three longer softness levels repeat twice.  Previous
+    # obstacle-specific shortcuts could leave a 2.2 s remainder after a 5 s
+    # stair attempt, cutting the second body halfway down the obstacle.  Equal
+    # spans and a strict two-attempt ceiling guarantee complete actions and the
+    # repeated 50/55% comparison visible in the source videos.
     target_seconds = {
         "moving-slide": 4.20,
         "v-stairs": 3.45,
-        "pipe-bend": 3.40,
+        "pipe-bend": 3.35,
         "peg-grid": 4.05,
-        "twin-gears": 1.35,
-        "compression-ring": 2.35,
+        "twin-gears": 3.25,
+        "compression-ring": 3.20,
     }.get(obstacle_key, 6.0)
     if obstacle_key == "peg-grid" and softness >= 50:
-        target_seconds = 2.25
-    if obstacle_key == "pipe-bend" and softness >= 100:
-        target_seconds = 2.30
+        target_seconds = 3.25
     if obstacle_key == "stair-cascade":
-        if softness <= 0:
-            target_seconds = 2.80
-        elif softness <= 25:
-            target_seconds = 3.60
-        elif softness <= 50:
-            target_seconds = 4.50
-        elif softness <= 75:
-            target_seconds = 5.00
-        else:
-            target_seconds = 5.60
+        target_seconds = 3.45
     minimum_complete_seconds = {
         "moving-slide": 3.00,
-        "v-stairs": 3.25,
+        "stair-cascade": 3.05,
+        "v-stairs": 3.05,
         "pipe-bend": 3.00,
-        "peg-grid": 3.35,
-        "twin-gears": 1.25,
-        "compression-ring": 2.10,
+        "peg-grid": 3.00,
+        "twin-gears": 3.00,
+        "compression-ring": 3.00,
     }.get(obstacle_key, target_seconds)
-    if obstacle_key == "peg-grid" and softness >= 50:
-        minimum_complete_seconds = 1.90
-    if obstacle_key == "pipe-bend" and softness >= 100:
-        minimum_complete_seconds = 2.00
     frame_count = end - start + 1
     duration = frame_count / fps
-    if obstacle_key == "compression-ring" and 3.40 < duration < 4.10:
-        target = round(minimum_complete_seconds * fps)
-        return ((start, start + target - 1), (start + target, end))
-    if obstacle_key == "peg-grid" and softness < 50:
-        target = round(target_seconds * fps)
-        if frame_count > target + round(0.90 * fps):
-            return ((start, start + target - 1), (start + target, end))
-        return ((start, end),)
-    if obstacle_key == "stair-cascade":
-        target = round(target_seconds * fps)
-        if frame_count > target + round(0.90 * fps):
-            return ((start, start + target - 1), (start + target, end))
-        return ((start, end),)
-    attempt_count = max(1, min(6, round(duration / target_seconds)))
+    attempt_count = max(1, min(2, round(duration / target_seconds)))
     while attempt_count > 1 and duration / attempt_count < minimum_complete_seconds:
         attempt_count -= 1
     boundaries = [
@@ -166,7 +205,7 @@ def obstacle_collision_radius_scale(softness: float, obstacle_key: str) -> float
 
     value = max(0.0, min(1.0, float(softness)))
     general = 1.0 - value * 0.18
-    if obstacle_key == "peg-grid":
+    if obstacle_key in {"peg-grid", "twin-gears"}:
         # 25% can visibly enter but remains fractionally wider than the gap;
         # from 50% onward the flattened cross-section clears the opening.
         return min(general, 1.0 - 0.28 * value ** 0.62)
@@ -186,7 +225,21 @@ def obstacle_drag_retention_per_second(softness: float, obstacle_key: str) -> fl
 def obstacle_specimen_offsets(obstacle_key: str) -> tuple[float, ...]:
     """Match obstacle references that release multiple bodies together."""
 
-    return (-0.64, 0.64) if obstacle_key == "peg-grid" else (0.0,)
+    if obstacle_key == "peg-grid":
+        return (-0.64, 0.64)
+    if obstacle_key == "stair-cascade":
+        return (-0.18, 0.0, 0.18)
+    if obstacle_key == "v-stairs":
+        return (0.0, 5.50)
+    return (0.0,)
+
+
+def obstacle_specimen_depth_offsets(obstacle_key: str) -> tuple[float, ...]:
+    """Place parallel reference specimens on distinct visible 3D lanes."""
+
+    if obstacle_key == "stair-cascade":
+        return (-1.15, 0.0, 1.15)
+    return (0.0,) * len(obstacle_specimen_offsets(obstacle_key))
 
 
 def solver_timing(fps: int, softness: float) -> tuple[int, float, float, float]:
@@ -354,7 +407,7 @@ SHAPES = (
 RAMPS = (
     RampPreset("classic-lip", "Classic lip", -2.85, 2.95, 3.68, 0.13, 0.07, 0.78, -0.30, 0.58, 0.76, 0.68, 0.24, 1.00, 2.00, 0.03, 1.55, -6.0),
     RampPreset("double-wave", "Double wave", -3.05, 3.05, 3.64, 0.09, 0.22, 1.08, 0.25, 0.70, 0.62, 0.64, 0.22, 1.10, 1.90, 0.04, 1.60, -6.2),
-    RampPreset("scoop-launch", "Scoop launch", -2.72, 3.18, 3.57, 0.17, 0.17, 0.72, -1.10, 0.48, 0.94, 0.72, 0.26, 1.15, 1.90, 0.03, 1.65, -6.3),
+    RampPreset("scoop-launch", "Scoop launch", -2.72, 3.18, 3.57, 0.12, 0.17, 0.72, -1.10, 0.48, 0.65, 0.72, 0.26, 1.15, 1.90, 0.03, 1.65, -6.3),
     RampPreset("roller-wave", "Roller wave", -3.18, 2.82, 3.70, 0.07, 0.27, 1.26, 0.70, 0.76, 0.56, 0.61, 0.20, 1.80, 2.00, 0.08, 1.48, -5.8),
     RampPreset("long-glide", "Long glide", -3.30, 3.24, 3.75, 0.055, 0.11, 0.55, -0.55, 0.64, 0.82, 0.70, 0.23, 1.75, 1.95, 0.05, 1.72, -6.5),
 )
@@ -378,15 +431,17 @@ RECEIVERS = (
 
 
 OBSTACLES = (
-    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.0, 3.12, 9.10),
-    ObstaclePreset("stair-cascade", "Falling stair cascade", "7640793378799586581", -2.00, 6.45, 1.55, 0.30, 3.35, 9.30),
-    ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.38, 0.0, 0.0, 3.35, 8.20),
-    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 8.05),
-    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 8.05),
-    ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 8.00),
-    ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 8.00),
+    ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.55, 3.12, 11.80),
+    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, 1.55, 0.30, 3.35, 14.20),
+    ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.90, 0.0, 0.0, 2.80, 12.80),
+    ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 9.50),
+    ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 10.10),
+    ObstaclePreset("twin-gears", "Counter-rotating gears", "7647848877403409684", 0.0, 6.45, 0.0, 0.0, 3.35, 9.50),
+    ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 9.50),
 )
 OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
+AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid")
+AUTO_OBSTACLES = tuple(item for item in OBSTACLES if item.key in AUTO_OBSTACLE_KEYS)
 
 
 STAGE_PRESETS = (
@@ -413,6 +468,16 @@ def stage_motion_for(variant: SoftBodyVariant, stage_index: int) -> StageMotion:
         angular_velocity=rng.uniform(-0.045, 0.045),
         ramp_phase_offset=rng.uniform(-0.012, 0.012),
     )
+
+
+def stage_selection_for(variant: SoftBodyVariant, softness: int | None = None):
+    """An explicit preview percentage is exact, not rounded to a preset."""
+    if softness is None:
+        return variant.stages, tuple(range(len(variant.stages)))
+    if not isinstance(softness, int) or not 0 <= softness <= 100:
+        raise ValueError("Preview softness must be an integer between 0 and 100")
+    motion_index = min(range(len(variant.stages)), key=lambda index: abs(variant.stages[index] - softness))
+    return (softness,), (motion_index,)
 
 
 def ramp_sweep_state(
@@ -480,7 +545,9 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
         if obstacle is None:
             raise ValueError(f"Unknown soft-body obstacle family: {obstacle_key}")
     else:
-        obstacle = OBSTACLES[(positive * 13 + positive // 17 + 4) % len(OBSTACLES)]
+        obstacle = AUTO_OBSTACLES[
+            (positive * 13 + positive // 17 + 4) % len(AUTO_OBSTACLES)
+        ]
     receiver = ReceiverPreset(
         receiver.key,
         receiver.label,
@@ -490,11 +557,17 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
         receiver.top,
         receiver.bowl_depth,
     )
+    if obstacle.key == "stair-cascade":
+        # One visible tube for each depth lane. A single central cup gave the
+        # outer bodies a 2D collider where no corresponding 3D opening exists.
+        outer = 0.42 + (positive % 3) * 0.01
+        receiver = ReceiverPreset(receiver.key + "-triple", "Triple clear receivers",
+                                  obstacle.receiver_x, outer, outer - 0.075, 1.40, 0.0)
     stage_key, stages = STAGE_PRESETS[(positive * 11 + positive // 13 + 3) % len(STAGE_PRESETS)]
     rng = random.Random(positive ^ 0x5F7B0D17)
     start_x = obstacle.start_x + rng.uniform(-0.12, 0.12)
     start_height = obstacle.start_height + rng.uniform(-0.08, 0.12)
-    if obstacle.key in {"pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
+    if obstacle.key in {"v-stairs", "pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
         start_rotation = math.pi / 2 + rng.uniform(-0.10, 0.10)
     else:
         start_rotation = rng.uniform(-0.24, 0.18)

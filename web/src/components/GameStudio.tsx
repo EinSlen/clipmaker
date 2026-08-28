@@ -132,14 +132,14 @@ const softBodyPaletteLabels: Record<string, string> = {
 };
 
 const softBodyObstacles: { id: SoftBodyObstacle; label: string; description: string; image: string }[] = [
-  { id: "auto", label: "Rotation automatique", description: "Une famille différente est choisie par la graine.", image: "/game-previews/soft-body-slide.webp" },
+  { id: "auto", label: "Rotation automatique", description: "Alterner entre rampe, triple escalier, V et grille. Les trois scènes expérimentales restent manuelles.", image: "/game-previews/soft-body-slide.webp" },
   { id: "moving-slide", label: "Rampe mobile", description: "Glissades, relances et chute dans le tube.", image: "/game-previews/soft-body-obstacles/moving-slide.webp" },
   { id: "stair-cascade", label: "Cascade de marches", description: "Rebonds successifs sur un escalier suspendu.", image: "/game-previews/soft-body-obstacles/stair-cascade.webp" },
   { id: "v-stairs", label: "Double escalier en V", description: "Deux descentes convergent vers le réceptacle.", image: "/game-previews/soft-body-obstacles/v-stairs.webp" },
-  { id: "pipe-bend", label: "Coude de tuyau", description: "Le corps se plie dans un conduit transparent.", image: "/game-previews/soft-body-obstacles/pipe-bend.webp" },
+  { id: "pipe-bend", label: "Coude de tuyau · bêta", description: "Test manuel : la forme boule de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/pipe-bend.webp" },
   { id: "peg-grid", label: "Grille de plots", description: "Compression et déviation entre plusieurs plots.", image: "/game-previews/soft-body-obstacles/peg-grid.webp" },
-  { id: "twin-gears", label: "Doubles engrenages", description: "Deux roues contrarotatives entraînent le corps.", image: "/game-previews/soft-body-obstacles/twin-gears.webp" },
-  { id: "compression-ring", label: "Presse à rouleaux", description: "Une ouverture mobile mesure la déformation.", image: "/game-previews/soft-body-obstacles/compression-ring.webp" },
+  { id: "twin-gears", label: "Doubles engrenages · bêta", description: "Test manuel : la forme croix de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/twin-gears.webp" },
+  { id: "compression-ring", label: "Rouleaux · bêta", description: "Test manuel de compression entre deux rouleaux. L’anneau sur sculpture de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/compression-ring.webp" },
 ];
 
 const softBodyObstacleLabels = Object.fromEntries(
@@ -637,8 +637,12 @@ export function GameStudio() {
                 {game === "soft-body-slide" ? (
                   <div className="space-y-1.5 text-xs text-ink-400">
                     <span>Niveaux de souplesse</span>
-                    <div className="field-control flex h-11 items-center justify-center font-semibold text-white">
-                      5 niveaux générés · 0 → 100 %
+                    <div
+                      aria-label="5 niveaux de souplesse, de 0 à 100 %"
+                      className="field-control flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-2 text-center font-semibold text-white"
+                    >
+                      <span className="whitespace-nowrap">5 niveaux</span>
+                      <span className="whitespace-nowrap text-ink-300">0 → 100 %</span>
                     </div>
                   </div>
                 ) : (
@@ -902,14 +906,16 @@ export function GameStudio() {
                     {duration} s
                   </dd>
                 </div>
-                <div>
+                <div className={game === "soft-body-slide" ? "col-span-2" : undefined}>
                   <dt className="text-ink-500">
                     {game === "soft-body-slide"
-                      ? "Variation"
+                      ? "Parcours"
                       : gameDefinition.uiMetricLabel}
                   </dt>
                   <dd className="mt-1 font-semibold text-white">
-                    {game === "soft-body-slide" ? "Automatique" : difficulty}
+                    {game === "soft-body-slide"
+                      ? softBodyObstacles.find((item) => item.id === softBodyObstacle)?.label
+                      : difficulty}
                   </dd>
                 </div>
                 <div className="col-span-2">
