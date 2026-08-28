@@ -12,7 +12,12 @@ from soft_body_variants import obstacle_specimen_depth_offsets
 
 def camera_location(obstacle):
     if obstacle.key == "stair-cascade":
-        return (obstacle.camera_target_x + 6.70, -11.50, 7.50)
+        # Face the outlet lanes more directly, keeping their exits inside the
+        # portrait frame. Preserve distance/elevation and never follow a body.
+        distance = math.hypot(6.70, 11.50)
+        angle = math.radians(60.0)
+        return (obstacle.camera_target_x + distance * math.sin(angle),
+                -distance * math.cos(angle), 7.50)
     return (obstacle.camera_target_x + 1.05, -14.8, 7.25)
 
 

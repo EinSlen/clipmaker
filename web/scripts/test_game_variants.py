@@ -39,7 +39,7 @@ from soft_body_variants import (
     supported_body_damping,
     variant_for_seed,
 )
-from soft_body_framing import inspect_simulation_framing, inspect_stair_outlet, validate_stair_outlet_evidence
+from soft_body_framing import inspect_simulation_framing, inspect_stair_outlet, validate_stair_outlet_evidence, project_point
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
@@ -131,6 +131,22 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_stair_camera_preserves_capsule_edges_at_release_and_outlet_exit(self):
+        # Native 734193085/100% trajectory extrema, frames 1 and 234. The old
+        # angle accepted the framing gate but visually clipped half a capsule
+        # at the right edge. Include radius, not just the centre of its spine.
+        variant = variant_for_seed(734193085, "stair-cascade")
+        points = (
+            (-2.749017, -1.19, 6.584198), (-2.555435, -.04, 6.639876),
+            (-2.375435, 1.11, 6.639876), (5.316909, -1.19, -.710505),
+            (4.731870, -.04, .501857), (5.067392, 1.11, -.178674),
+        )
+        radius = variant.shape.radius * 1.5 / (variant.obstacle.camera_scale * 9 / 16)
+        for point in points:
+            x, _y = project_point(point, variant.obstacle)
+            self.assertGreaterEqual(x - radius, .025)
+            self.assertLessEqual(x + radius, .975)
+
     def test_curved_stair_receivers_join_the_last_landing_without_intersection(self):
         from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, pipe_path, stair_outline
         outline = stair_outline()
