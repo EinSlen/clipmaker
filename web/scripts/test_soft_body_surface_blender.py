@@ -457,7 +457,13 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertEqual(framing["issues"], [], framing)
         for simulation in simulations:
             self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
-        premature = renderer.inspect_simulation_framing([trace[:190] for trace in simulations], variant, 30)
+        # The solid geometry reaches the outlet earlier than the old thin
+        # steps. Cut just below the actual observation threshold instead of
+        # requiring a formerly unfinished absolute frame to remain a failure.
+        last_entry = max(body["first_outlet_frame"] for body in framing["outlet"]["bodies"])
+        too_short = last_entry + math.ceil(.35 * 30) - 1
+        self.assertLess(too_short, 195)
+        premature = renderer.inspect_simulation_framing([trace[:too_short + 1] for trace in simulations], variant, 30)
         self.assertIn("unfinished-stair-descent", premature["issues"])
 
     def test_portrait_projection_matches_blender_for_every_camera(self):
