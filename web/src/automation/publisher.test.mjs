@@ -276,7 +276,7 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(
     workflow,
-    /Import today's completed 3D renders[\s\S]*github\.event_name == 'workflow_dispatch' && inputs\.dry_run/u,
+    /Import today's completed 3D renders[\s\S]*steps\.runtime\.outputs\.dry_run == 'false'/u,
   );
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
   assert.match(workflow, /force_youtube:/u);
