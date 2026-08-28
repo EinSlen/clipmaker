@@ -44,6 +44,9 @@ test('winter time, malformed slots and expired dates cannot publish tomorrow by 
   const raw = config();
   assert.deepEqual(scopePublication(raw, { scheduled: true, now: new Date('2026-12-28T17:00:00Z') }).channels, ['early']);
   assert.deepEqual(scopePublication(raw, { scheduled: true, now: new Date('2026-08-28T22:00:00Z') }).channels, []);
+  // Actual delayed GitHub event: the previous evening's 18:07 trigger only
+  // arrived at 00:50Z. It must not import/publish the new day's unready 3D.
+  assert.deepEqual(scopePublication(raw, { scheduled: true, now: new Date('2026-08-28T00:50:23Z') }).channels, []);
   assert.throws(() => scopePublication(raw, { scheduled: true, slot: '20:99' }), /Invalid time/u);
   assert.throws(() => scopePublication(raw, { slot: '18:00' }), /requires scheduled/u);
   assert.throws(() => scopePublication(raw, {

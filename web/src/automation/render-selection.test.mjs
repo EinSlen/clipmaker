@@ -44,7 +44,7 @@ function evidence(seed) {
       framing: { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
       rendered_surface: { frames_checked: 180, vertices_checked: 210946 * 180, subdivision: 3,
         maximum_penetration: 0, maximum_correction: 0.01, issues: [] },
-      inter_body_contact: { frames_checked: 180, issues: [] },
+      inter_body_contact: { frames_checked: 180, maximum_penetration: 0, issues: [] },
     }))) };
 }
 

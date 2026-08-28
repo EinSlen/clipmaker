@@ -397,7 +397,11 @@ def static_obstacle_circles(key: str):
         for row in range(5):
             z = 5.15 - row * 0.62
             for column in range(6):
-                circles.append((Vector((-1.60 + column * 0.64, z)), 0.115, Vector((0.0, 0.0)), 0.0))
+                # A 0.44 opening accepts the flattened 15/25% presets while
+                # remaining narrower than the rigid 0.45-0.468 diameter.
+                # The old 0.41 throat trapped the 15% section between two
+                # incompatible circle projections, folding and ejecting it.
+                circles.append((Vector((-1.60 + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
         speed = math.tau / 3.40
@@ -422,12 +426,12 @@ def obstacle_circles(time: float, variant: SoftBodyVariant):
         return static_obstacle_circles(key)
     if key == "compression-ring":
         angle = math.tau * time / 1.72 - math.pi / 2
-        # The earlier 0.28 squeeze closed the rollers more narrowly than even
-        # the flattened collision section. Alternating projections then had no
-        # geometric solution and could tear the chain. Keep a visible press,
-        # but retain a physically solvable clearance throughout the cycle.
-        half_gap = 0.92 - 0.14 * (0.5 + 0.5 * math.sin(angle))
-        velocity = -0.14 * 0.5 * math.tau / 1.72 * math.cos(angle)
+        # Keep 0.44 units between the closed rollers: the actual 45% preset
+        # needs up to 0.4301, while its unsqueezed section is up to 0.468.
+        # The former 0.40 opening had no feasible contact solution at that
+        # preset and alternating projections tore the chain at the throat.
+        half_gap = 0.92 - 0.12 * (0.5 + 0.5 * math.sin(angle))
+        velocity = -0.12 * 0.5 * math.tau / 1.72 * math.cos(angle)
         return [
             (Vector((-half_gap, 3.82)), 0.58, Vector((-velocity, 0.0)), 0.0),
             (Vector((half_gap, 3.82)), 0.58, Vector((velocity, 0.0)), 0.0),
@@ -1957,7 +1961,8 @@ class ObstacleSurface:
         return self.tree
 
 
-def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, depth_offset=0.0):
+def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, depth_offset=0.0,
+                           verify_closed_volume=False):
     """Clip only contact-side skin rays; leave free-flight vertices unchanged."""
 
     if tree is None:
@@ -1967,6 +1972,7 @@ def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, de
     corrected = []
     count, inside = 0, 0
     maximum = 0.0
+    anchor_membership = {}
     for base, position in zip(base_vertices, shape):
         coordinate = max(0.0, min(len(chain_points) - 1.0,
             (base[0] + half_length) / (2.0 * half_length) * (len(chain_points) - 1)))
@@ -1981,7 +1987,16 @@ def constrain_visible_skin(shape, base_vertices, chain_points, variant, tree, de
             direction /= distance
             hit, normal, _face, hit_distance = tree.ray_cast(anchor, direction, distance + margin)
             if hit is not None:
-                if normal.dot(direction) > 1e-4:
+                starts_inside = normal.dot(direction) > 1e-4
+                if verify_closed_volume:
+                    # A folded companion can have a locally reversed face.
+                    # Test its closed volume, not that face's orientation;
+                    # all vertices in an axial ring share the same anchor.
+                    key = tuple(anchor)
+                    if key not in anchor_membership:
+                        anchor_membership[key] = point_inside_closed_surface(tree, anchor)
+                    starts_inside = anchor_membership[key]
+                if starts_inside:
                     # This is an exit, not an entry: the physical spine is
                     # already inside a visible obstacle. Do not hide it with
                     # a huge cosmetic projection; fail the publication gate.
@@ -2017,7 +2032,8 @@ def capsule_frame_shape(base_vertices, faces, simulated, index, softness, varian
             other_shape, base_vertices, other_points, variant, tree, companion_depth)
         other_tree = BVHTree.FromPolygons(
             [(x, y + companion_depth, z) for x, y, z in other_shape], faces, all_triangles=False)
-        shape, contact = constrain_visible_skin(shape, base_vertices, points, variant, other_tree, depth)
+        shape, contact = constrain_visible_skin(
+            shape, base_vertices, points, variant, other_tree, depth, verify_closed_volume=True)
         quality["inside_contacts"] += contact["inside_contacts"]
         quality["maximum_correction"] = max(quality["maximum_correction"], contact["maximum_correction"])
         quality["corrected_vertices"] += contact["corrected_vertices"]

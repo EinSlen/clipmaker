@@ -14,7 +14,7 @@ from bpy_extras.object_utils import world_to_camera_view
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from soft_body_variants import (
-    OBSTACLES, obstacle_specimen_depth_offsets, obstacle_specimen_offsets,
+    OBSTACLES, SHAPES, obstacle_specimen_depth_offsets, obstacle_specimen_offsets,
     stage_motion_for, variant_for_seed,
 )
 from soft_body_framing import project_point
@@ -65,6 +65,25 @@ class SurfaceContactTests(unittest.TestCase):
     def test_an_inside_spine_is_reported_not_hidden(self):
         _shape, report = self.constrain((0.0, -0.04, 0.3), anchor_z=0.0)
         self.assertEqual(report["inside_contacts"], 1)
+
+    def test_peer_contact_uses_closed_volume_even_with_reversed_faces(self):
+        from mathutils.bvhtree import BVHTree
+        bpy.ops.mesh.primitive_cube_add(size=1.0)
+        mesh = bpy.context.object.data
+        vertices = [vertex.co.copy() for vertex in mesh.vertices]
+        for reverse in (False, True):
+            faces = [tuple(reversed(face.vertices)) if reverse else tuple(face.vertices) for face in mesh.polygons]
+            tree = BVHTree.FromPolygons(vertices, faces)
+            shape, report = renderer.constrain_visible_skin(
+                [(0, -.04, 0)], [(0, 0, -.2)], [Vector((0, .7))] * 2,
+                self.variant, tree, verify_closed_volume=True)
+            self.assertEqual(report["inside_contacts"], 0)
+            self.assertEqual(report["corrected_vertices"], 1)
+            self.assertGreaterEqual(shape[0][2], .507)
+            _shape, report = renderer.constrain_visible_skin(
+                [(0, -.04, .7)], [(0, 0, .2)], [Vector((0, 0))] * 2,
+                self.variant, tree, verify_closed_volume=True)
+            self.assertEqual(report["inside_contacts"], 1, "real inside anchors still fail")
 
     def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
         self.box_surface()
@@ -241,6 +260,31 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertEqual(report["frames_checked"], 1)
         self.assertTrue(report["issues"], report)
 
+    def test_grid_actual_presets_keep_every_contact_and_body_in_frame(self):
+        spec = importlib.util.spec_from_file_location("audit", ROOT / "audit-soft-body-3d.py")
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        for seed, softness, frames, stage in ((910105, 15, 180, 1), (910103, 85, 210, 3)):
+            with self.subTest(seed=seed, softness=softness):
+                variant = variant_for_seed(seed, "peg-grid")
+                simulations = renderer.simulate_specimens(softness, frames, 30, variant, stage)
+                for simulation in simulations:
+                    self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
+                framing = renderer.inspect_simulation_framing(simulations, variant, 30)
+                self.assertEqual(framing["issues"], [], framing)
+                contacts = audit.audit_specimen_contacts(renderer, variant, simulations, softness, stage, 30)
+                self.assertEqual(contacts["frames_checked"], frames)
+                self.assertEqual(contacts["issues"], [], contacts)
+
+    def test_grid_throat_is_solvable_for_every_partly_soft_shape(self):
+        left, right = renderer.static_obstacle_circles("peg-grid")[:2]
+        opening = right[0].x - left[0].x - left[1] - right[1]
+        for shape in SHAPES:
+            with self.subTest(shape=shape.key):
+                self.assertLess(opening, 2 * shape.radius, "rigid specimens still meet a real obstruction")
+                for softness in (0.15, 0.25, 0.45, 0.55, 0.85, 1.0):
+                    self.assertGreater(opening, 2 * shape.radius * renderer.obstacle_collision_radius_scale(softness, "peg-grid"))
+
     def test_coupled_solver_uses_one_clock_at_preview_and_production_rates(self):
         preview = renderer.simulate_specimens(55, 1, 5, self.variant, 2)
         native = renderer.simulate_specimens(55, 6, 30, self.variant, 2)
@@ -259,6 +303,25 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertEqual(quality["issues"], [])
         self.assertGreaterEqual(quality["minimum_segment_ratio"], 0.96)
         self.assertLessEqual(quality["maximum_segment_ratio"], 1.04)
+
+    def test_compression_actual_mid_preset_has_clearance_and_two_stable_attempts(self):
+        for seed in (910103, 910104, 910105):
+            variant = variant_for_seed(seed, "compression-ring")
+            left, right = renderer.obstacle_circles(1.72 / 2, variant)
+            opening = right[0].x - left[0].x - left[1] - right[1]
+            diameter = 2 * variant.shape.radius * renderer.obstacle_collision_radius_scale(0.45, "compression-ring")
+            self.assertGreater(opening, diameter)
+            self.assertLess(opening, 2 * variant.shape.radius, "the rollers must still visibly squeeze the body")
+        # Exact seed/preset missed by the old 0/25/55/75/100 audit.
+        variant = variant_for_seed(910105, "compression-ring")
+        for stage in (2, 7):
+            with self.subTest(stage=stage):
+                simulation = renderer.simulate_chain(45, 108, 30, variant, stage)
+                quality = renderer.simulation_quality(simulation, variant)
+                self.assertEqual(quality["issues"], [], quality)
+                self.assertGreaterEqual(quality["minimum_segment_ratio"], 0.96)
+                self.assertLessEqual(quality["maximum_segment_ratio"], 1.04)
+                self.assertEqual(renderer.inspect_simulation_framing([simulation], variant, 30)["issues"], [])
 
     def test_pressure_and_gears_remain_stable_and_visible_at_a_soft_impact(self):
         for obstacle, seed in (("compression-ring", 910104), ("twin-gears", 910105)):

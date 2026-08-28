@@ -49,7 +49,12 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
       || !Number.isFinite(framing.maximum_side_exit_seconds) || framing.maximum_side_exit_seconds < 0 || framing.maximum_side_exit_seconds > 0.5) fail();
     if (specimens > 1 && (report.inter_body_contact?.frames_checked !== end - start + 1
-      || !Array.isArray(report.inter_body_contact?.issues) || report.inter_body_contact.issues.length)) fail();
+      || !Array.isArray(report.inter_body_contact?.issues) || report.inter_body_contact.issues.length
+      || !Number.isFinite(report.inter_body_contact.maximum_penetration)
+      || report.inter_body_contact.maximum_penetration < 0
+      || report.inter_body_contact.maximum_penetration > 0.008
+      || (report.inter_body_contact.spine_inside_contacts !== undefined
+        && report.inter_body_contact.spine_inside_contacts !== 0))) fail();
     const key = `${stage}:${attempt}`;
     const trial = trials.get(key) || { stage, attempt, start, end, bodies: new Set() };
     if (trial.start !== start || trial.end !== end || trial.bodies.has(body)) fail();
