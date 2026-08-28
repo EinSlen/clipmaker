@@ -1119,10 +1119,10 @@ def _chain_ticks(
         # empty portrait frame.
         "compression-ring": 0.14,
     }.get(variant.obstacle.key, 1.0)
-    # Static V-stairs already apply contact friction in collide_point. They
+    # Static stairs already apply contact friction in collide_point. They
     # must not inherit the moving ramp's extra hold until a duration-derived
     # release window: changing the edit used to change the preceding fall.
-    exit_time = 0.0 if variant.obstacle.key == "v-stairs" else effective_ramp_exit_time(
+    exit_time = 0.0 if variant.obstacle.key in {"v-stairs", "stair-cascade"} else effective_ramp_exit_time(
         variant,
         trial_duration,
         stage_motion.ramp_phase_offset,

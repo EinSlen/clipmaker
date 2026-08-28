@@ -439,20 +439,25 @@ class SurfaceContactTests(unittest.TestCase):
 
     def test_daily_stair_final_descent_reaches_the_outlet_before_the_cut(self):
         variant = variant_for_seed(734193085, "stair-cascade")
-        simulations = renderer.simulate_specimens(100, 240, 30, variant, 4)
+        start, end = renderer.stage_frame_spans(900, 5, "stair-cascade", variant.stages)[4]
+        simulations = renderer.simulate_specimens(100, end - start + 1, 30, variant, 4)
         framing = renderer.inspect_simulation_framing(simulations, variant, 30)
         self.assertEqual(framing["issues"], [], framing)
         self.assertTrue(all(body["observed"] for body in framing["outlet"]["bodies"]))
         for simulation in simulations:
             self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
-        # Same trajectories cut at the old six-second duration: no numerical
-        # collision defect, but the slow bodies have not reached the outlet.
-        premature = renderer.inspect_simulation_framing([trace[:181] for trace in simulations], variant, 30)
+        # Reject a real cut one frame short of the unchanged observation gate.
+        last_entry = max(body["first_outlet_frame"] for body in framing["outlet"]["bodies"])
+        too_short = last_entry + math.ceil(.35 * 30) - 1
+        self.assertLess(too_short, end - start + 1)
+        premature = renderer.inspect_simulation_framing([trace[:too_short + 1] for trace in simulations], variant, 30)
         self.assertIn("unfinished-stair-descent", premature["issues"])
 
     def test_stair_85_outlet_contact_is_visible_long_enough_at_the_cut(self):
         variant = variant_for_seed(910103, "stair-cascade")
-        simulations = renderer.simulate_specimens(85, 195, 30, variant, 3)
+        start, end = renderer.stage_frame_spans(900, 5, "stair-cascade", variant.stages)[3]
+        frames = end - start + 1
+        simulations = renderer.simulate_specimens(85, frames, 30, variant, 3)
         framing = renderer.inspect_simulation_framing(simulations, variant, 30)
         self.assertEqual(framing["issues"], [], framing)
         for simulation in simulations:
@@ -462,9 +467,23 @@ class SurfaceContactTests(unittest.TestCase):
         # requiring a formerly unfinished absolute frame to remain a failure.
         last_entry = max(body["first_outlet_frame"] for body in framing["outlet"]["bodies"])
         too_short = last_entry + math.ceil(.35 * 30) - 1
-        self.assertLess(too_short, 195)
+        self.assertLess(too_short, frames)
         premature = renderer.inspect_simulation_framing([trace[:too_short + 1] for trace in simulations], variant, 30)
         self.assertIn("unfinished-stair-descent", premature["issues"])
+
+    def test_stair_compliant_and_middle_takes_finish_at_production_cuts(self):
+        # These exact takes failed the four-seed audit with the detached tubes.
+        # Check the real solver against the complete native edit, not a longer
+        # scout or a lowered observation threshold.
+        for seed, softness, stage in ((910105, 25, 1), (910103, 55, 2)):
+            with self.subTest(seed=seed, softness=softness):
+                variant = variant_for_seed(seed, "stair-cascade")
+                start, end = renderer.stage_frame_spans(900, 5, "stair-cascade", variant.stages)[stage]
+                simulations = renderer.simulate_specimens(softness, end - start + 1, 30, variant, stage)
+                framing = renderer.inspect_simulation_framing(simulations, variant, 30)
+                self.assertEqual(framing["issues"], [], framing)
+                for simulation in simulations:
+                    self.assertEqual(renderer.simulation_quality(simulation, variant)["issues"], [])
 
     def test_portrait_projection_matches_blender_for_every_camera(self):
         scene = bpy.context.scene
@@ -578,6 +597,25 @@ class SurfaceContactTests(unittest.TestCase):
         for first, second in zip(short, long):
             self.assertLess((first - second).length, 1e-6,
                             "a future edit must not change friction on static stairs")
+
+    def test_static_stair_friction_never_reads_a_future_release_deadline(self):
+        from unittest.mock import patch
+        # Regression: staircase 910103/55% changed by 0.38 world units when
+        # only the future cut changed. A static collider must use its contact
+        # friction, never the moving ramp's duration-dependent release hold.
+        with patch.object(renderer, "effective_ramp_exit_time", side_effect=AssertionError("future cut used")):
+            for key in ("stair-cascade", "v-stairs"):
+                variant = variant_for_seed(910103, key)
+                prefixes = []
+                for frames in (189, 270):
+                    ticks = renderer._chain_ticks(55, frames, 30, variant, 2,
+                                                  obstacle_specimen_offsets(key)[0], .045)
+                    for _ in range(120):
+                        state = next(ticks)
+                    prefixes.append([point.copy() for point in state["points"]])
+                    ticks.close()
+                for first, second in zip(*prefixes):
+                    self.assertLess((first - second).length, 1e-6)
 
     def test_downward_exit_is_not_confused_with_side_escape_or_teleport(self):
         class Trace(list):

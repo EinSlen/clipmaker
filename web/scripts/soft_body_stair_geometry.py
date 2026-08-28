@@ -9,7 +9,10 @@ import math
 from functools import lru_cache
 
 RECEIVER_X = 2.55
-RECEIVER_TOP = 1.55
+# Join the final marble landing (z=2.54), as in the staircase reference.
+# The old 0.99-unit air gap detached the pipes and delayed the visible entry.
+# A small positive clearance avoids overlapping the solid marble collider.
+RECEIVER_TOP = 2.50
 OUTER_RADIUS = .44
 INNER_RADIUS = .365
 VOLUME_CONTACT = "closed-stair-volume-v1"
@@ -35,11 +38,14 @@ def stair_outline():
 
 @lru_cache(maxsize=1)
 def pipe_path():
-    points = [(RECEIVER_X, RECEIVER_TOP), (RECEIVER_X, 1.0)]
+    bend_top = RECEIVER_TOP - .55
+    bend_radius = .55
+    points = [(RECEIVER_X, RECEIVER_TOP), (RECEIVER_X, bend_top)]
     for index in range(1, 17):
         angle = math.pi * .5 * index / 16
-        points.append((RECEIVER_X + .55 * (1 - math.cos(angle)), 1.0 - .55 * math.sin(angle)))
-    points.append((3.6, .45))
+        points.append((RECEIVER_X + bend_radius * (1 - math.cos(angle)),
+                       bend_top - bend_radius * math.sin(angle)))
+    points.append((RECEIVER_X + bend_radius + .50, bend_top - bend_radius))
     return tuple(points)
 
 

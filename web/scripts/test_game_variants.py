@@ -131,6 +131,26 @@ class SocialLayoutRegressionTests(unittest.TestCase):
 
 
 class SoftBodyVariantTests(unittest.TestCase):
+    def test_curved_stair_receivers_join_the_last_landing_without_intersection(self):
+        from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, pipe_path, stair_outline
+        outline = stair_outline()
+        last_edge = max(x for x, _ in outline)
+        last_top = max(z for x, z in outline if abs(x - last_edge) < 1e-8)
+        self.assertGreater(RECEIVER_X - OUTER_RADIUS - last_edge, 0)
+        self.assertLessEqual(RECEIVER_X - OUTER_RADIUS - last_edge, .05)
+        self.assertGreaterEqual(last_top - RECEIVER_TOP, 0)
+        self.assertLessEqual(last_top - RECEIVER_TOP, .05,
+                             "the tubes must meet the final landing, not float below it")
+        path = pipe_path()
+        self.assertEqual(path[0], (RECEIVER_X, RECEIVER_TOP))
+        self.assertAlmostEqual(RECEIVER_TOP - path[-1][1], 1.10)
+        self.assertTrue(all(second[1] <= first[1] for first, second in zip(path, path[1:])))
+        self.assertTrue(all(second[0] >= first[0] for first, second in zip(path, path[1:])))
+        for seed in (910103, 910104, 910105, 734193085):
+            variant = variant_for_seed(seed, "stair-cascade")
+            self.assertEqual(variant.receiver.top, path[0][1])
+            self.assertEqual(variant.receiver.x, path[0][0])
+
     def test_requested_preview_softness_is_exact_even_between_presets(self):
         variant = variant_for_seed(910105, "moving-slide")
         self.assertNotIn(55, variant.stages)
@@ -192,23 +212,22 @@ class SoftBodyVariantTests(unittest.TestCase):
         self.assertEqual(stage_release_delay(4, "peg-grid"), 0)
         self.assertEqual(stage_release_delay(7, "moving-slide"), 0)
 
-    def test_stair_edit_reuses_frozen_holds_for_the_final_descent(self):
+    def test_stair_edit_keeps_complete_takes_and_matching_labels(self):
         spans = stage_frame_spans(900, 5, "stair-cascade")
-        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 162, 189, 189, 240))
-        for (start, end), previous_active_seconds in zip(spans[:4], (4, 5.35, 6.35, 6.35)):
+        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 168, 189, 189, 234))
+        for start, end in spans:
             duration = (end - start + 1) / 30
             self.assertEqual(stage_release_delay(duration, "stair-cascade"), 0)
-            self.assertLessEqual(abs(duration - previous_active_seconds), 0.051)
         value = PREMIUM_RENDERER.build_video_filter(30.0, (0, 25, 55, 75, 100), "stair-cascade")
-        for time in ("4.000", "9.400", "15.700", "22.000"):
+        for time in ("4.000", "9.600", "15.900", "22.200"):
             self.assertIn(time, value)
         with tempfile.TemporaryDirectory() as directory:
             frames = Path(directory)
-            for boundary in (121, 283, 472, 661):
+            for boundary in (121, 289, 478, 667):
                 for index in (boundary, boundary + 1):
                     (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
             self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "stair-cascade"),
-                             (121, 283, 472, 661))
+                             (121, 289, 478, 667))
 
     def test_stair_outlet_beat_checks_all_bodies_and_only_rendered_frames(self):
         variant = variant_for_seed(734193085, "stair-cascade")
@@ -229,24 +248,24 @@ class SoftBodyVariantTests(unittest.TestCase):
             inspect_stair_outlet([*complete[:2], trace(35)[:-1]], variant, 30)
         self.assertIsNone(inspect_stair_outlet([], variant_for_seed(1, "peg-grid"), 30))
 
-    def test_stair_85_keeps_a_visible_outlet_beat_without_shortening_100(self):
+    def test_stair_85_does_not_steal_the_middle_levels_outlet_beat(self):
         stages = (0, 30, 55, 85, 100)
         spans = stage_frame_spans(900, 5, "stair-cascade", stages)
-        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 162, 183, 195, 240))
+        self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 168, 189, 189, 234))
         for fourth in (65, 75):
             unchanged = stage_frame_spans(900, 5, "stair-cascade", (0, 25, 55, fourth, 100))
-            self.assertEqual(tuple(end - start + 1 for start, end in unchanged), (120, 162, 189, 189, 240))
+            self.assertEqual(tuple(end - start + 1 for start, end in unchanged), (120, 168, 189, 189, 234))
         value = PREMIUM_RENDERER.build_video_filter(30.0, stages, "stair-cascade")
-        self.assertIn("15.500", value)
-        self.assertIn("22.000", value)
-        self.assertNotIn("15.700", value)
+        self.assertIn("15.900", value)
+        self.assertIn("22.200", value)
+        self.assertNotIn("15.500", value)
         with tempfile.TemporaryDirectory() as directory:
             frames = Path(directory)
-            for boundary in (121, 283, 466, 661):
+            for boundary in (121, 289, 478, 667):
                 for index in (boundary, boundary + 1):
                     (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
             self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(
-                frames, 900, 5, (), "stair-cascade", stages), (121, 283, 466, 661))
+                frames, 900, 5, (), "stair-cascade", stages), (121, 289, 478, 667))
 
     def test_imported_stair_outlet_proof_cannot_hide_an_unfinished_body(self):
         good = {"minimum_observation_seconds": 0.35, "issues": [], "bodies": [
