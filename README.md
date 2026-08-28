@@ -22,6 +22,7 @@ Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
 - rendu 3D matriciel à 00 h 07, génération 2D à 00 h 37 et publication Cloudflare dès 18 h 00, heure de Paris ;
 - planificateur Cloudflare toutes les cinq minutes : il déclenche la publication au créneau configuré et rattrape les générations absentes ou échouées sans doubler un run actif ou réussi ;
 - cron GitHub de 18 h 07 conservé comme second filet de sécurité ; l’état chiffré du publisher empêche un second envoi ;
+- rattrapage GitHub à la fin d'un rendu 3D tardif : uniquement les comptes déjà dus, les artefacts du jour et la branche de production ; jamais un aperçu de test ;
 - envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts avec OAuth/API ;
 - conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
 - notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
@@ -72,6 +73,11 @@ npm run dev
 L'orchestrateur intégré sépare le rendu de la publication, conserve un état atomique et évite les
 doublons après un redémarrage. Sa configuration d'exemple ne publie rien : le dry-run est activé et
 les deux plateformes sont désactivées.
+
+Si le rendu n'est pas prêt à l'heure prévue, la publication reste bloquée. Le workflow
+**Catch up a late daily 3D render** la relance après un rendu réussi le même jour, avec les mêmes
+contrôles et sans forcer les plateformes déjà publiées. Un horaire exact n'est donc pas garanti
+en cas de retard des runners ou du rendu.
 
 ```bash
 cp web/config/publisher.example.json web/config/publisher.json
