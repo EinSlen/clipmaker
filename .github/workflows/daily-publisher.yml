@@ -138,11 +138,10 @@ jobs:
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:publisher .
 
       - name: Start the private ClipMaker API
+        id: runtime
         run: |
-          publisher_dry_run=false
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
-            publisher_dry_run=true
-          fi
+          publisher_dry_run="$(node web/scripts/publisher-runner-mode.mjs web/config/publisher.json)"
+          echo "dry_run=$publisher_dry_run" >> "$GITHUB_OUTPUT"
           docker run --detach --rm --init --name clipmaker-daily --network host \
             --env REPO_ROOT=/repo \
             --env PYTHON_BIN=python3 \
@@ -200,7 +199,7 @@ jobs:
           PY
 
       - name: Import today's completed 3D renders
-        if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && steps.runtime.outputs.dry_run == 'false' }}
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PUBLISH_DATE: ${{ steps.scope.outputs.date }}
@@ -332,6 +331,7 @@ jobs:
           OPERATION: ${{ steps.operation.outputs.command }}
           RUN_STATUS: ${{ job.status }}
           MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+          EFFECTIVE_DRY_RUN: ${{ steps.runtime.outputs.dry_run }}
         run: |
           gh label create clipmaker-status --repo "$GITHUB_REPOSITORY" \
             --color 7c3aed --description "Notifications quotidiennes ClipMaker" --force
@@ -352,7 +352,7 @@ jobs:
             verdict="Échec"
           fi
           mode="réel"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; then
+          if [ "$EFFECTIVE_DRY_RUN" = "true" ] || { [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_DRY_RUN" = "true" ]; }; then
             mode="test sans rendu ni publication"
           fi
           operation="${OPERATION:-initialisation}"
