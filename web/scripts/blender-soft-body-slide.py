@@ -43,6 +43,8 @@ from soft_body_variants import (
 )
 from soft_body_framing import camera_location, inspect_simulation_framing
 from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
+from soft_body_volume_contact import point_inside_closed_surface
+from soft_body_stair_geometry import add_staircase, add_curved_receivers, collision_segments, project_inside_stair
 
 
 
@@ -322,11 +324,7 @@ def static_obstacle_segments(key):
         # catch. Bodies finish the squeeze, land and slide during the payoff.
         return [((-3.15, 1.80), (3.15, 1.18), 0.085)]
     if key == "stair-cascade":
-        return [
-            ((-2.35 + index * 0.62, 5.55 - index * 0.52),
-             (-1.83 + index * 0.62, 5.55 - index * 0.52), 0.110)
-            for index in range(7)
-        ]
+        return collision_segments()
     if key == "v-stairs":
         result = []
         for index in range(5):
@@ -396,12 +394,20 @@ def static_obstacle_circles(key: str):
         circles = []
         for row in range(5):
             z = 5.15 - row * 0.62
+            # A perfectly aligned lattice leaves uninterrupted vertical
+            # corridors at x=+/-0.64.  A sufficiently soft specimen could then
+            # miss all five rows without a single interaction.  Real peg-board
+            # challenges stagger successive rows: alternate a small quarter-gap
+            # offset so both reference lanes meet a peg from alternating sides.
+            # This creates repeated, unscripted compression contacts while
+            # preserving the same 0.44 opening and visible/collision geometry.
+            row_offset = 0.0 if row % 2 == 0 else (0.16 if row % 4 == 1 else -0.16)
             for column in range(6):
                 # A 0.44 opening accepts the flattened 15/25% presets while
                 # remaining narrower than the rigid 0.45-0.468 diameter.
                 # The old 0.41 throat trapped the 15% section between two
                 # incompatible circle projections, folding and ejecting it.
-                circles.append((Vector((-1.60 + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
+                circles.append((Vector((-1.60 + row_offset + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
         speed = math.tau / 3.40
@@ -547,6 +553,8 @@ def add_obstacle_geometry(
     key = variant.obstacle.key
     if key == "moving-slide":
         return
+    if key == "stair-cascade":
+        return add_staircase(add_mesh, marble, variant)
 
     def local_time(frame):
         start = next((span[1] for span in trial_spans if span[1] <= frame <= span[2]), 1)
@@ -860,6 +868,8 @@ def collide_point(
     ramp_intensity = 0.0
     receiver_intensity = 0.0
     ramp_contact = False
+    if variant.obstacle.key == "stair-cascade":
+        project_inside_stair(point, previous, radius, closest_segment_point)
     local_x = point.x - ramp_position(time, variant, trial_duration, ramp_phase_offset)
     if variant.obstacle.key == "moving-slide" and variant.ramp.minimum <= local_x <= variant.ramp.maximum:
         height = physics_ramp_height(local_x, variant)
@@ -947,7 +957,9 @@ def collide_point(
             ramp_intensity = max(ramp_intensity, intensity)
             ramp_contact = ramp_contact or contact
 
-    if variant.obstacle.key == "peg-grid":
+    if variant.obstacle.key in {"peg-grid", "stair-cascade"}:
+        # Stair elbows already belong to the shared physical segments; never
+        # add the old straight receiver's invisible walls on top of them.
         return point, previous, ramp_intensity, receiver_intensity, ramp_contact
 
     # Thin circular rim first. The opening remains real: misses continue below
@@ -1115,10 +1127,10 @@ def _chain_ticks(
         # empty portrait frame.
         "compression-ring": 0.14,
     }.get(variant.obstacle.key, 1.0)
-    # Static V-stairs already apply contact friction in collide_point. They
+    # Static stairs already apply contact friction in collide_point. They
     # must not inherit the moving ramp's extra hold until a duration-derived
     # release window: changing the edit used to change the preceding fall.
-    exit_time = 0.0 if variant.obstacle.key == "v-stairs" else effective_ramp_exit_time(
+    exit_time = 0.0 if variant.obstacle.key in {"v-stairs", "stair-cascade"} else effective_ramp_exit_time(
         variant,
         trial_duration,
         stage_motion.ramp_phase_offset,
@@ -2068,31 +2080,6 @@ def specimen_geometry_penetration(bodies):
     return maximum
 
 
-def point_inside_closed_surface(tree, point):
-    """Confirm volume membership independently of the nearest triangle normal.
-
-    A concave contact crease can put an exterior point behind its nearest
-    face. Three non-axis-aligned parity rays avoid treating that local normal
-    as proof of penetration. An unresolved ray fails conservatively.
-    """
-    inside_votes = 0
-    for direction in (Vector((1.0, 0.173, 0.317)),
-                      Vector((-0.31, 1.0, 0.127)),
-                      Vector((0.219, -0.341, 1.0))):
-        direction.normalize()
-        origin, crossings = point.copy(), 0
-        for _ in range(64):
-            hit, _normal, _face, _distance = tree.ray_cast(origin, direction)
-            if hit is None:
-                break
-            crossings += 1
-            origin = hit + direction * 0.00001
-        else:
-            return True
-        inside_votes += crossings % 2
-    return inside_votes >= 2
-
-
 def inspect_specimen_intersections(objects, start, end):
     """Reject visible interpenetration between independently released bodies.
 
@@ -2240,14 +2227,7 @@ def add_receiver(marble, gold, variant: SoftBodyVariant):
     if variant.obstacle.key == "peg-grid":
         return
     if variant.obstacle.key == "stair-cascade":
-        glass = material("Clear stair receiver glass", (0.70, 0.84, 0.94, 0.26), roughness=0.12, clearcoat=0.45)
-        glass.node_tree.nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.26
-        glass.blend_method = "BLEND"
-        glass.use_screen_refraction = True
-        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
-            for obj in add_receiver_tube(glass, gold, variant):
-                obj.location.y = depth
-        return
+        return add_curved_receivers(add_mesh, material, obstacle_specimen_depth_offsets("stair-cascade"))
     add_receiver_tube(marble, gold, variant)
 
 

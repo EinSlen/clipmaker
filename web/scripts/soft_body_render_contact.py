@@ -8,6 +8,7 @@ import bmesh
 import bpy
 import numpy as np
 from mathutils import Vector
+from soft_body_stair_geometry import VOLUME_CONTACT
 
 CONTACT_OFFSET = 0.003
 MAX_RENDER_PENETRATION = 0.003
@@ -21,6 +22,10 @@ def build_contact_targets(objects):
     targets rather than silently freezing their deformation in this snapshot.
     Weld the bevel caps before orienting normals, as in the contact query mesh.
     """
+    objects = tuple(obj for obj in objects if obj.type in {"MESH", "CURVE"})
+    volume_contact = bool(objects) and all(obj.get("contact_model") == VOLUME_CONTACT for obj in objects)
+    if any(obj.get("contact_model") == VOLUME_CONTACT for obj in objects) and not volume_contact:
+        raise ValueError("Closed-volume contact cannot mix validated stairs with unrelated solids")
     bpy.context.scene.frame_set(1)
     depsgraph = bpy.context.evaluated_depsgraph_get()
     targets = []
@@ -41,6 +46,9 @@ def build_contact_targets(objects):
             bm.from_mesh(mesh)
             bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
             bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+            if volume_contact and (not bm.faces or not all(edge.is_manifold and edge.is_contiguous for edge in bm.edges)
+                                   or bm.calc_volume(signed=True) <= 0):
+                raise ValueError(f"Closed-volume contact requires watertight outward geometry: {original.name}")
             bm.to_mesh(mesh)
         finally:
             bm.free()
@@ -62,6 +70,8 @@ def build_contact_targets(objects):
         bpy.context.collection.objects.link(proxy)
         proxy.hide_render = True
         proxy.display_type = "WIRE"
+        if volume_contact:
+            proxy["contact_model"] = VOLUME_CONTACT
         follow = proxy.constraints.new("COPY_TRANSFORMS")
         follow.target = original
         targets.append(proxy)
@@ -73,12 +83,19 @@ def build_contact_targets(objects):
         bpy.context.collection.objects.link(proxy)
         proxy.hide_render = True
         proxy.display_type = "WIRE"
+        if volume_contact:
+            proxy["contact_model"] = VOLUME_CONTACT
         targets.insert(0, proxy)
     return tuple(targets)
 
 
 def add_final_surface_contact(body, targets):
     """Correct only inside vertices, after all smoothing modifiers."""
+    targets = tuple(targets)
+    if targets and all(target.get("contact_model") == VOLUME_CONTACT for target in targets):
+        from soft_body_volume_contact import add_volume_contact
+        add_volume_contact(body, targets)
+        return
     for target in targets:
         contact = body.modifiers.new("Final skin contact", "SHRINKWRAP")
         contact.target = target
@@ -119,6 +136,9 @@ def inspect_rendered_surface(body, obstacle_surface, start, end):
     The signed nearest-face test is a conservative numerical contact check,
     not proof of visual quality, occlusion or all possible mesh self-contact.
     """
+    if any(modifier.type == "NODES" and modifier.name.startswith("Final skin contact") for modifier in body.modifiers):
+        from soft_body_volume_contact import inspect_volume_surface
+        return inspect_volume_surface(body, obstacle_surface, start, end)
     subdivisions = [(modifier, modifier.levels) for modifier in body.modifiers if modifier.type == "SUBSURF"]
     contacts = [(modifier, modifier.show_viewport) for modifier in body.modifiers
                 if modifier.type == "SHRINKWRAP" and modifier.name.startswith("Final skin contact")]

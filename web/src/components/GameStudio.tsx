@@ -134,7 +134,7 @@ const softBodyPaletteLabels: Record<string, string> = {
 const softBodyObstacles: { id: SoftBodyObstacle; label: string; description: string; image: string }[] = [
   { id: "auto", label: "Rotation automatique", description: "Alterner entre rampe, triple escalier, V et grille. Les trois scènes expérimentales restent manuelles.", image: "/game-previews/soft-body-slide.webp" },
   { id: "moving-slide", label: "Rampe mobile", description: "Glissades, relances et chute dans le tube.", image: "/game-previews/soft-body-obstacles/moving-slide.webp" },
-  { id: "stair-cascade", label: "Cascade de marches", description: "Rebonds successifs sur un escalier suspendu.", image: "/game-previews/soft-body-obstacles/stair-cascade.webp" },
+  { id: "stair-cascade", label: "Cascade de marches", description: "Trois corps, sept marches pleines et trois tubes courbés.", image: "/game-previews/soft-body-obstacles/stair-cascade.webp" },
   { id: "v-stairs", label: "Double escalier en V", description: "Deux descentes convergent vers le réceptacle.", image: "/game-previews/soft-body-obstacles/v-stairs.webp" },
   { id: "pipe-bend", label: "Coude de tuyau · bêta", description: "Test manuel : la forme boule de la référence reste à reconstruire.", image: "/game-previews/soft-body-obstacles/pipe-bend.webp" },
   { id: "peg-grid", label: "Grille de plots", description: "Compression et déviation entre plusieurs plots.", image: "/game-previews/soft-body-obstacles/peg-grid.webp" },

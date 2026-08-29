@@ -20,6 +20,7 @@ from soft_body_variants import (
     stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary,
 )
 from soft_body_framing import validate_stair_outlet_evidence
+from soft_body_stair_geometry import VOLUME_CONTACT
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -74,6 +75,11 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
                    for key, limit in (("maximum_empty_seconds", 1.0), ("maximum_side_exit_seconds", 0.5)))):
             raise ValueError("Native 3D camera framing was not validated")
         if variant.obstacle.key == "stair-cascade":
+            if (rendered_surface.get("contact_model") != VOLUME_CONTACT
+                or rendered_surface.get("classification") != "independent-three-ray-parity"
+                or type(rendered_surface.get("outside_vertices_moved")) is not int
+                or rendered_surface["outside_vertices_moved"] != 0):
+                raise ValueError("Native stair closed-volume contact was not validated")
             validate_stair_outlet_evidence(framing.get("outlet"), framing["frames_checked"], fps)
         if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
             between = item.get("inter_body_contact")

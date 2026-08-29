@@ -173,7 +173,10 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.render_enabled == 'true' }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    # Native closed-volume checks inspect every subdivided vertex of all three
+    # bodies. The 90-minute budget expired during the final 100% comparison;
+    # keep every check and allow the complete five-stage preparation to finish.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.channels) }}
