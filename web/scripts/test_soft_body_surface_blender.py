@@ -377,6 +377,41 @@ class SurfaceContactTests(unittest.TestCase):
                 self.assertEqual(contacts["frames_checked"], frames)
                 self.assertEqual(contacts["issues"], [], contacts)
 
+    def test_grid_production_seed_staggers_both_lanes_into_repeated_contacts(self):
+        variant = variant_for_seed(2093973352, "peg-grid")
+        for softness, frames, stage, minimum_episodes in ((30, 180, 1, 3), (55, 210, 2, 5)):
+            with self.subTest(softness=softness):
+                simulations = renderer.simulate_specimens(softness, frames, 30, variant, stage)
+                for body, simulation in enumerate(simulations, start=1):
+                    quality = renderer.simulation_quality(simulation, variant)
+                    self.assertEqual(quality["issues"], [], (softness, body, quality))
+                    hit_indices = [
+                        index
+                        for index, sample in enumerate(simulation.physics_samples)
+                        if sample[1] >= 0.20
+                    ]
+                    contact_episodes = []
+                    for index in hit_indices:
+                        if not contact_episodes or index - contact_episodes[-1][-1] > 12:
+                            contact_episodes.append([index])
+                        else:
+                            contact_episodes[-1].append(index)
+                    self.assertGreaterEqual(
+                        len(contact_episodes), minimum_episodes,
+                        (softness, body, contact_episodes, quality),
+                    )
+                framing = renderer.inspect_simulation_framing(simulations, variant, 30)
+                self.assertEqual(framing["issues"], [], (softness, framing))
+
+    def test_grid_rows_are_staggered_without_changing_the_throat_width(self):
+        circles = renderer.static_obstacle_circles("peg-grid")
+        rows = [circles[index * 6:(index + 1) * 6] for index in range(5)]
+        self.assertEqual([round(row[0][0].x, 2) for row in rows], [-1.60, -1.44, -1.60, -1.76, -1.60])
+        for row in rows:
+            openings = [right[0].x - left[0].x - left[1] - right[1] for left, right in zip(row, row[1:])]
+            # mathutils.Vector stores single-precision coordinates in Blender.
+            self.assertTrue(all(abs(opening - 0.44) < 1e-6 for opening in openings), openings)
+
     def test_grid_throat_is_solvable_for_every_partly_soft_shape(self):
         left, right = renderer.static_obstacle_circles("peg-grid")[:2]
         opening = right[0].x - left[0].x - left[1] - right[1]

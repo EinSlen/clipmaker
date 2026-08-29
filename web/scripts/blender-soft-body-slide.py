@@ -394,12 +394,20 @@ def static_obstacle_circles(key: str):
         circles = []
         for row in range(5):
             z = 5.15 - row * 0.62
+            # A perfectly aligned lattice leaves uninterrupted vertical
+            # corridors at x=+/-0.64.  A sufficiently soft specimen could then
+            # miss all five rows without a single interaction.  Real peg-board
+            # challenges stagger successive rows: alternate a small quarter-gap
+            # offset so both reference lanes meet a peg from alternating sides.
+            # This creates repeated, unscripted compression contacts while
+            # preserving the same 0.44 opening and visible/collision geometry.
+            row_offset = 0.0 if row % 2 == 0 else (0.16 if row % 4 == 1 else -0.16)
             for column in range(6):
                 # A 0.44 opening accepts the flattened 15/25% presets while
                 # remaining narrower than the rigid 0.45-0.468 diameter.
                 # The old 0.41 throat trapped the 15% section between two
                 # incompatible circle projections, folding and ejecting it.
-                circles.append((Vector((-1.60 + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
+                circles.append((Vector((-1.60 + row_offset + column * 0.64, z)), 0.10, Vector((0.0, 0.0)), 0.0))
         return tuple(circles)
     if key == "twin-gears":
         speed = math.tau / 3.40
