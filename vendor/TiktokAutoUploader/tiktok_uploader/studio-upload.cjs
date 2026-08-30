@@ -161,14 +161,41 @@ async function waitForUploadPage(page) {
   throw new Error('TikTok Studio upload form did not load.');
 }
 
+async function dismissUploadOverlays(page) {
+  for (const label of [/^Decline optional cookies$/i, /^Got it$/i, /^Cancel$/i]) {
+    const buttons = page.getByRole('button', { name: label, exact: true });
+    for (let index = (await buttons.count()) - 1; index >= 0; index -= 1) {
+      const button = buttons.nth(index);
+      if (await visible(button)) {
+        await button.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(250);
+      }
+    }
+  }
+  // TikTok's first-use tour and cookie web component can remain mounted after
+  // their own dismissal button disappears. They have no upload state, but do
+  // intercept every pointer event in a headless browser.
+  await page.locator('tiktok-cookie-banner, #react-joyride-portal')
+    .evaluateAll((nodes) => nodes.forEach((node) => node.remove()))
+    .catch(() => {});
+}
+
 async function setCaption(page, caption) {
-  const editor = await firstVisible(page, [
-    '[data-e2e="caption-editor"] [contenteditable="true"]',
-    'div.public-DraftEditor-content[contenteditable="true"]',
-    'div[contenteditable="true"][role="textbox"]',
-    'div[contenteditable="true"]',
-  ]);
+  const deadline = Date.now() + 90_000;
+  let editor = null;
+  while (!editor && Date.now() < deadline) {
+    editor = await firstVisible(page, [
+      '[data-e2e="caption-editor"] [contenteditable="true"]',
+      'div.public-DraftEditor-content[contenteditable="true"]',
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"][role="combobox"]',
+      'textarea[placeholder*="caption" i]',
+      'div[contenteditable="true"]',
+    ]);
+    if (!editor) await page.waitForTimeout(1000);
+  }
   if (!editor) throw new Error('TikTok caption editor not found.');
+  await dismissUploadOverlays(page);
   await editor.click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.keyboard.insertText(caption.slice(0, 2000));
@@ -183,17 +210,27 @@ async function setVisibility(page, privacy) {
   const opener = await firstVisible(page, [
     '[data-e2e="permission-container"]',
     '[class*="PermissionSetting"]',
-    'div[role="combobox"]',
+    'button[role="combobox"]:has-text("Everyone")',
+    'button[role="combobox"]:has-text("Public")',
+    'button[role="combobox"]:has-text("Friends")',
+    'button[role="combobox"]:has-text("Only you")',
+    'button[role="combobox"]:has-text("Only me")',
+    'button[role="combobox"]:has-text("Private")',
   ]) || await firstVisible(page, [
     'text=/^(Everyone|Public|Friends|Only you|Only me|Private)$/i',
   ]);
   if (!opener) throw new Error('TikTok visibility control not found.');
+  await dismissUploadOverlays(page);
   await opener.click();
-  const option = page.getByText(target, { exact: true }).last();
+  const roleOptions = page.getByRole('option', { name: target, exact: true });
+  const option = await roleOptions.count()
+    ? roleOptions.last()
+    : page.getByText(target, { exact: true }).last();
   await option.waitFor({ state: 'visible', timeout: 10_000 });
   await option.click();
   await page.waitForTimeout(500);
-  if (!await visible(page.getByText(target, { exact: true }).last())) {
+  const selected = page.locator('button[role="combobox"]').filter({ hasText: target }).last();
+  if (!await visible(selected)) {
     throw new Error(`TikTok did not confirm ${privacy} visibility.`);
   }
 }
@@ -209,6 +246,7 @@ async function postButton(page) {
 async function waitUntilReady(page) {
   const deadline = Date.now() + 240_000;
   while (Date.now() < deadline) {
+    await dismissUploadOverlays(page);
     const button = await postButton(page);
     if (button && await button.isEnabled().catch(() => false)) return button;
     const body = await page.locator('body').innerText().catch(() => '');
@@ -287,6 +325,18 @@ async function run() {
     await setCaption(page, title);
     await setVisibility(page, privacy);
     const button = await waitUntilReady(page);
+    if (args.dryRun === true) {
+      process.stdout.write(`${DOCTOR_PREFIX}${JSON.stringify({
+        ok: true,
+        username,
+        provider: 'tiktok-studio-browser',
+        readyForLiveUpload: true,
+        uploadFormReady: true,
+        privacy,
+        visiblePostCount: baseline.size,
+      })}\n`);
+      return;
+    }
     await button.click();
     const postNow = page.getByRole('button', { name: /^(Post now|Publish now)$/i }).last();
     if (await postNow.isVisible({ timeout: 5000 }).catch(() => false)) await postNow.click();
