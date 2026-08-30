@@ -212,7 +212,8 @@ jobs:
     continue-on-error: true
     strategy:
       fail-fast: false
-      max-parallel: 20
+      # Leave two repository runner slots available for the publisher and CI.
+      max-parallel: 18
       matrix: ${{ fromJSON(needs.plan.outputs.frames) }}
     steps:
       - uses: actions/checkout@v6
@@ -300,7 +301,8 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 20
+      # Retries must not block the time-sensitive publication workflow either.
+      max-parallel: 18
       matrix: ${{ fromJSON(needs.retry_plan.outputs.frames) }}
     steps:
       - uses: actions/checkout@v6
