@@ -52,6 +52,14 @@ test('winter time, malformed slots and expired dates cannot publish tomorrow by 
   assert.throws(() => scopePublication(raw, {
     scheduled: true, expectedDate: '2026-08-28', now: new Date('2026-08-28T22:00:00Z'),
   }), /expired/u);
+  const manualCatchup = scopePublication(raw, {
+    scheduled: false, expectedDate: '2026-08-27', now: new Date('2026-08-28T22:00:00Z'),
+  });
+  assert.equal(manualCatchup.date, '2026-08-27');
+  assert.deepEqual(manualCatchup.channels, ['early', 'late']);
+  assert.throws(() => scopePublication(raw, {
+    scheduled: false, expectedDate: '2026-08-20', now: new Date('2026-08-28T22:00:00Z'),
+  }), /within the last/u);
 });
 
 test('cleanup selects only fully published, unshared, safe video names', () => {
