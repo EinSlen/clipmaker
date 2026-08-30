@@ -339,6 +339,8 @@ test('scheduled 3D renders use short reliable chunks without exceeding GitHub ma
   assert.match(workflow, /"samples": 64, "chunk_size": 15/u);
   assert.match(workflow, /if len\(channels\) > 4:[\s\S]*channel\["chunk_size"\] = 30/u);
   assert.match(workflow, /if len\(channels\) > 8:/u);
+  assert.equal((workflow.match(/max-parallel: 18/gu) || []).length, 2);
+  assert.doesNotMatch(workflow, /max-parallel: 20/u);
   const prepare = workflow.slice(workflow.indexOf('\n  prepare:'), workflow.indexOf('\n  render:'));
   assert.match(prepare, /timeout-minutes: 180/u);
   assert.match(prepare, /--width "\$RENDER_WIDTH" --height "\$RENDER_HEIGHT"/u);
