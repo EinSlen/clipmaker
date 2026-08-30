@@ -378,6 +378,7 @@ test('TikTok upload uses the verified Studio browser contract and an admin token
   assert.match(uploader, /verifiedInStudio: true/u);
   assert.match(uploader, /confirmPost\(page, baseline, responseIds\)/u);
   assert.match(agent, /studio-upload\.cjs/u);
+  assert.match(agent, /process\.env\.REPO_ROOT/u);
   assert.doesNotMatch(source, /'--user', username/);
 });
 
