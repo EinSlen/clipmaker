@@ -95,12 +95,15 @@ export function uploadTiktok(config, payload, token) {
 export async function doctorEndpoints(config, channel) {
   const results = {};
   try {
-    const accounts = await request(config.baseUrl, '/api/tiktok/accounts', {}, 30_000);
+    const verify = encodeURIComponent(channel.tiktok.username);
+    const accounts = await request(config.baseUrl, `/api/tiktok/accounts?verify=${verify}`, {}, 120_000);
     results.app = { ok: true };
     const tiktokConfigured = !channel.tiktok.enabled
       || (Array.isArray(accounts.accounts)
         && accounts.accounts.some((account) => (
-          account.username === channel.tiktok.username && account.ready === true
+          account.username === channel.tiktok.username
+          && account.ready === true
+          && account.studioReady === true
         )));
     results.tiktok = {
       ok: config.dryRun || tiktokConfigured,

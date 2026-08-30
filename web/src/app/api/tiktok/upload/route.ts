@@ -24,15 +24,17 @@ type UploadReceipt = {
   releaseUrl: string;
   raw: {
     privacy: 'private' | 'public';
-    creationId: string;
     statusCode: number;
-    uploadVideoId: string;
+    evidence: 'post-response' | 'studio-content';
+    verifiedInStudio: true;
+    account: string;
   };
 };
 
 const RECEIPT_PREFIX = 'CLIPMAKER_RECEIPT:';
+const STUDIO_AGENT_PATH = path.join(process.cwd(), 'scripts', 'tiktok-studio-agent.cjs');
 
-function parseUploaderReceipt(stdout: string): UploadReceipt | null {
+function parseUploaderReceipt(stdout: string, expectedUsername: string): UploadReceipt | null {
   const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith(RECEIPT_PREFIX));
   if (!line) return null;
   try {
@@ -40,16 +42,26 @@ function parseUploaderReceipt(stdout: string): UploadReceipt | null {
     const raw = source.raw && typeof source.raw === 'object' ? source.raw as Record<string, unknown> : {};
     const platformPostId = String(source.platformPostId || '').trim();
     const privacy = raw.privacy === 'public' ? 'public' : 'private';
-    if (!platformPostId) return null;
+    const provider = String(source.provider || '').trim();
+    const releaseUrl = String(source.releaseUrl || '').trim();
+    const evidence = raw.evidence === 'post-response' ? 'post-response' : raw.evidence === 'studio-content' ? 'studio-content' : null;
+    const expectedUrl = `https://www.tiktok.com/@${expectedUsername}/video/${platformPostId}`;
+    if (!/^\d{12,25}$/.test(platformPostId)
+      || provider !== 'tiktok-studio-browser'
+      || raw.verifiedInStudio !== true
+      || String(raw.account || '') !== expectedUsername
+      || releaseUrl !== expectedUrl
+      || !evidence) return null;
     return {
-      provider: String(source.provider || 'tiktok-web-upload').trim() || 'tiktok-web-upload',
+      provider,
       platformPostId,
-      releaseUrl: String(source.releaseUrl || '').trim(),
+      releaseUrl,
       raw: {
         privacy,
-        creationId: String(raw.creationId || '').trim(),
         statusCode: Number(raw.statusCode || 0),
-        uploadVideoId: String(raw.uploadVideoId || platformPostId).trim(),
+        evidence,
+        verifiedInStudio: true,
+        account: expectedUsername,
       },
     };
   } catch {
@@ -104,25 +116,27 @@ export async function POST(req: Request) {
   if (body.musicId && !musicId) {
     return NextResponse.json({ ok: false, error: 'music ID/URL invalide' }, { status: 400 });
   }
-  const py = process.env.PYTHON_BIN || 'python';
-
+  if (musicId) {
+    return NextResponse.json({ ok: false, error: 'Les sons officiels TikTok ne sont pas encore compatibles avec l’envoi Studio vérifié.' }, { status: 400 });
+  }
   const args = [
-    'cli.py', 'upload', '--users', username, '-v', videoAbs, '-t', caption,
+    STUDIO_AGENT_PATH, 'upload', '--users', username, '--video', videoAbs, '--title', caption,
     '--visibility', visibility === 'public' ? '0' : '1',
   ];
-  if (musicId) args.push('--music-id', musicId);
 
   return new Promise<Response>((resolve) => {
-    const proc = spawn(py, args, {
+    const proc = spawn(process.execPath, args, {
       cwd: TIKTOK_UPLOADER_DIR,
       windowsHide: true
     });
+    const timeout = setTimeout(() => proc.kill(), 9 * 60_000);
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d) => (stdout += d.toString()));
     proc.stderr.on('data', (d) => (stderr += d.toString()));
     proc.on('close', (code) => {
-      const upload = code === 0 ? parseUploaderReceipt(stdout) : null;
+      clearTimeout(timeout);
+      const upload = code === 0 ? parseUploaderReceipt(stdout, username) : null;
       const ok = code === 0 && Boolean(upload);
       resolve(
         NextResponse.json({
@@ -136,6 +150,7 @@ export async function POST(req: Request) {
       );
     });
     proc.on('error', (e) => {
+      clearTimeout(timeout);
       resolve(NextResponse.json({ ok: false, error: String(e) }, { status: 500 }));
     });
   });
