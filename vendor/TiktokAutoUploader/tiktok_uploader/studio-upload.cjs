@@ -90,6 +90,23 @@ function numericPostId(value) {
   return /^\d{12,25}$/.test(candidate) ? candidate : null;
 }
 
+function postTimestampMs(postId) {
+  try {
+    return Number(BigInt(postId) >> 32n) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+function newestRecentPost(ids, since) {
+  const lowerBound = since - 60_000;
+  const upperBound = Date.now() + 60_000;
+  return [...ids]
+    .map((id) => ({ id, timestamp: postTimestampMs(id) }))
+    .filter((entry) => entry.timestamp >= lowerBound && entry.timestamp <= upperBound)
+    .sort((left, right) => right.timestamp - left.timestamp)[0]?.id || null;
+}
+
 function responsePostIds(value, found = new Set()) {
   if (!value || typeof value !== 'object') return found;
   for (const [key, entry] of Object.entries(value)) {
@@ -304,6 +321,32 @@ async function run() {
   try {
     await goto(page, STUDIO_CONTENT_URL);
     const baseline = await collectPostIds(page);
+    if (args.command === 'verify-recent') {
+      const since = Number(args.since || 0);
+      if (!Number.isFinite(since) || since <= 0) throw new Error('A valid raw upload start time is required.');
+      const deadline = Date.now() + 150_000;
+      let postId = newestRecentPost(baseline, since);
+      while (!postId && Date.now() < deadline) {
+        await page.waitForTimeout(7000);
+        postId = newestRecentPost(await collectPostIds(page, 2), since);
+      }
+      if (!postId) throw new Error('No recent TikTok post appeared after the ambiguous API upload.');
+      const privacy = String(args.visibility) === '0' ? 'public' : 'private';
+      process.stdout.write(`${RECEIPT_PREFIX}${JSON.stringify({
+        provider: 'tiktok-web-upload',
+        platformPostId: postId,
+        releaseUrl: `https://www.tiktok.com/@${username}/video/${postId}`,
+        raw: {
+          privacy,
+          statusCode: 0,
+          evidence: 'studio-content',
+          verifiedInStudio: true,
+          account: username,
+          recoveredAfterAmbiguousResponse: true,
+        },
+      })}\n`);
+      return;
+    }
     await goto(page, STUDIO_UPLOAD_URL);
     const fileInput = await waitForUploadPage(page);
     if (args.command === 'doctor') {

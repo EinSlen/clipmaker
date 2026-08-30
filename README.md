@@ -23,7 +23,7 @@ Ce dépôt regroupe tout le produit, de la simulation jusqu'à la publication :
 - planificateur Cloudflare toutes les cinq minutes : il déclenche la publication au créneau configuré et rattrape les générations absentes ou échouées sans doubler un run actif ou réussi ;
 - cron GitHub de 18 h 07 conservé comme second filet de sécurité ; l’état chiffré du publisher empêche un second envoi ;
 - rattrapage GitHub à la fin d'un rendu 3D tardif : uniquement les comptes déjà dus, les artefacts du jour et la branche de production ; jamais un aperçu de test ;
-- envoi vers TikTok au moyen d'une session de navigateur et vers YouTube Shorts avec OAuth/API ;
+- envoi TikTok autonome par l'API web historique du fork, avec vérification et repli TikTok Studio sans doublon ; envoi YouTube Shorts avec OAuth/API ;
 - conservation chiffrée des sessions, de l'état et de la vidéo en attente dans GitHub Actions ;
 - notification du résultat de chaque opération dans le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36).
 
