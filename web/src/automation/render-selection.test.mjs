@@ -153,6 +153,38 @@ test('a forced catch-up can restore a validated video without changing a publish
   assert.equal(await fs.readFile(path.join(directory, 'publisher-state.json'), 'utf8'), before);
 });
 
+test('a forced catch-up restores a validated video for a partial job without changing receipts', async t => {
+  const { config, channel, date, directory } = await fixture(t);
+  channel.game = { game: 'soft-body-slide', duration: 30, obstacle: 'auto' };
+  const incoming = manifest(config, channel, date);
+  await importRenderedJob(config, incoming);
+  const state = await loadState(directory);
+  state.jobs[0].status = 'partial';
+  state.jobs[0].platforms.youtube = {
+    ...state.jobs[0].platforms.youtube,
+    status: 'published',
+    attempts: 1,
+    receipt: { id: 'keep-youtube' },
+  };
+  state.jobs[0].platforms.tiktok = {
+    ...state.jobs[0].platforms.tiktok,
+    status: 'failed',
+    attempts: 1,
+    error: 'previous upload failed',
+  };
+  await saveState(directory, state);
+  const before = await fs.readFile(path.join(directory, 'publisher-state.json'), 'utf8');
+  let copies = 0;
+  const result = await importRenderedJob(config, incoming, {
+    restorePublishedVideo: true,
+    copyVideo: async () => { copies += 1; },
+  });
+  assert.equal(result.reason, 'publication-started');
+  assert.equal(result.restoredVideo, true);
+  assert.equal(copies, 1);
+  assert.equal(await fs.readFile(path.join(directory, 'publisher-state.json'), 'utf8'), before);
+});
+
 test('failed import copy preserves the previous plan and state', async t => {
   const { config, channel, date, directory } = await fixture(t);
   const before = await fs.readFile(path.join(directory, 'publisher-state.json'), 'utf8');
