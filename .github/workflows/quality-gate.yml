@@ -95,7 +95,10 @@ jobs:
   soft-body-surface:
     name: Blender surface contacts and repeat timing
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    # A successful full surface pass normally takes about 24 minutes on a
+    # hosted runner. Keep enough variance for a slower runner instead of
+    # cancelling a healthy simulation at the old 25-minute boundary.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - name: Build the production Blender environment

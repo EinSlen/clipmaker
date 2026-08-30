@@ -338,6 +338,15 @@ test('cloud YouTube uploads use the OAuth Data API without a persistent browser'
   assert.doesNotMatch(ciStage, /xvfb/u);
 });
 
+test('the required Blender surface gate has enough hosted-runner time to finish', async () => {
+  const workflowPath = await repositoryFile('.github/workflows/quality-gate.yml');
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(
+    workflow,
+    /soft-body-surface:[\s\S]*?name: Blender surface contacts and repeat timing[\s\S]*?timeout-minutes: 40/u,
+  );
+});
+
 test('every scheduled 3D render reports success or failure with a direct run link', async () => {
   const workflowPath = await repositoryFile('.github/workflows/soft-body-artifact.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
