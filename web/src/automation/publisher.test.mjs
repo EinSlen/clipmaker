@@ -378,6 +378,11 @@ test('TikTok upload uses the verified Studio browser contract and an admin token
   assert.match(uploader, /tiktok-studio-browser/u);
   assert.match(uploader, /verifiedInStudio: true/u);
   assert.match(uploader, /confirmPost\(page, baseline, responseIds\)/u);
+  assert.match(uploader, /Date\.now\(\) \+ 90_000/u);
+  assert.match(uploader, /tiktok-cookie-banner, #react-joyride-portal/u);
+  assert.match(uploader, /button\[role="combobox"\]:has-text\("Everyone"\)/u);
+  assert.match(uploader, /getByRole\('option'/u);
+  assert.match(uploader, /uploadFormReady: true/u);
   assert.match(agent, /studio-upload\.cjs/u);
   assert.match(agent, /process\.env\.REPO_ROOT/u);
   assert.doesNotMatch(source, /'--user', username/);
