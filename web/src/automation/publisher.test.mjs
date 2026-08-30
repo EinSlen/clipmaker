@@ -290,6 +290,8 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /extra\+=\(--dry-run\)/u);
   assert.match(workflow, /force_youtube:/u);
   assert.match(workflow, /extra\+=\(--force-platform youtube\)/u);
+  assert.match(workflow, /force_tiktok:/u);
+  assert.match(workflow, /extra\+=\(--force-platform tiktok\)/u);
   assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
   assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);
@@ -353,21 +355,45 @@ test('production 3D assembly rejects a video without the generated audio mix', a
   assert.match(workflow, /metadata\.get\("sound_pack"\) != "premium-foley"/u);
 });
 
-test('TikTok upload uses the pinned fork CLI contract and an admin token', async () => {
+test('TikTok upload uses the verified Studio browser contract and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
-  const cliPath = await repositoryFile('vendor/TiktokAutoUploader/cli.py');
-  const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/tiktok.py');
-  const source = await fs.readFile(routePath, 'utf8');
-  const [cli, uploader] = await Promise.all([fs.readFile(cliPath, 'utf8'), fs.readFile(uploaderPath, 'utf8')]);
+  const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/studio-upload.cjs');
+  const agentPath = new URL('../../scripts/tiktok-studio-agent.cjs', import.meta.url);
+  const [source, uploader, agent] = await Promise.all([
+    fs.readFile(routePath, 'utf8'),
+    fs.readFile(uploaderPath, 'utf8'),
+    fs.readFile(agentPath, 'utf8'),
+  ]);
   assert.match(source, /'--users', username/);
   assert.match(source, /'--visibility'/);
   assert.match(source, /x-clipmaker-upload-token/);
-  assert.match(source, /parseUploaderReceipt\(stdout\)/u);
+  assert.match(source, /parseUploaderReceipt\(stdout, username\)/u);
+  assert.match(source, /\^\\d\{12,25\}\$/u);
+  assert.match(source, /raw\.verifiedInStudio !== true/u);
   assert.match(source, /platformPostId/u);
-  assert.match(cli, /CLIPMAKER_RECEIPT:/u);
-  assert.match(uploader, /"visibility_type": visibility_type/u);
-  assert.match(uploader, /"provider": "tiktok-web-upload"/u);
+  assert.match(uploader, /CLIPMAKER_RECEIPT:/u);
+  assert.match(uploader, /tiktok-studio-browser/u);
+  assert.match(uploader, /verifiedInStudio: true/u);
+  assert.match(uploader, /confirmPost\(page, baseline, responseIds\)/u);
+  assert.match(agent, /studio-upload\.cjs/u);
   assert.doesNotMatch(source, /'--user', username/);
+});
+
+test('publisher doctor proves that TikTok Studio can load before publishing', async () => {
+  const routePath = new URL('../app/api/tiktok/accounts/route.ts', import.meta.url);
+  const clientPath = new URL('./api-client.mjs', import.meta.url);
+  const agentPath = new URL('../../scripts/tiktok-studio-agent.cjs', import.meta.url);
+  const [route, client, agent] = await Promise.all([
+    fs.readFile(routePath, 'utf8'),
+    fs.readFile(clientPath, 'utf8'),
+    fs.readFile(agentPath, 'utf8'),
+  ]);
+  assert.match(route, /tiktok-studio-agent\.cjs/u);
+  assert.match(agent, /studio-upload\.cjs/u);
+  assert.match(route, /CLIPMAKER_TIKTOK_DOCTOR:/u);
+  assert.match(route, /readyForLiveUpload !== true/u);
+  assert.match(client, /\/api\/tiktok\/accounts\?verify=/u);
+  assert.match(client, /account\.studioReady === true/u);
 });
 
 test('state writes atomically and rejects a concurrent publisher', async (t) => {

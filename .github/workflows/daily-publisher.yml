@@ -30,6 +30,11 @@ on:
         required: true
         default: false
         type: boolean
+      force_tiktok:
+        description: Retry TikTok after a verified empty Studio project
+        required: true
+        default: false
+        type: boolean
       scheduled_publish:
         description: Respect the saved account publication times (cloud scheduler)
         required: false
@@ -70,6 +75,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       MANUAL_DRY_RUN: ${{ inputs.dry_run }}
       MANUAL_FORCE_YOUTUBE: ${{ inputs.force_youtube }}
+      MANUAL_FORCE_TIKTOK: ${{ inputs.force_tiktok }}
     steps:
       - uses: actions/checkout@v6
 
@@ -301,6 +307,9 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_FORCE_YOUTUBE" = "true" ]; then
             extra+=(--force-platform youtube)
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_FORCE_TIKTOK" = "true" ]; then
+            extra+=(--force-platform tiktok)
           fi
           if [ "$COMMAND" = "generate" ] || [ "$COMMAND" = "run" ]; then
             extra+=(--skip-game soft-body-slide)

@@ -93,7 +93,13 @@ test('two real local publisher cycles preserve the later video and do not upload
   const accountChecks = [];
   const server = http.createServer(async (request, response) => {
     response.setHeader('content-type', 'application/json');
-    if (request.url === '/api/tiktok/accounts') return response.end(JSON.stringify({ ok: true, accounts: [] }));
+    if (request.url.startsWith('/api/tiktok/accounts')) {
+      const username = new URL(request.url, 'http://localhost').searchParams.get('verify');
+      return response.end(JSON.stringify({
+        ok: true,
+        accounts: username ? [{ username, ready: true, studioReady: true }] : [],
+      }));
+    }
     if (request.url.startsWith('/api/youtube/status')) {
       accountChecks.push(new URL(request.url, 'http://localhost').searchParams.get('account'));
       return response.end(JSON.stringify({ ok: true, dryRun: false, readyForLiveUpload: true }));
