@@ -144,6 +144,21 @@ test('daily 3D import prefers the latest default-branch render and accepts the c
   assert.ok(step.indexOf('imported_channels[$channel_id]=1') < step.indexOf('if [ "$imported" -eq "$expected" ]'));
 });
 
+test('automatic publishing defers a missing 3D render without reporting a false CI failure', async () => {
+  const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
+  const source = await fs.readFile(workflow, 'utf8');
+  const imports = source.split("- name: Import today's completed 3D renders")[1]
+    .split('- name: Check connected accounts')[0];
+  assert.match(imports, /id: imports/u);
+  assert.match(imports, /ALLOW_DEFERRED_3D:.*github\.event_name == 'schedule'.*inputs\.scheduled_publish/u);
+  assert.match(imports, /echo "ready=false" >> "\$GITHUB_OUTPUT"/u);
+  assert.match(imports, /if \[ "\$ALLOW_DEFERRED_3D" = "true" \][\s\S]*exit 0[\s\S]*exit 1/u);
+  assert.match(source, /Check connected accounts[\s\S]*if:.*steps\.imports\.outputs\.ready != 'false'/u);
+  assert.match(source, /Execute the publisher operation[\s\S]*if:.*steps\.imports\.outputs\.ready != 'false'/u);
+  assert.match(source, /verdict="En attente du rendu 3D"/u);
+  assert.match(source, /Remove videos that were fully published[\s\S]*steps\.imports\.outputs\.ready != 'false'/u);
+});
+
 test('date helpers are deterministic across month boundaries', () => {
   assert.equal(addDays('2026-08-31', 1), '2026-09-01');
   assert.equal(dateInTimeZone(new Date('2026-08-14T23:30:00Z'), 'Europe/Paris'), '2026-08-15');
