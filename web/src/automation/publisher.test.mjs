@@ -292,6 +292,7 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /extra\+=\(--force-platform youtube\)/u);
   assert.match(workflow, /force_tiktok:/u);
   assert.match(workflow, /extra\+=\(--force-platform tiktok\)/u);
+  assert.match(workflow, /restore\+=\(--restore-published-video\)/u);
   assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
   assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);

@@ -339,12 +339,18 @@ export function validateRenderedManifest(config, manifest) {
   return { plan, channel, date, filename, render };
 }
 
-export async function importRenderedJob(config, manifest, { copyVideo } = {}) {
+export async function importRenderedJob(config, manifest, { copyVideo, restorePublishedVideo = false } = {}) {
   const { plan, channel, date, filename, render } = validateRenderedManifest(config, manifest);
   return withStateLock(config.stateDir, async () => {
     const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
     const job = ensureJob(state, plan, channel);
-    if (job.status === 'published') return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+    if (job.status === 'published') {
+      if (restorePublishedVideo && copyVideo) {
+        await copyVideo();
+        return { ok: true, skipped: true, reason: 'already-published', restoredVideo: true, jobId: job.id };
+      }
+      return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
+    }
     if (publicationStarted(job)) {
       if (!matchesRenderPlan(job, plan)) throw selectionChangedError(job);
       return { ok: true, skipped: true, reason: 'publication-started', jobId: job.id };
