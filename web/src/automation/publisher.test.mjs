@@ -317,6 +317,10 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
   assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);
+  assert.match(
+    workflow,
+    /name: Notify the owner through GitHub[\s\S]*?if: \$\{\{ always\(\) && !cancelled\(\) \}\}/u,
+  );
 });
 
 test('cloud YouTube uploads use the OAuth Data API without a persistent browser', async () => {

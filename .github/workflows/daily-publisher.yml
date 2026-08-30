@@ -359,7 +359,9 @@ jobs:
           cat artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify the owner through GitHub
-        if: always()
+        # A deliberately cancelled stale catch-up must not create a false red
+        # notification after a newer run has taken over the publication.
+        if: ${{ always() && !cancelled() }}
         env:
           OPERATION: ${{ steps.operation.outputs.command }}
           RUN_STATUS: ${{ job.status }}
