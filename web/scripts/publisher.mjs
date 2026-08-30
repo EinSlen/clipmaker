@@ -75,7 +75,9 @@ async function main() {
     validateRenderedManifest(config, { ...manifest, filename });
     const renderDirectory = path.resolve(path.dirname(config.configPath), '../renders');
     const destination = path.join(renderDirectory, filename);
-    return output(await importRenderedJob(config, { ...manifest, filename }, { copyVideo: async () => {
+    return output(await importRenderedJob(config, { ...manifest, filename }, {
+      restorePublishedVideo: args.includes('--restore-published-video'),
+      copyVideo: async () => {
       if (!(await fs.stat(source)).isFile()) throw new Error('Imported video must be a file.');
       if (source === destination) return;
       await fs.mkdir(renderDirectory, { recursive: true });
@@ -86,7 +88,8 @@ async function main() {
       } finally {
         await fs.rm(temporary, { force: true });
       }
-    } }));
+      },
+    }));
   }
   if (command === 'run') {
     const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] });
