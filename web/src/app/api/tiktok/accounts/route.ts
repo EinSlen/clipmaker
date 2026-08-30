@@ -28,7 +28,9 @@ type TikTokAccountStatus = {
   datacenterPresent: boolean;
   expiresAt: number | null;
   error?: string;
+  rawReady?: boolean;
   studioReady?: boolean;
+  fallbackReady?: boolean;
   provider?: string;
   visiblePostCount?: number;
 };
@@ -118,17 +120,22 @@ export async function GET(req: Request) {
         const studio = await inspectStudio(verify);
         accounts = accounts.map((account) => account.username === verify ? {
           ...account,
-          ready: studio.readyForLiveUpload,
+          ready: account.ready,
+          rawReady: account.ready,
           studioReady: studio.readyForLiveUpload,
-          provider: studio.provider,
+          fallbackReady: studio.readyForLiveUpload,
+          provider: 'tiktok-api-with-studio-fallback',
           visiblePostCount: studio.visiblePostCount,
         } : account);
       } catch (error) {
         accounts = accounts.map((account) => account.username === verify ? {
           ...account,
-          ready: false,
+          ready: account.ready,
+          rawReady: account.ready,
           studioReady: false,
-          error: error instanceof Error ? error.message : 'TikTok Studio indisponible.',
+          fallbackReady: false,
+          provider: 'tiktok-web-upload',
+          error: `Repli Studio indisponible : ${error instanceof Error ? error.message : 'TikTok Studio indisponible.'}`,
         } : account);
       }
     }

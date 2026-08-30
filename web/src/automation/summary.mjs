@@ -26,10 +26,13 @@ function channelTargets(channel, doctorChannel) {
 function platformPublication(platform, target) {
   if (!target || target.enabled === false) return null;
   const receipt = target.receipt;
+  const releaseUrl = /^https:\/\/[a-z0-9.-]+(?:\/[^\s)]*)?$/iu.test(receipt?.releaseUrl || '')
+    ? receipt.releaseUrl
+    : null;
   const proof = receipt?.id
     ? `reçu ${receipt.provider || platform}${receipt.privacy ? `, ${receipt.privacy}` : ''}`
     : 'aucun reçu enregistré';
-  return `  - ${platform}: \`${target.status || 'unknown'}\` · ${proof}`;
+  return `  - ${platform}: \`${target.status || 'unknown'}\` · ${proof}${releaseUrl ? ` · [ouvrir la vidéo](${releaseUrl})` : ''}`;
 }
 
 export function buildPublisherSummary({ operation, config, doctor = null, status = null, configurationError = null }) {

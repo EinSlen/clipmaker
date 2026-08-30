@@ -279,7 +279,12 @@ test('workflow summary reports the requested operation and active configuration,
         youtube: {
           enabled: true,
           status: 'published',
-          receipt: { id: 'youtube-one', provider: 'youtube-data-api', privacy: 'private' },
+          receipt: {
+            id: 'youtube-one',
+            provider: 'youtube-data-api',
+            privacy: 'private',
+            releaseUrl: 'https://studio.youtube.com/video/youtube-one/edit',
+          },
         },
         tiktok: { enabled: true, status: 'published', receipt: null },
       },
@@ -292,6 +297,7 @@ test('workflow summary reports the requested operation and active configuration,
   assert.match(summary, /TikTok @dvlad \(private, prêt\)/u);
   assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old` · `ball-escape`/u);
   assert.match(summary, /youtube: `published` · reçu youtube-data-api, private/u);
+  assert.match(summary, /\[ouvrir la vidéo\]\(https:\/\/studio\.youtube\.com\/video\/youtube-one\/edit\)/u);
   assert.match(summary, /tiktok: `published` · aucun reçu enregistré/u);
 });
 
@@ -311,6 +317,10 @@ test('a manual dry-run can validate publication without requiring the nightly 3D
   assert.match(workflow, /GITHUB_EVENT_NAME.*workflow_dispatch.*MANUAL_DRY_RUN.*true/u);
   assert.match(workflow, /--env YOUTUBE_API_DRY_RUN="\$publisher_dry_run"/u);
   assert.match(workflow, /--env PUBLISHER_DRY_RUN="\$publisher_dry_run"/u);
+  assert.match(
+    workflow,
+    /name: Notify the owner through GitHub[\s\S]*?if: \$\{\{ always\(\) && !cancelled\(\) \}\}/u,
+  );
 });
 
 test('cloud YouTube uploads use the OAuth Data API without a persistent browser', async () => {
@@ -326,6 +336,15 @@ test('cloud YouTube uploads use the OAuth Data API without a persistent browser'
   assert.doesNotMatch(workflow, /Xvfb :99/u);
   const ciStage = dockerfile.split('FROM runtime-base AS ci')[1].split('\nFROM ')[0];
   assert.doesNotMatch(ciStage, /xvfb/u);
+});
+
+test('the required Blender surface gate has enough hosted-runner time to finish', async () => {
+  const workflowPath = await repositoryFile('.github/workflows/quality-gate.yml');
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  assert.match(
+    workflow,
+    /soft-body-surface:[\s\S]*?name: Blender surface contacts and repeat timing[\s\S]*?timeout-minutes: 40/u,
+  );
 });
 
 test('every scheduled 3D render reports success or failure with a direct run link', async () => {
@@ -373,21 +392,23 @@ test('production 3D assembly rejects a video without the generated audio mix', a
   assert.match(workflow, /metadata\.get\("sound_pack"\) != "premium-foley"/u);
 });
 
-test('TikTok upload uses the verified Studio browser contract and an admin token', async () => {
+test('TikTok upload restores the API provider with a verified Studio fallback and an admin token', async () => {
   const routePath = new URL('../app/api/tiktok/upload/route.ts', import.meta.url);
   const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/studio-upload.cjs');
-  const agentPath = new URL('../../scripts/tiktok-studio-agent.cjs', import.meta.url);
+  const agentPath = new URL('../../scripts/tiktok-upload-agent.cjs', import.meta.url);
   const [source, uploader, agent] = await Promise.all([
     fs.readFile(routePath, 'utf8'),
     fs.readFile(uploaderPath, 'utf8'),
     fs.readFile(agentPath, 'utf8'),
   ]);
-  assert.match(source, /'--users', username/);
+  assert.match(source, /'--users', username/u);
   assert.match(source, /'--visibility'/);
   assert.match(source, /x-clipmaker-upload-token/);
   assert.match(source, /parseUploaderReceipt\(stdout, username\)/u);
   assert.match(source, /\^\\d\{12,25\}\$/u);
-  assert.match(source, /raw\.verifiedInStudio !== true/u);
+  assert.match(source, /tiktok-web-upload/u);
+  assert.match(source, /tiktok-studio-browser/u);
+  assert.match(source, /directApiProof/u);
   assert.match(source, /platformPostId/u);
   assert.match(uploader, /CLIPMAKER_RECEIPT:/u);
   assert.match(uploader, /tiktok-studio-browser/u);
@@ -398,12 +419,18 @@ test('TikTok upload uses the verified Studio browser contract and an admin token
   assert.match(uploader, /button\[role="combobox"\]:has-text\("Everyone"\)/u);
   assert.match(uploader, /getByRole\('option'/u);
   assert.match(uploader, /uploadFormReady: true/u);
+  assert.match(uploader, /verify-recent/u);
+  assert.match(uploader, /recoveredAfterAmbiguousResponse: true/u);
   assert.match(agent, /studio-upload\.cjs/u);
   assert.match(agent, /process\.env\.REPO_ROOT/u);
+  assert.match(agent, /'cli\.py', 'upload'/u);
+  assert.match(agent, /failure\?\.safeToFallback/u);
+  assert.match(agent, /using verified Studio fallback/u);
+  assert.match(agent, /ambiguous; Studio fallback was blocked to prevent a duplicate post/u);
   assert.doesNotMatch(source, /'--user', username/);
 });
 
-test('publisher doctor proves that TikTok Studio can load before publishing', async () => {
+test('publisher doctor requires the historical API session and reports Studio fallback health separately', async () => {
   const routePath = new URL('../app/api/tiktok/accounts/route.ts', import.meta.url);
   const clientPath = new URL('./api-client.mjs', import.meta.url);
   const agentPath = new URL('../../scripts/tiktok-studio-agent.cjs', import.meta.url);
@@ -416,8 +443,11 @@ test('publisher doctor proves that TikTok Studio can load before publishing', as
   assert.match(agent, /studio-upload\.cjs/u);
   assert.match(route, /CLIPMAKER_TIKTOK_DOCTOR:/u);
   assert.match(route, /readyForLiveUpload !== true/u);
+  assert.match(route, /rawReady: account\.ready/u);
+  assert.match(route, /fallbackReady/u);
   assert.match(client, /\/api\/tiktok\/accounts\?verify=/u);
-  assert.match(client, /account\.studioReady === true/u);
+  assert.match(client, /tiktokAccount\?\.rawReady === true/u);
+  assert.match(client, /studioFallbackReady/u);
 });
 
 test('state writes atomically and rejects a concurrent publisher', async (t) => {

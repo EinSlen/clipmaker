@@ -25,14 +25,16 @@ type UploadReceipt = {
   raw: {
     privacy: 'private' | 'public';
     statusCode: number;
-    evidence: 'post-response' | 'studio-content';
-    verifiedInStudio: true;
-    account: string;
+    evidence?: 'post-response' | 'studio-content';
+    verifiedInStudio?: true;
+    account?: string;
+    creationId?: string;
+    uploadVideoId?: string;
   };
 };
 
 const RECEIPT_PREFIX = 'CLIPMAKER_RECEIPT:';
-const STUDIO_AGENT_PATH = path.join(process.cwd(), 'scripts', 'tiktok-studio-agent.cjs');
+const UPLOAD_AGENT_PATH = path.join(process.cwd(), 'scripts', 'tiktok-upload-agent.cjs');
 
 function parseUploaderReceipt(stdout: string, expectedUsername: string): UploadReceipt | null {
   const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith(RECEIPT_PREFIX));
@@ -44,14 +46,19 @@ function parseUploaderReceipt(stdout: string, expectedUsername: string): UploadR
     const privacy = raw.privacy === 'public' ? 'public' : 'private';
     const provider = String(source.provider || '').trim();
     const releaseUrl = String(source.releaseUrl || '').trim();
-    const evidence = raw.evidence === 'post-response' ? 'post-response' : raw.evidence === 'studio-content' ? 'studio-content' : null;
+    const evidence = raw.evidence === 'post-response' ? 'post-response' : raw.evidence === 'studio-content' ? 'studio-content' : undefined;
     const expectedUrl = `https://www.tiktok.com/@${expectedUsername}/video/${platformPostId}`;
     if (!/^\d{12,25}$/.test(platformPostId)
-      || provider !== 'tiktok-studio-browser'
-      || raw.verifiedInStudio !== true
-      || String(raw.account || '') !== expectedUsername
+      || !['tiktok-web-upload', 'tiktok-studio-browser'].includes(provider)
       || releaseUrl !== expectedUrl
-      || !evidence) return null;
+      || Number(raw.statusCode) !== 0) return null;
+    const studioProof = raw.verifiedInStudio === true
+      && String(raw.account || '') === expectedUsername
+      && Boolean(evidence);
+    const directApiProof = Boolean(String(raw.creationId || '').trim())
+      && /^\d{12,25}$/.test(String(raw.uploadVideoId || '').trim());
+    if (provider === 'tiktok-studio-browser' && !studioProof) return null;
+    if (provider === 'tiktok-web-upload' && !studioProof && !directApiProof) return null;
     return {
       provider,
       platformPostId,
@@ -59,9 +66,11 @@ function parseUploaderReceipt(stdout: string, expectedUsername: string): UploadR
       raw: {
         privacy,
         statusCode: Number(raw.statusCode || 0),
-        evidence,
-        verifiedInStudio: true,
-        account: expectedUsername,
+        ...(evidence ? { evidence } : {}),
+        ...(raw.verifiedInStudio === true ? { verifiedInStudio: true as const } : {}),
+        ...(raw.account ? { account: String(raw.account) } : {}),
+        ...(raw.creationId ? { creationId: String(raw.creationId) } : {}),
+        ...(raw.uploadVideoId ? { uploadVideoId: String(raw.uploadVideoId) } : {}),
       },
     };
   } catch {
@@ -116,20 +125,18 @@ export async function POST(req: Request) {
   if (body.musicId && !musicId) {
     return NextResponse.json({ ok: false, error: 'music ID/URL invalide' }, { status: 400 });
   }
-  if (musicId) {
-    return NextResponse.json({ ok: false, error: 'Les sons officiels TikTok ne sont pas encore compatibles avec l’envoi Studio vérifié.' }, { status: 400 });
-  }
   const args = [
-    STUDIO_AGENT_PATH, 'upload', '--users', username, '--video', videoAbs, '--title', caption,
+    UPLOAD_AGENT_PATH, '--users', username, '--video', videoAbs, '--title', caption,
     '--visibility', visibility === 'public' ? '0' : '1',
   ];
+  if (musicId) args.push('--music-id', musicId);
 
   return new Promise<Response>((resolve) => {
     const proc = spawn(process.execPath, args, {
       cwd: TIKTOK_UPLOADER_DIR,
       windowsHide: true
     });
-    const timeout = setTimeout(() => proc.kill(), 9 * 60_000);
+    const timeout = setTimeout(() => proc.kill(), 12 * 60_000);
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d) => (stdout += d.toString()));

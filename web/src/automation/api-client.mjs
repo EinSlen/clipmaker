@@ -98,18 +98,18 @@ export async function doctorEndpoints(config, channel) {
     const verify = encodeURIComponent(channel.tiktok.username);
     const accounts = await request(config.baseUrl, `/api/tiktok/accounts?verify=${verify}`, {}, 120_000);
     results.app = { ok: true };
+    const tiktokAccount = Array.isArray(accounts.accounts)
+      ? accounts.accounts.find((account) => account.username === channel.tiktok.username)
+      : null;
     const tiktokConfigured = !channel.tiktok.enabled
-      || (Array.isArray(accounts.accounts)
-        && accounts.accounts.some((account) => (
-          account.username === channel.tiktok.username
-          && account.ready === true
-          && account.studioReady === true
-        )));
+      || (tiktokAccount?.ready === true && tiktokAccount?.rawReady === true);
     results.tiktok = {
       ok: config.dryRun || tiktokConfigured,
       enabled: channel.tiktok.enabled,
       configured: tiktokConfigured,
       username: channel.tiktok.username,
+      provider: tiktokAccount?.provider || null,
+      studioFallbackReady: tiktokAccount?.fallbackReady === true,
     };
   } catch (error) {
     results.app = { ok: false, error: error.message };

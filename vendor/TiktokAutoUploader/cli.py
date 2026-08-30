@@ -96,6 +96,7 @@ if __name__ == "__main__":
             sys.exit(1)
         uploaded = tiktok.upload_video(args.users, args.video, args.title, args.schedule, args.comment, args.duet, args.stitch, args.visibility, args.brandorganic, args.brandcontent, args.ailabel, args.proxy, music_id=music_id)
         if not uploaded:
+            print("CLIPMAKER_FAILURE:" + json.dumps(tiktok.upload_failure(), separators=(",", ":"), ensure_ascii=True))
             sys.exit(1)
         if isinstance(uploaded, dict):
             print("CLIPMAKER_RECEIPT:" + json.dumps(uploaded, separators=(",", ":"), ensure_ascii=True))
