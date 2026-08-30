@@ -344,15 +344,22 @@ export async function importRenderedJob(config, manifest, { copyVideo, restorePu
   return withStateLock(config.stateDir, async () => {
     const state = pruneState(await loadState(config.stateDir), oldestRetainedDate(config, date));
     const job = ensureJob(state, plan, channel);
-    if (job.status === 'published') {
-      if (restorePublishedVideo && copyVideo) {
-        await copyVideo();
-        return { ok: true, skipped: true, reason: 'already-published', restoredVideo: true, jobId: job.id };
-      }
+    if (job.status === 'published' && !restorePublishedVideo) {
       return { ok: true, skipped: true, reason: 'already-published', jobId: job.id };
     }
     if (publicationStarted(job)) {
       if (!matchesRenderPlan(job, plan)) throw selectionChangedError(job);
+      if (restorePublishedVideo && copyVideo) {
+        if (job.render?.filename && job.render.filename !== filename) throw selectionChangedError(job);
+        await copyVideo();
+        return {
+          ok: true,
+          skipped: true,
+          reason: job.status === 'published' ? 'already-published' : 'publication-started',
+          restoredVideo: true,
+          jobId: job.id,
+        };
+      }
       return { ok: true, skipped: true, reason: 'publication-started', jobId: job.id };
     }
     // Copy under the same lock as the state check. A re-import may never
