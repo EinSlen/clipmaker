@@ -205,11 +205,14 @@ jobs:
           PY
 
       - name: Import today's completed 3D renders
+        id: imports
         if: ${{ (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') && steps.runtime.outputs.dry_run == 'false' }}
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PUBLISH_DATE: ${{ steps.scope.outputs.date }}
+          ALLOW_DEFERRED_3D: ${{ github.event_name == 'schedule' || inputs.scheduled_publish }}
         run: |
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           expected="$(python3 - <<'PY'
           import json
           from pathlib import Path
@@ -273,12 +276,20 @@ jobs:
               --jq ".artifacts[] | select(.expired == false) | select(.name | startswith(\"soft-body-daily-${today}-\")) | [.id,.name] | @tsv")
             if [ "$imported" -eq "$expected" ]; then break; fi
           done
-          test "$imported" -eq "$expected" || {
-            echo "Rendus 3D prêts : $imported/$expected. La publication est arrêtée pour ne pas envoyer une mauvaise vidéo." >&2
+          if [ "$imported" -ne "$expected" ]; then
+            message="Rendus 3D prêts : $imported/$expected. Aucune ancienne vidéo ne sera publiée."
+            echo "$message" >&2
+            if [ "$ALLOW_DEFERRED_3D" = "true" ]; then
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              echo "reason=$message" >> "$GITHUB_OUTPUT"
+              echo "::notice title=Publication différée::$message Le workflow de rattrapage reprendra automatiquement."
+              exit 0
+            fi
             exit 1
-          }
+          fi
 
       - name: Check connected accounts
+        if: ${{ steps.imports.outputs.ready != 'false' }}
         run: |
           docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs doctor \
             --config /repo/web/config/publisher.json > artifacts/doctor.json
@@ -301,6 +312,7 @@ jobs:
           PY
 
       - name: Execute the publisher operation
+        if: ${{ steps.imports.outputs.ready != 'false' }}
         env:
           COMMAND: ${{ steps.operation.outputs.command }}
           MANUAL_DRY_RUN: ${{ inputs.dry_run }}
@@ -327,6 +339,8 @@ jobs:
         if: always()
         env:
           COMMAND: ${{ steps.operation.outputs.command }}
+          IMPORT_READY: ${{ steps.imports.outputs.ready }}
+          IMPORT_REASON: ${{ steps.imports.outputs.reason }}
         run: |
           if docker ps --format '{{.Names}}' | grep -qx clipmaker-daily; then
             docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs status \
@@ -338,6 +352,10 @@ jobs:
             --status artifacts/status.json \
             --operation "${COMMAND:-unknown}" \
             --output artifacts/summary.md
+          if [ "$IMPORT_READY" = "false" ]; then
+            printf '\n## Publication différée\n\n- %s\n- Le rattrapage démarrera automatiquement dès que le rendu 3D quotidien sera disponible.\n' \
+              "$IMPORT_REASON" >> artifacts/summary.md
+          fi
           cat artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify the owner through GitHub
@@ -347,6 +365,7 @@ jobs:
           RUN_STATUS: ${{ job.status }}
           MANUAL_DRY_RUN: ${{ inputs.dry_run }}
           EFFECTIVE_DRY_RUN: ${{ steps.runtime.outputs.dry_run }}
+          IMPORT_READY: ${{ steps.imports.outputs.ready }}
         run: |
           gh label create clipmaker-status --repo "$GITHUB_REPOSITORY" \
             --color 7c3aed --description "Notifications quotidiennes ClipMaker" --force
@@ -359,7 +378,10 @@ jobs:
               --body "Ce ticket reçoit les comptes rendus automatiques du cron ClipMaker. Garde-le ouvert et abonné.")"
             issue="${issue_url##*/}"
           fi
-          if [ "$RUN_STATUS" = "success" ]; then
+          if [ "$IMPORT_READY" = "false" ]; then
+            icon="⏳"
+            verdict="En attente du rendu 3D"
+          elif [ "$RUN_STATUS" = "success" ]; then
             icon="✅"
             verdict="Terminé"
           else
@@ -388,7 +410,7 @@ jobs:
             --body-file artifacts/notification.md
 
       - name: Remove videos that were fully published
-        if: ${{ success() && (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') }}
+        if: ${{ success() && steps.imports.outputs.ready != 'false' && (steps.operation.outputs.command == 'publish' || steps.operation.outputs.command == 'run') }}
         run: |
           docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs cleanup \
             --config /repo/web/config/publisher.json > artifacts/cleanup.json
