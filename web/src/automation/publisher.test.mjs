@@ -279,7 +279,12 @@ test('workflow summary reports the requested operation and active configuration,
         youtube: {
           enabled: true,
           status: 'published',
-          receipt: { id: 'youtube-one', provider: 'youtube-data-api', privacy: 'private' },
+          receipt: {
+            id: 'youtube-one',
+            provider: 'youtube-data-api',
+            privacy: 'private',
+            releaseUrl: 'https://studio.youtube.com/video/youtube-one/edit',
+          },
         },
         tiktok: { enabled: true, status: 'published', receipt: null },
       },
@@ -292,6 +297,7 @@ test('workflow summary reports the requested operation and active configuration,
   assert.match(summary, /TikTok @dvlad \(private, prêt\)/u);
   assert.match(summary, /Latest stored job: `published` · `2026-08-22` · `ball-old` · `ball-escape`/u);
   assert.match(summary, /youtube: `published` · reçu youtube-data-api, private/u);
+  assert.match(summary, /\[ouvrir la vidéo\]\(https:\/\/studio\.youtube\.com\/video\/youtube-one\/edit\)/u);
   assert.match(summary, /tiktok: `published` · aucun reçu enregistré/u);
 });
 
