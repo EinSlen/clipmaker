@@ -162,8 +162,10 @@
           <div><p class="eyebrow">VOIX D’EDITS · EN ANGLAIS</p><h3>Des voix parlées, pas des chansons</h3></div>
           <span id="edit-audio-state" class="secure-badge">Connexion requise</span>
         </div>
-        <p class="panel-intro">Monologues tristes ou revenge : voix au premier plan, émotions et pauses conservées. Les extraits tournent par compte, sans répétition avant la fin d’un cycle si la bibliothèque reste inchangée. Le choix du jour reste fixé pour les relances.</p>
+        <p class="panel-intro">Monologues tristes ou revenge : voix au premier plan, émotions et pauses conservées. Chaque soir, ClipMaker cherche de nouveaux enregistrements CC0/CC BY sur Freesound via Openverse, vérifie automatiquement la source, la licence, l’anglais et les répétitions, puis garde uniquement les candidats conformes. « Contrôle automatique » ne signifie pas écoute humaine. Le choix du jour reste fixé pour les relances.</p>
         <button id="reload-edit-audio" class="button button-secondary requires-token" type="button">Actualiser la bibliothèque</button>
+        <button id="run-edit-audio-collection" class="button button-secondary requires-token" type="button">Chercher de nouvelles voix</button>
+        <button id="toggle-edit-audio-collection" class="button button-secondary requires-token" type="button">Activer / mettre en pause</button>
         <div id="edit-audio-list" class="edit-audio-list" aria-live="polite">Connecte-toi pour gérer les voix privées.</div>
         <audio id="edit-audio-player" controls hidden preload="none"></audio>
         <details class="edit-audio-import"><summary>+ Importer un extrait d’edit</summary>

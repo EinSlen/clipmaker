@@ -1,6 +1,7 @@
 import { normalizePublisherConfig, publicPublisherConfig } from './publisher-config.js';
 import { runScheduler } from './scheduler.js';
 import { AudioError, EDIT_PROFILES, CLIP_PREFIX, boundedBytes, chooseClip, listClips, putClip, readClip } from './edit-audio.js';
+import { AUDIT_PREFIX, collectionState, importDiscoveredClip, saveCollection } from './audio-discovery.js';
 
 const API_VERSION = '2026-03-10';
 const APP_CONFIG_KEY = 'github-app-config';
@@ -264,6 +265,8 @@ export function validateDispatch(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new HttpError(400, 'Commande invalide.');
   const workflow = String(payload.workflow || '');
   const supplied = payload.inputs && typeof payload.inputs === 'object' && !Array.isArray(payload.inputs) ? payload.inputs : {};
+
+  if (workflow === 'edit-audio-discovery.yml') return { workflow, inputs: {} };
 
   if (workflow === 'daily-publisher.yml') {
     const action = String(supplied.action || '');
@@ -532,6 +535,18 @@ async function apiEditAudio(request, env, runner = false) {
   const reply = (payload, status) => json({ ...payload, ...(renewed ? { session: renewed } : {}) }, status, request, env);
   const path = new URL(request.url).pathname;
   const base = runner ? '/api/workflow/edit-audio' : '/api/edit-audio';
+  if (path === `${base}/collection`) {
+    if (request.method === 'GET') return reply(await collectionState(env.CONFIG), 200);
+    if (request.method === (runner ? 'POST' : 'PUT')) return reply(await saveCollection(request, env.CONFIG, runner), 200);
+    throw new HttpError(405, 'Méthode de collecte non autorisée.');
+  }
+  if (runner && path === `${base}/import` && request.method === 'POST') return reply({ clip: await importDiscoveredClip(request, env.CONFIG) }, 201);
+  const auditMatch = path.slice(base.length).match(/^\/([a-f0-9]{64})\/audit$/u);
+  if (auditMatch && request.method === 'GET') {
+    const audit = await env.CONFIG.get(AUDIT_PREFIX + auditMatch[1], 'json');
+    if (!audit) throw new HttpError(404, 'Audit absent.');
+    return reply({ audit }, 200);
+  }
   if (path === base && request.method === 'GET') return reply({ clips: await listClips(env.CONFIG) }, 200);
   if (!runner && path === base && request.method === 'POST') return reply({ clip: await putClip(request, env.CONFIG) }, 201);
   if (runner && path === `${base}/select` && request.method === 'POST') {

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import worker, { sealSession } from '../src/index.js';
 import { CLIP_PREFIX, boundedBytes, chooseClip, clipMetadata, inspectWav, listClips, putClip } from '../src/edit-audio.js';
+import { AUDIT_PREFIX, DISCOVERY_VERSION, collectionState, importDiscoveredClip } from '../src/audio-discovery.js';
 
 function wav(seconds = 12, signal = 1000) {
   const bytes = Buffer.alloc(44 + seconds * 192000);
@@ -29,6 +31,31 @@ function memoryKv() {
 function upload(audio = wav(), metadata = info, headers = {}) {
   const body = new FormData(); body.append('audio', new Blob([audio]), 'clip.wav'); body.append('metadata', JSON.stringify(metadata));
   return new Request('https://worker.test/api/edit-audio', { method: 'POST', body, headers });
+}
+function discoveredUpload(audio = wav()) {
+  const transcript = 'I miss you so much, and my broken heart remembers our lost love forever.';
+  const normalized = transcript.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/gu).join(' ');
+  const body = new FormData();
+  const metadata = { title: 'I miss you', mood: 'sad', mix: 'voice-only', rights: 'licensed',
+    source: 'https://freesound.org/people/voice_actor/sounds/123456/', sourceId: '123456',
+    credit: 'I miss you — voice_actor (CC BY 4.0); normalized + background added.',
+    rightsEvidence: 'https://creativecommons.org/licenses/by/4.0/', speechReviewed: false,
+    rightsConfirmed: false, reviewMode: DISCOVERY_VERSION };
+  const id = createHash('sha256').update(audio).digest('hex');
+  const audit = { version: DISCOVERY_VERSION, sourceId: '123456', source: metadata.source,
+    media: 'https://cdn.freesound.org/previews/123/123456_1-hq.mp3',
+    openverseId: '59299898-6d14-49dd-82bd-7a6380c39668', indexSha256: 'a'.repeat(64),
+    sourceSha256: 'b'.repeat(64), audioSha256: id,
+    licenseEvidence: { license: metadata.rightsEvidence, originalClaim: true,
+      pageSha256: 'c'.repeat(64), description: 'Me saying an original sad sentence.' },
+    speech: { transcript, transcriptSha256: createHash('sha256').update(normalized).digest('hex'),
+      language: 'en', languageProbability: .98, wordConfidence: .96, wordCount: normalized.split(' ').length,
+      start: .2, end: 11.2, mood: 'sad', wholeRecording: true, repeatedTakes: false,
+      model: 'faster-whisper-small' },
+    levels: { duration: 12, rms: .1, clippedFraction: 0 }, checkedAt: '2026-08-31T12:00:00Z' };
+  body.append('audio', new Blob([audio]), 'clip.wav'); body.append('metadata', JSON.stringify(metadata)); body.append('audit', JSON.stringify(audit));
+  return new Request('https://worker.test/api/workflow/edit-audio/import', { method: 'POST', body,
+    headers: { Authorization: 'Bearer runner-test-only' } });
 }
 async function setup() {
   const CONFIG = memoryKv();
@@ -117,4 +144,32 @@ test('audio endpoints reject public access, wrong origins and runner writes', as
   assert.equal((await worker.fetch(new Request('https://worker.test/api/workflow/edit-audio'), env)).status, 401);
   assert.notEqual((await worker.fetch(new Request('https://worker.test/api/workflow/edit-audio', { method: 'POST', headers: { Authorization: 'Bearer runner-test-only' }, body: '{}' }), env)).status, 201);
   assert.equal((await listClips(env.CONFIG)).length, 0);
+});
+test('automatic collection stores licensed speech with an immutable private audit and idempotent source indexes', async () => {
+  const { env } = await setup();
+  assert.equal((await collectionState(env.CONFIG)).status, 'not-run');
+  const first = await worker.fetch(discoveredUpload(), env);
+  const firstPayload = await first.json();
+  assert.equal(first.status, 201, JSON.stringify(firstPayload));
+  const clip = firstPayload.clip;
+  assert.equal(clip.speechReviewed, false); assert.equal(clip.reviewMode, DISCOVERY_VERSION);
+  assert.ok(await env.CONFIG.get(AUDIT_PREFIX + clip.id));
+  const retry = await worker.fetch(discoveredUpload(), env);
+  assert.equal(retry.status, 201); assert.equal((await retry.json()).clip.duplicate, true);
+  const list = await listClips(env.CONFIG);
+  assert.equal(list.length, 1);
+  const publicAttempt = await worker.fetch(new Request('https://worker.test/api/workflow/edit-audio/import', { method: 'POST', body: 'x' }), env);
+  assert.equal(publicAttempt.status, 401);
+});
+test('runner reports cannot unpause collection or smuggle arbitrary state fields', async () => {
+  const { env, headers } = await setup();
+  const pause = await worker.fetch(new Request('https://worker.test/api/edit-audio/collection', { method: 'PUT',
+    body: JSON.stringify({ enabled: false }), headers: { ...headers, 'Content-Type': 'application/json' } }), env);
+  assert.equal(pause.status, 200); assert.equal((await pause.json()).enabled, false);
+  const report = { version: DISCOVERY_VERSION, status: 'no-new-clips', cursor: 3, seen: ['123'], startedAt: '2026-08-31T12:00:00Z',
+    completedAt: '2026-08-31T12:01:00Z', imported: 0, searched: 3, examined: 1, duplicates: 0, rejected: {}, errors: [], enabled: true,
+    accounts: ['must-not-persist'] };
+  const saved = await worker.fetch(new Request('https://worker.test/api/workflow/edit-audio/collection', { method: 'POST',
+    headers: { Authorization: 'Bearer runner-test-only', 'Content-Type': 'application/json' }, body: JSON.stringify(report) }), env);
+  assert.equal(saved.status, 200); const stored = await saved.json(); assert.equal(stored.enabled, false); assert.equal(stored.accounts, undefined);
 });

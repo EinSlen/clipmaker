@@ -1,0 +1,48 @@
+name: Refresh spoken edit library
+
+on:
+  schedule:
+    # Always before the 00:07 Europe/Paris render, in winter and summer.
+    - cron: "17 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edit-audio-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface/hub
+          key: whisper-small-536b0662742c02347bc0e980a01041f333bce120
+      - name: Install pinned speech and media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --disable-pip-version-check --quiet faster-whisper==1.2.1
+      - name: Find, verify and privately import new spoken clips
+        run: python web/scripts/discover_edit_audio.py --output "$RUNNER_TEMP/edit-audio" --publish --max-imports 2 --scan-limit 12
+      - name: Print only the non-sensitive collection summary
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/edit-audio/report.json"; then
+            python - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = json.loads((Path(os.environ['RUNNER_TEMP']) / 'edit-audio' / 'report.json').read_text())
+          print(json.dumps({key: report.get(key) for key in ('status','imported','searched','examined','duplicates','rejected','errors')}, indent=2))
+          PY
+          fi

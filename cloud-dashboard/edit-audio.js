@@ -11,6 +11,7 @@
     let previewKey = '';
     let playerUrl = '';
     let clips = [];
+    let collection = null;
     let revision = 0;
     const key = () => `${input('start').value}:${input('end').value}`;
     const playBlob = blob => {
@@ -21,7 +22,7 @@
       player.hidden = false;
     };
     function clear() {
-      decoded = null; invalidate(); clips = [];
+      decoded = null; invalidate(); clips = []; collection = null;
       player.pause(); player.removeAttribute('src'); player.hidden = true;
       if (playerUrl) URL.revokeObjectURL(playerUrl);
       playerUrl = '';
@@ -81,7 +82,10 @@
       } catch (error) { if (current === revision) notify(error.message, true); }
     });
     function render() {
-      state.textContent = `${clips.filter(clip => clip.active).length} extraits actifs · bibliothèque privée`;
+      const auto = collection?.enabled === false ? 'collecte Internet en pause'
+        : collection?.status === 'not-run' ? 'collecte Internet prête'
+          : `collecte ${collection?.status || 'inconnue'}${collection?.completedAt ? ` · ${new Date(collection.completedAt).toLocaleString('fr-FR')}` : ''}`;
+      state.textContent = `${clips.filter(clip => clip.active).length} extraits actifs · ${auto}`;
       list.replaceChildren();
       if (!clips.length) { list.textContent = 'Aucune voix importée. Le mode voix ne prendra jamais une chanson à la place.'; return; }
       for (const clip of clips) {
@@ -89,8 +93,12 @@
         const copy = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = clip.title;
         const details = document.createElement('small');
-        details.textContent = `${clip.mood === 'sad' ? 'Triste' : 'Revenge'} · ${clip.duration.toFixed(1)} s · ${clip.mix === 'premixed' ? 'mix original conservé' : 'voix + fond discret'} · ${clip.active ? 'actif' : 'désactivé'}`;
+        details.textContent = `${clip.mood === 'sad' ? 'Triste' : 'Revenge'} · ${clip.duration.toFixed(1)} s · ${clip.mix === 'premixed' ? 'mix original conservé' : 'voix + fond discret'} · ${clip.reviewMode === 'freesound-whisper-v1' ? 'Internet · contrôle automatique CC' : 'validé manuellement'} · ${clip.active ? 'actif' : 'désactivé'}`;
         copy.append(title, details);
+        if (/^https:\/\//u.test(clip.source || '')) {
+          const source = document.createElement('a'); source.href = clip.source; source.target = '_blank'; source.rel = 'noreferrer';
+          source.textContent = clip.reviewMode === 'freesound-whisper-v1' ? 'Source et licence ↗' : 'Source ↗'; copy.append(source);
+        }
         const listen = document.createElement('button'); listen.type = 'button'; listen.className = 'button button-secondary'; listen.textContent = 'Écouter';
         listen.addEventListener('click', async () => {
           listen.disabled = true;
@@ -112,7 +120,7 @@
     }
     async function load() {
       if (!connected()) { clear(); return; }
-      try { clips = (await control('/api/edit-audio')).clips; render(); }
+      try { [clips, collection] = await Promise.all([control('/api/edit-audio').then(value => value.clips), control('/api/edit-audio/collection')]); render(); }
       catch (error) { state.textContent = 'Bibliothèque indisponible'; notify(error.message, true); }
     }
     form.addEventListener('submit', async event => {
@@ -132,6 +140,22 @@
       finally { button.disabled = !connected(); }
     });
     document.querySelector('#reload-edit-audio').addEventListener('click', () => void load());
+    document.querySelector('#toggle-edit-audio-collection').addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      try {
+        collection = await control('/api/edit-audio/collection', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: collection?.enabled === false }) });
+        render(); notify(collection.enabled ? 'Collecte Internet quotidienne activée.' : 'Collecte Internet mise en pause.');
+      } catch (error) { notify(error.message, true); }
+      finally { event.currentTarget.disabled = false; }
+    });
+    document.querySelector('#run-edit-audio-collection').addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      try {
+        await control('/api/dispatch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflow: 'edit-audio-discovery.yml', inputs: {} }) });
+        notify('Recherche Internet lancée sur GitHub. Le résultat apparaîtra ici après analyse.');
+      } catch (error) { notify(error.message, true); }
+      finally { event.currentTarget.disabled = false; }
+    });
     window.addEventListener('pagehide', () => { if (playerUrl) URL.revokeObjectURL(playerUrl); });
     return { load, clear };
   };
