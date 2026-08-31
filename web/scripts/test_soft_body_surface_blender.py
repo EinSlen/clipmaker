@@ -683,6 +683,47 @@ class SurfaceContactTests(unittest.TestCase):
         trace[1][0][10].x += rest * 0.5
         self.assertIn("constraint-tear", renderer.simulation_quality(trace, self.variant)["issues"])
 
+    def test_daily_moving_slide_seed_stays_stable_and_in_frame(self):
+        """Cover the scheduled seed that exposed recycled Verlet energy."""
+
+        variant = variant_for_seed(495917862, "auto")
+        self.assertEqual(variant.obstacle.key, "moving-slide")
+        spans = renderer.stage_frame_spans(900, 5, variant.obstacle.key, variant.stages)
+        for stage in (0, 3, 4):
+            softness = variant.stages[stage]
+            attempts = renderer.stage_attempt_frame_spans(
+                spans[stage][0], spans[stage][1], 30, variant.obstacle.key, softness
+            )
+            for attempt, (start, end) in enumerate(attempts):
+                with self.subTest(softness=softness, attempt=attempt + 1):
+                    simulation = renderer.simulate_chain(
+                        softness, end - start + 1, 30, variant, stage + attempt * 5
+                    )
+                    quality = renderer.simulation_quality(simulation, variant)
+                    self.assertEqual(quality["issues"], [], quality)
+                    framing = renderer.inspect_simulation_framing([simulation], variant, 30)
+                    self.assertEqual(framing["issues"], [], framing)
+
+    def test_solver_velocity_limit_preserves_normal_motion_and_caps_only_spikes(self):
+        dt = 1 / 240
+        ordinary = Vector((0.04, -0.02))
+        self.assertLess((renderer.limit_solver_velocity(ordinary, dt) - ordinary).length, 1e-9)
+        limited = renderer.limit_solver_velocity(Vector((0.3, 0.4)), dt)
+        self.assertAlmostEqual(limited.length, 24 * dt, places=6)
+
+    def test_solver_translation_limit_preserves_shape_and_verlet_velocity(self):
+        origin = [Vector((-0.5, 1.0)), Vector((0.5, 1.0))]
+        points = [point + Vector((0.0, 0.6)) for point in origin]
+        previous = [point - Vector((0.03, -0.02)) for point in points]
+        velocities = [point - old for point, old in zip(points, previous)]
+        correction = renderer.limit_solver_translation(points, previous, origin)
+        self.assertAlmostEqual(correction, 0.4, places=6)
+        center = sum(points, Vector((0.0, 0.0))) / len(points)
+        self.assertAlmostEqual(center.y, 1.2, places=6)
+        for before, after, velocity, old in zip(origin, points, velocities, previous):
+            self.assertAlmostEqual((after - before).x, 0.0, places=6)
+            self.assertAlmostEqual((after - old - velocity).length, 0.0, places=6)
+
     def test_all_spawned_capsules_fit_below_the_label(self):
         for obstacle in OBSTACLES:
             for seed in (910103, 910104, 910105):
