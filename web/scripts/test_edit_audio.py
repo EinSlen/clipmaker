@@ -11,6 +11,7 @@ import textwrap
 import unittest
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import edit_audio as edit
@@ -169,6 +170,14 @@ class EditAudioTests(unittest.TestCase):
         self.assertEqual((aud['codec_name'], aud['sample_rate'], aud['channels']), ('aac', '48000', 2))
         self.assertAlmostEqual(float(aud['duration']), 30, delta=.04)
         self.assertAlmostEqual(float(probe['format']['duration']), 30, delta=.04)
+
+    def test_local_renderer_refuses_an_external_song_or_muted_voice_before_blender(self):
+        spec = importlib.util.spec_from_file_location('edit_test_renderer', Path(__file__).with_name('render-premium-3d.py'))
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        for music, volume in [('other-song.wav', .58), (None, 0)]:
+            with self.assertRaisesRegex(ValueError, 'cannot be replaced'):
+                renderer.render(SimpleNamespace(music_profile='edit-sad', music=music, music_volume=volume))
 
 
 if __name__ == '__main__':

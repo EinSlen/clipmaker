@@ -333,7 +333,7 @@ export function GameStudio() {
             soundPack,
             musicFile: musicFile || undefined,
             musicMode,
-            musicProfile: game === "soft-body-slide" ? musicProfile : undefined,
+            musicProfile: game === "soft-body-slide" && !musicFile ? musicProfile : undefined,
             musicVolume,
             title,
             obstacle: game === "soft-body-slide" ? softBodyObstacle : undefined,

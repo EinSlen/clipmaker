@@ -400,6 +400,8 @@ def build_video_filter(
 
 
 def render(args: argparse.Namespace) -> dict[str, object]:
+    if args.music_profile in EDIT_PROFILES and (args.music or args.music_volume <= 0):
+        raise ValueError("Spoken edits cannot be replaced by external music or muted")
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     blender = os.environ.get("BLENDER_BIN", "blender")

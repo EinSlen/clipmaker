@@ -126,6 +126,9 @@ export async function POST(request: Request) {
     if (musicProfile.startsWith('edit-') && (game !== 'soft-body-slide' || musicVolume <= 0)) {
       return NextResponse.json({ ok: false, error: 'Les voix d’edit nécessitent Souplesse 3D et un volume supérieur à zéro.' }, { status: 400 });
     }
+    if (musicProfile.startsWith('edit-') && body.musicFile) {
+      return NextResponse.json({ ok: false, error: 'Choisis la bibliothèque de voix ou un fichier musical, pas les deux.' }, { status: 400 });
+    }
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const obstacleKeys = ['auto', 'moving-slide', 'stair-cascade', 'v-stairs', 'pipe-bend', 'peg-grid', 'twin-gears', 'compression-ring'] as const;
     const obstacle = body.obstacle && obstacleKeys.includes(body.obstacle) ? body.obstacle : 'auto';
