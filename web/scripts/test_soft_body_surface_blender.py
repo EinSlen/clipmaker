@@ -703,6 +703,8 @@ class SurfaceContactTests(unittest.TestCase):
                     self.assertEqual(quality["issues"], [], quality)
                     framing = renderer.inspect_simulation_framing([simulation], variant, 30)
                     self.assertEqual(framing["issues"], [], framing)
+                    if softness == 0:
+                        self.assertEqual(framing["maximum_side_exit_seconds"], 0.0, framing)
 
     def test_solver_velocity_limit_preserves_normal_motion_and_caps_only_spikes(self):
         dt = 1 / 240
