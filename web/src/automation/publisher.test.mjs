@@ -98,6 +98,18 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
   }
 });
 
+test('3D upload rejects an artifact from a different requested playlist', () => {
+  const base = native3dEvidence(123);
+  for (const profile of ['auto', 'revenge', 'sad-english', 'original']) {
+    const good = { ...base, music_profile: profile === 'auto' ? 'revenge' : profile, requested_music_profile: profile };
+    assert.doesNotThrow(() => assertNative3dQuality(good, { seed: 123, musicProfile: profile }));
+    assert.throws(() => assertNative3dQuality(base, { seed: 123, musicProfile: profile }), /selected vocal playlist/);
+    assert.throws(() => assertNative3dQuality({ ...base, music_profile: 'other', requested_music_profile: 'other' },
+      { seed: 123, musicProfile: profile }), /selected vocal playlist/);
+  }
+  assert.doesNotThrow(() => assertNative3dQuality(base, { seed: 123 }));
+});
+
 test('stair upload requires a complete outlet beat for all three specimens', () => {
   const base = native3dEvidence(123);
   const good = { ...base, variant_obstacle: 'stair-cascade',

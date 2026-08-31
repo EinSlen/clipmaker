@@ -25,6 +25,8 @@ web/.env
 web/.env.local
 web/uploads/
 web/renders/
+renders/
+.wrangler/
 web/config/publisher.json
 web/data/publisher/
 web/data/auth/

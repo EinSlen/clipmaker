@@ -66,6 +66,20 @@ test('the one-account-one-game editor and all public destinations remain present
   assert.match(html, /actions\/workflows\/soft-body-artifact\.yml/u);
 });
 
+test('3D accounts distinguish spoken edit libraries from optional songs', async () => {
+  const app = await source('app.js');
+  assert.match(app, /channel\.game\.musicProfile/u);
+  for (const profile of ['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original']) {
+    assert.ok(app.includes(`'${profile}'`), `${profile} should be selectable`);
+  }
+  assert.match(app, /#audio-library/u);
+  const html = await source('index.html');
+  assert.match(html, /media-src 'self' blob:/u);
+  assert.match(html, /name="speechReviewed"/u);
+  assert.match(html, /name="rightsConfirmed"/u);
+  assert.match(html, /Son d’edit déjà mixé/u);
+});
+
 test('every game has a real gameplay preview in the account editor', async () => {
   const app = await source('app.js');
   const css = await source('styles.css');

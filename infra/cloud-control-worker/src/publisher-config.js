@@ -9,6 +9,7 @@ const GAME_LIMITS = Object.freeze({
 const THEMES = new Set(['neon', 'sunset', 'ice']);
 const SOUND_PACKS = new Set(['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr']);
 const MUSIC_MODES = new Set(['hit-reveal', 'continuous']);
+const MUSIC_PROFILES = new Set(['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original']);
 const OBSTACLES = new Set([
   'auto',
   'moving-slide',
@@ -61,6 +62,12 @@ function normalizeGame(value, channelId) {
     title: text(value.title || 'CAN IT ESCAPE?', 'Accroche', 52),
   };
   if (id === 'soft-body-slide') game.obstacle = OBSTACLES.has(value.obstacle) ? value.obstacle : 'auto';
+  // Keep legacy plans structurally unchanged until the user chooses a value.
+  if (value.musicProfile !== undefined) {
+    if (!MUSIC_PROFILES.has(value.musicProfile)) fail('Playlist vocale invalide.');
+    if (value.musicProfile.startsWith('edit-') && (id !== 'soft-body-slide' || game.musicVolume <= 0)) fail('Les voix d’edit nécessitent Souplesse 3D et un volume supérieur à zéro.');
+    game.musicProfile = value.musicProfile;
+  }
   return game;
 }
 

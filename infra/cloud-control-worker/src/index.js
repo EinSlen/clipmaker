@@ -1,5 +1,6 @@
 import { normalizePublisherConfig, publicPublisherConfig } from './publisher-config.js';
 import { runScheduler } from './scheduler.js';
+import { AudioError, EDIT_PROFILES, CLIP_PREFIX, boundedBytes, chooseClip, listClips, putClip, readClip } from './edit-audio.js';
 
 const API_VERSION = '2026-03-10';
 const APP_CONFIG_KEY = 'github-app-config';
@@ -278,6 +279,8 @@ export function validateDispatch(payload) {
     const seed = String(supplied.seed || '');
     const samples = String(supplied.samples || '');
     const chunkSize = String(supplied.chunk_size || '');
+    const musicProfile = supplied.music_profile;
+    if (musicProfile !== undefined && ![...EDIT_PROFILES, 'original', 'auto', 'revenge', 'sad-english'].includes(musicProfile)) throw new HttpError(400, 'Mode audio invalide.');
     if (!SOFT_BODY_OBSTACLES.has(obstacle)) throw new HttpError(400, 'Obstacle 3D invalide.');
     if (!/^\d{1,12}$/u.test(seed)) throw new HttpError(400, 'Seed invalide.');
     if (!new Set(['32', '64', '128']).has(samples)) throw new HttpError(400, 'Qualité 3D invalide.');
@@ -290,6 +293,7 @@ export function validateDispatch(payload) {
         samples,
         chunk_size: chunkSize,
         title: 'HOW SOFT CAN IT GET?',
+        ...(musicProfile ? { music_profile: musicProfile } : {}),
       },
     };
   }
@@ -518,6 +522,49 @@ async function apiPublisherAccounts(request, env) {
   return json({ ok: true, accounts, sessionsSynced, session: renewed }, 200, request, env);
 }
 
+async function apiEditAudio(request, env, runner = false) {
+  let renewed = null;
+  if (runner) await workflowRequest(request, env);
+  else {
+    const auth = await authenticatedSession(request, env);
+    if (auth.changed) renewed = await sealSession(auth.session, env);
+  }
+  const reply = (payload, status) => json({ ...payload, ...(renewed ? { session: renewed } : {}) }, status, request, env);
+  const path = new URL(request.url).pathname;
+  const base = runner ? '/api/workflow/edit-audio' : '/api/edit-audio';
+  if (path === base && request.method === 'GET') return reply({ clips: await listClips(env.CONFIG) }, 200);
+  if (!runner && path === base && request.method === 'POST') return reply({ clip: await putClip(request, env.CONFIG) }, 201);
+  if (runner && path === `${base}/select` && request.method === 'POST') {
+    const bytes = await boundedBytes(request, 2000);
+    let payload;
+    try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new HttpError(400, 'Sélection invalide.'); }
+    return reply({ clip: await chooseClip(env.CONFIG, payload) }, 200);
+  }
+  const id = path.slice(base.length + 1);
+  const { value, metadata } = await readClip(env.CONFIG, id);
+  if (request.method === 'GET') {
+    if (runner && !metadata.active) { await value.cancel(); throw new HttpError(409, 'Extrait désactivé.'); }
+    return new Response(value, { headers: noStoreHeaders({ 'Content-Type': 'audio/wav', ...corsHeaders(request, env),
+      ...(renewed ? { 'X-ClipMaker-Session': renewed, 'Access-Control-Expose-Headers': 'X-ClipMaker-Session' } : {}),
+    }) });
+  }
+  if (!runner && request.method === 'POST') {
+    let payload;
+    try { payload = JSON.parse(new TextDecoder().decode(await boundedBytes(request, 100))); }
+    catch (error) {
+      await value.cancel();
+      if (error instanceof SyntaxError) throw new HttpError(400, 'État audio invalide.');
+      throw error;
+    }
+    if (typeof payload?.active !== 'boolean') { await value.cancel(); throw new HttpError(400, 'État audio invalide.'); }
+    const changed = { ...metadata, active: payload.active };
+    await env.CONFIG.put(CLIP_PREFIX + id, value, { metadata: changed });
+    return reply({ clip: { id, ...changed } }, 200);
+  }
+  await value.cancel();
+  throw new HttpError(405, 'Méthode audio non autorisée.');
+}
+
 async function apiWorkflowBootstrap(request, env) {
   await workflowRequest(request, env);
   if (request.method === 'POST') {
@@ -641,6 +688,8 @@ async function route(request, env) {
   if (request.method === 'GET' && url.pathname === '/api/session') return apiSession(request, env);
   if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/config') return apiPublisherConfig(request, env);
   if (request.method === 'GET' && url.pathname === '/api/accounts') return apiPublisherAccounts(request, env);
+  if (url.pathname === '/api/edit-audio' || url.pathname.startsWith('/api/edit-audio/')) return apiEditAudio(request, env);
+  if (url.pathname === '/api/workflow/edit-audio' || url.pathname.startsWith('/api/workflow/edit-audio/')) return apiEditAudio(request, env, true);
   if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/api/workflow/bootstrap') return apiWorkflowBootstrap(request, env);
   if (request.method === 'POST' && url.pathname === '/api/dispatch') return apiDispatch(request, env);
   if (request.method === 'POST' && url.pathname === '/api/logout') return apiLogout(request, env);
@@ -654,9 +703,10 @@ export default {
     try {
       return await route(request, env);
     } catch (error) {
-      const status = error instanceof HttpError ? error.status : 500;
-      const message = error instanceof HttpError ? error.message : 'Erreur interne du contrôle Cloud.';
-      if (!(error instanceof HttpError)) {
+      const known = error instanceof HttpError || error instanceof AudioError;
+      const status = known ? error.status : 500;
+      const message = known ? error.message : 'Erreur interne du contrôle Cloud.';
+      if (!known) {
         console.error(JSON.stringify({ message: 'cloud-control request failed', error: error instanceof Error ? error.message : String(error), path: new URL(request.url).pathname }));
       }
       return json({ error: message }, status, request, env);

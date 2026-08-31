@@ -18,6 +18,8 @@ web/public/music
 vendor/TiktokAutoUploader/CookiesDir
 clips
 downloads
+renders
+.wrangler
 output
 logs
 *.mp4

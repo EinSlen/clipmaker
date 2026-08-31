@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0c12">
   <meta name="description" content="Panneau de contrôle cloud de ClipMaker">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://clipmaker-cloud-control.einslen.workers.dev; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://clipmaker-cloud-control.einslen.workers.dev; media-src 'self' blob:; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <title>ClipMaker Cloud</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -157,6 +157,37 @@
         </div>
       </section>
 
+      <section id="audio-library" class="panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">VOIX D’EDITS · EN ANGLAIS</p><h3>Des voix parlées, pas des chansons</h3></div>
+          <span id="edit-audio-state" class="secure-badge">Connexion requise</span>
+        </div>
+        <p class="panel-intro">Monologues tristes ou revenge : voix au premier plan, émotions et pauses conservées. Les extraits tournent par compte, sans répétition avant la fin d’un cycle si la bibliothèque reste inchangée. Le choix du jour reste fixé pour les relances.</p>
+        <button id="reload-edit-audio" class="button button-secondary requires-token" type="button">Actualiser la bibliothèque</button>
+        <div id="edit-audio-list" class="edit-audio-list" aria-live="polite">Connecte-toi pour gérer les voix privées.</div>
+        <audio id="edit-audio-player" controls hidden preload="none"></audio>
+        <details class="edit-audio-import"><summary>+ Importer un extrait d’edit</summary>
+          <p class="panel-intro">Importe un fichier que tu peux réutiliser sur TikTok et YouTube. Une playlist ou un lien TikTok ne prouve pas ces droits. La source reste sur ton ordinateur : seul l’extrait choisi est envoyé au cloud. Aucun prélèvement automatique de dialogues de films.</p>
+          <form id="edit-audio-form" class="form-grid">
+            <label>Fichier source (30 Mo max)<input name="file" type="file" accept="audio/*,video/mp4" required></label>
+            <label>Titre de l’extrait<input name="title" maxlength="80" placeholder="A quiet goodbye" required></label>
+            <label>Début (secondes)<input name="start" type="number" min="0" step="0.01" value="0" required></label>
+            <label>Fin (secondes)<input name="end" type="number" min="10" step="0.01" value="29.5" required></label>
+            <label>Émotion<select name="mood"><option value="sad">Triste · solitude, regrets, rupture</option><option value="revenge">Revenge · détermination, colère froide</option></select></label>
+            <label>Contenu du fichier<select name="mix"><option value="premixed">Son d’edit déjà mixé — conserver son fond</option><option value="voice-only">Voix seule — ajouter un fond discret</option></select></label>
+            <button id="preview-edit-audio" class="button button-secondary" type="button">Écouter l’extrait exact</button>
+            <label class="edit-audio-check"><input name="speechReviewed" type="checkbox" required>J’ai écouté : voix parlée en anglais, 10 à 29,5 s, phrases complètes, pas de chant.</label>
+            <label>Source / créateur<input name="source" maxlength="180" placeholder="Lien de la source ou nom de mon enregistrement" required></label>
+            <label>Crédit à publier<input name="credit" maxlength="160" placeholder="Voice: … · Music: …" required></label>
+            <label>Droits<select name="rights"><option value="original">Enregistrement et texte originaux</option><option value="licensed">Autorisation / licence obtenue</option></select></label>
+            <label>Justificatif<input name="rightsEvidence" maxlength="180" placeholder="Lien de licence ou description de l’autorisation" required></label>
+            <label class="edit-audio-check field-span-2"><input name="rightsConfirmed" type="checkbox" required>Je confirme les droits sur la voix, le texte et le fond musical pour publier et monétiser sur TikTok ET YouTube.</label>
+            <button class="button button-primary requires-token" type="submit">Ajouter à la rotation privée</button>
+          </form>
+        </details>
+        <p class="panel-intro">Ensuite, choisis « Voix d’edit — triste / revenge / mix » dans ton compte et sauvegarde le planning. Aucun mode n’est activé à ta place. Une bibliothèque vide bloque ce mode avant le calcul Blender.</p>
+      </section>
+
       <section id="three-d" class="panel three-d-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">BLENDER CLOUD</p><h3>Test Souplesse 3D</h3></div>
@@ -188,6 +219,7 @@
             <label>Lots
               <select id="chunk-size"><option value="15" selected>15 images · recommandé</option><option value="30">30 images</option><option value="45">45 images</option></select>
             </label>
+            <label>Audio<select id="three-d-music-profile"><option value="original">Ambiance originale</option><option value="edit-sad">Voix d’edit — triste</option><option value="edit-revenge">Voix d’edit — revenge</option><option value="edit-auto">Voix d’edit — mix aléatoire</option></select></label>
             <button class="button button-primary requires-token" type="submit">Lancer les 900 images <span>↗</span></button>
           </form>
         </div>
@@ -215,6 +247,7 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="edit-audio.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ type RenderRequest = {
   soundPack?: 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
   musicFile?: string;
   musicMode?: 'hit-reveal' | 'continuous';
+  musicProfile?: 'edit-auto' | 'edit-sad' | 'edit-revenge' | 'auto' | 'revenge' | 'sad-english' | 'original';
   musicVolume?: number;
   title?: string;
   obstacle?: 'auto' | 'moving-slide' | 'stair-cascade' | 'v-stairs' | 'pipe-bend' | 'peg-grid' | 'twin-gears' | 'compression-ring';
@@ -118,6 +119,16 @@ export async function POST(request: Request) {
       ? body.musicMode
       : defaultMusicMode;
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
+    const musicProfile = body.musicProfile ?? 'original';
+    if (!['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original'].includes(musicProfile)) {
+      return NextResponse.json({ ok: false, error: 'Playlist vocale invalide.' }, { status: 400 });
+    }
+    if (musicProfile.startsWith('edit-') && (game !== 'soft-body-slide' || musicVolume <= 0)) {
+      return NextResponse.json({ ok: false, error: 'Les voix d’edit nécessitent Souplesse 3D et un volume supérieur à zéro.' }, { status: 400 });
+    }
+    if (musicProfile.startsWith('edit-') && body.musicFile) {
+      return NextResponse.json({ ok: false, error: 'Choisis la bibliothèque de voix ou un fichier musical, pas les deux.' }, { status: 400 });
+    }
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const obstacleKeys = ['auto', 'moving-slide', 'stair-cascade', 'v-stairs', 'pipe-bend', 'peg-grid', 'twin-gears', 'compression-ring'] as const;
     const obstacle = body.obstacle && obstacleKeys.includes(body.obstacle) ? body.obstacle : 'auto';
@@ -194,7 +205,7 @@ export async function POST(request: Request) {
       '--music-volume', String(musicVolume),
       '--music-mode', musicMode,
     ];
-    if (game === 'soft-body-slide') rendererArgs.push('--obstacle', obstacle);
+    if (game === 'soft-body-slide') rendererArgs.push('--obstacle', obstacle, '--music-profile', musicProfile);
     if (musicPath) rendererArgs.push('--music', musicPath);
     const renderer = await runRenderer(rendererArgs);
     let rendererMetadata: {
@@ -202,6 +213,10 @@ export async function POST(request: Request) {
       duration?: number;
       music?: string;
       music_generated?: boolean;
+      music_profile?: string;
+      music_provider?: string;
+      music_credit?: string;
+      music_source_url?: string;
       music_mode?: string;
       music_hits?: number;
       completed_at?: number | null;
@@ -247,9 +262,11 @@ export async function POST(request: Request) {
       completedAt: rendererMetadata.completed_at ?? null,
       outcome: rendererMetadata.outcome ?? null,
       musicUsed: musicPath ? path.basename(musicPath) : rendererMetadata.music || null,
-      musicTitle,
-      musicSource,
-      musicCredit,
+      musicTitle: musicTitle || rendererMetadata.music || null,
+      musicSource: rendererMetadata.music_provider || musicSource,
+      musicCredit: musicCredit || rendererMetadata.music_credit || null,
+      musicProfile: rendererMetadata.music_profile || null,
+      musicSourceUrl: rendererMetadata.music_source_url || null,
       musicNote,
       variantKey: rendererMetadata.variant_key || null,
       variantLabel: rendererMetadata.variant_label || null,
@@ -265,7 +282,7 @@ export async function POST(request: Request) {
       native3d: game === 'soft-body-slide' ? rendererMetadata : undefined,
       title,
       youtubeTitle: `${title} #shorts`,
-      caption: musicCredit ? `${captionBase}\n${musicCredit}` : captionBase,
+      caption: (musicCredit || rendererMetadata.music_credit) ? `${captionBase}\n${musicCredit || rendererMetadata.music_credit}` : captionBase,
       tags: ['#satisfying', '#simulation', '#hypnotic', ...definition.tags, '#shorts'],
     });
   } catch (error) {

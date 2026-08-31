@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "licenseUrl": "https://ncs.io/usage-policy/terms",
+  "reviewedAt": "2026-08-31",
+  "tracks": [
+    { "id": "royalty", "slug": "Royalty", "profile": "revenge", "title": "Royalty", "artist": "Egzod, Maestro Chives, Neoni", "start": 15 },
+    { "id": "wake-up", "slug": "WakeUp", "profile": "revenge", "title": "Wake Up", "artist": "Egzod, Chris Linton", "start": 15 },
+    { "id": "fearless-2", "slug": "Fearless2", "profile": "revenge", "title": "Fearless pt. II", "artist": "Lost Sky, Chris Linton", "start": 10 },
+    { "id": "stronger", "slug": "Stronger", "profile": "revenge", "title": "Stronger", "artist": "Prismo", "start": 15 },
+    { "id": "heaven-and-hell", "slug": "heavenandhell", "profile": "revenge", "title": "Heaven & Hell", "artist": "Lost Sky, Chris Linton", "start": 133.2 },
+    { "id": "where-we-started", "slug": "WhereWeStarted", "profile": "sad-english", "title": "Where We Started", "artist": "Lost Sky, Jex", "start": 15 },
+    { "id": "save-myself", "slug": "SaveMyself", "profile": "sad-english", "title": "Save Myself", "artist": "Mendum, xo sad", "start": 15 },
+    { "id": "home", "slug": "Home", "profile": "sad-english", "title": "Home", "artist": "Jordan Schor, Harley Bird", "start": 19 },
+    { "id": "i-still-hear-your-voice", "slug": "istillhearyourvoice", "profile": "sad-english", "title": "i still hear your voice", "artist": "johnny joined, Lynxie", "start": 4 }
+  ]
+}

@@ -230,3 +230,14 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 27px
   .game-picker { padding-inline: 11px; }.game-picker-heading { align-items: flex-start; flex-direction: column; gap: 5px; }.game-picker-list { margin-right: -11px; }.game-choice img { aspect-ratio: 9 / 13; }
   .run-row { grid-template-columns: 9px minmax(0,1fr) auto; }.run-result { display: none; } footer { flex-direction: column; }
 }
+/* Reviewed spoken clips: compact library and accessible import controls. */
+.edit-audio-list { display: grid; gap: 12px; margin: 20px 0; }
+.edit-audio-row { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid #30313d; border-radius: 12px; }
+.edit-audio-row > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.edit-audio-row small { display: block; color: #a3a8bd; margin-top: 6px; }
+.edit-audio-import { margin-top: 24px; }
+.edit-audio-import summary { cursor: pointer; font-weight: 700; padding: 12px 0; }
+.edit-audio-check { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 10px; line-height: 1.6; }
+.edit-audio-check input { width: 18px; height: 18px; flex-shrink: 0; margin-top: 3px; }
+#edit-audio-player { width: 100%; margin: 10px 0; }
+@media (max-width: 600px) { .edit-audio-row { flex-wrap: wrap; } .edit-audio-row > div { flex-basis: 100%; } }
