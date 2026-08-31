@@ -22,12 +22,13 @@ function run(command, args, { includeStderr = false, ...options } = {}) {
 process.stdout.write('Running deterministic engine tests...\n');
 const unitOutput = run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_game_variants.py', '-v'], { includeStderr: true });
 process.stdout.write(`${unitOutput}\n`);
+process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_procedural_variation.py', '-v'], { includeStderr: true })}\n`);
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_vocal_playlist.py', '-v'], { includeStderr: true })}\n`);
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_edit_audio.py', '-v'], { includeStderr: true })}\n`);
 
 if (!process.argv.includes('--smoke')) process.exit(0);
 
-const catalogSource = readFileSync(join(webDirectory, 'lib', 'game-catalog.ts'), 'utf8');
+const catalogSource = readFileSync(join(webDirectory, 'src', 'lib', 'game-catalog.ts'), 'utf8');
 const allGameIds = [...catalogSource.matchAll(/\bid:\s*['"]([a-z-]+)['"]/g)].map((match) => match[1]);
 const gameIds = allGameIds.filter((gameId) => gameId !== 'soft-body-slide');
 assert.deepEqual(gameIds, ['ball-escape', 'shape-tunnel', 'laser-dodge', 'boss-battle']);
@@ -74,6 +75,9 @@ try {
     const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
     assert.equal(metadata.ok, true);
     assert.equal(metadata.game, gameId);
+    assert.equal(metadata.variation_version, 1);
+    assert.match(metadata.variation_fingerprint, /^[0-9a-f]{64}$/u);
+    assert.ok(Object.keys(metadata.variation_parameters).length > 0);
     assert.equal(metadata.difficulty, difficulty);
     assert.equal(metadata.units_total, difficulty);
     assert.ok(Object.hasOwn(metadata, 'completed_at'));

@@ -223,6 +223,8 @@ export async function POST(request: Request) {
       outcome?: RenderOutcome;
       units_completed?: number;
       units_total?: number;
+      variation_version?: number;
+      variation_fingerprint?: string;
       variant_key?: string;
       variant_label?: string;
       variant_shape?: string;
@@ -268,6 +270,8 @@ export async function POST(request: Request) {
       musicProfile: rendererMetadata.music_profile || null,
       musicSourceUrl: rendererMetadata.music_source_url || null,
       musicNote,
+      variationVersion: rendererMetadata.variation_version || null,
+      variationFingerprint: rendererMetadata.variation_fingerprint || null,
       variantKey: rendererMetadata.variant_key || null,
       variantLabel: rendererMetadata.variant_label || null,
       variantShape: rendererMetadata.variant_shape || null,

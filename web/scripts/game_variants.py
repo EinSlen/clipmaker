@@ -8,6 +8,7 @@ import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from procedural_variation import organic_contour_for_seed
 
 
 THEMES = {
@@ -224,6 +225,7 @@ class ShapeTunnel(BaseGame):
         self.last_impact = -10.0
         self.last_contact = [self.cx, self.cy]
         self.shape_phase = self.rng.uniform(0, math.tau)
+        self.contour = organic_contour_for_seed(self.seed)
         # Difficulty is a visual layer count (normally 30..300), not a demand
         # for hundreds of fake collisions.  A harder physical impact can crack
         # several adjacent layers, but every layer change still originates at
@@ -239,10 +241,7 @@ class ShapeTunnel(BaseGame):
     def contour_radius(self, progress: float, angle: float, layer: int = 0, time_sec: float = 0.0) -> float:
         """Radius of the exact contour used by both collision and drawing."""
         base = self.width * (0.155 + progress * 0.43) + layer * self.width * 0.0145
-        wave = 1.0
-        wave += 0.084 * math.sin(angle * 7 + self.shape_phase + layer * 0.012)
-        wave += 0.032 * math.sin(angle * 3 - self.shape_phase * 0.7)
-        wave += 0.013 * math.sin(angle * 13 + self.shape_phase * 1.8 + time_sec * 0.30)
+        wave, _, _ = self.contour.sample(angle, self.shape_phase, layer, time_sec)
         return base * wave
 
     def boundary_radius(self, progress: float, angle: float, time_sec: float = 0.0) -> float:
@@ -256,11 +255,8 @@ class ShapeTunnel(BaseGame):
         redirect the comet instead of merely reversing its heading.
         """
         base = self.width * (0.155 + progress * 0.43)
-        derivative = base * (
-            0.084 * 7.0 * math.cos(angle * 7 + self.shape_phase)
-            + 0.032 * 3.0 * math.cos(angle * 3 - self.shape_phase * 0.7)
-            + 0.013 * 13.0 * math.cos(angle * 13 + self.shape_phase * 1.8 + time_sec * 0.30)
-        )
+        _, angular_derivative, _ = self.contour.sample(angle, self.shape_phase, time=time_sec)
+        derivative = base * angular_derivative
         radial_x, radial_y = math.cos(angle), math.sin(angle)
         tangent_x, tangent_y = -radial_y, radial_x
         scale = derivative / max(1.0, radius)
@@ -271,9 +267,8 @@ class ShapeTunnel(BaseGame):
 
     def boundary_radial_speed(self, progress: float, angle: float, time_sec: float) -> float:
         base = self.width * (0.155 + progress * 0.43)
-        return base * 0.013 * 0.30 * math.cos(
-            angle * 13 + self.shape_phase * 1.8 + time_sec * 0.30
-        )
+        _, _, radial_speed = self.contour.sample(angle, self.shape_phase, time=time_sec)
+        return base * radial_speed
 
     def _update_particles_fixed(self, dt: float):
         alive = []

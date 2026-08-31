@@ -82,6 +82,18 @@ test('empty libraries and malformed dates fail without a song fallback', async (
   await assert.rejects(() => chooseClip(memoryKv(), { ...req, date: '2026-99-99' }), /invalide/);
   await assert.rejects(() => chooseClip(memoryKv(), { ...req, profile: 'sad-english' }), /invalide/);
 });
+test('seed-scoped previews accept a stable date and vary across video identities', async () => {
+  const kv = memoryKv();
+  for (let i = 1; i <= 4; i++) await putClip(upload(wav(12, i * 1000)), kv);
+  const selected = [];
+  for (let seed = 910100; seed < 910116; seed++) {
+    const request = { profile: 'edit-sad', channel: `preview-${seed}`, date: '1970-01-01', seed };
+    const clip = await chooseClip(kv, request);
+    selected.push(clip.id);
+    assert.deepEqual(await chooseClip(kv, request), clip);
+  }
+  assert.equal(new Set(selected).size, 4);
+});
 test('private API imports, serves and deactivates without exposing credentials', async () => {
   const { env, headers } = await setup();
   const uploaded = await worker.fetch(upload(wav(), info, headers), env);
