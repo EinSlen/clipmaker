@@ -39,7 +39,7 @@ function discoveredUpload(audio = wav()) {
   const body = new FormData();
   const metadata = { title: 'I miss you', mood: 'sad', mix: 'voice-only', rights: 'licensed',
     source: 'https://freesound.org/people/voice_actor/sounds/123456/', sourceId: '123456',
-    credit: 'I miss you — voice_actor (CC BY 4.0); normalized + background added.',
+    credit: 'I miss you — voice_actor · CC BY 4.0 · https://freesound.org/people/voice_actor/sounds/123456/',
     rightsEvidence: 'https://creativecommons.org/licenses/by/4.0/', speechReviewed: false,
     rightsConfirmed: false, reviewMode: DISCOVERY_VERSION };
   const id = createHash('sha256').update(audio).digest('hex');

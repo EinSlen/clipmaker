@@ -90,7 +90,7 @@ export async function validateDiscovery(raw, audit, duration, audioId) {
   for (const [key, limit] of [['title', 80], ['credit', 160]]) {
     if (typeof raw[key] !== 'string' || !raw[key].trim() || raw[key].length > limit || /[\x00-\x1f]/u.test(raw[key])) fail('Crédit/titre invalide.');
   }
-  if (!raw.credit.includes(source[1]) || !raw.credit.includes(raw.title) || !raw.credit.includes('CC')) fail('Attribution du créateur absente.');
+  if (!raw.credit.includes(source[1]) || !raw.credit.includes(raw.title) || !raw.credit.includes('CC') || !raw.credit.includes(raw.source)) fail('Attribution du créateur absente.');
   const metadata = { title: raw.title, mood: raw.mood, mix: 'voice-only', rights: 'licensed',
     rightsEvidence: raw.rightsEvidence, credit: raw.credit, source: raw.source, sourceId: raw.sourceId,
     kind: 'spoken', language: 'en', speechReviewed: false, rightsConfirmed: false, reviewMode: DISCOVERY_VERSION,

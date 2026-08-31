@@ -270,7 +270,7 @@ def collect(output: Path, *, publish=False, max_imports=2, scan_limit=12) -> dic
                              "sourceSha256": sha(data), "audioSha256": digest, "licenseEvidence": license_evidence,
                              "speech": speech, "levels": levels, "checkedAt": datetime.now(timezone.utc).isoformat()}
                     label = "CC0 1.0" if "/zero/" in clip["license"] else "CC BY " + clip["license"].rstrip("/").split("/")[-1]
-                    credit = f'{clip["title"]} — {clip["creator"]} ({label}); normalized + background added.'
+                    credit = f'{clip["title"]} — {clip["creator"]} · {label} · {clip["source"]}'
                     if len(credit) > 160:
                         raise ValueError("attribution-too-long")
                     metadata = {"title": clip["title"], "mood": speech["mood"], "mix": "voice-only", "rights": "licensed",
