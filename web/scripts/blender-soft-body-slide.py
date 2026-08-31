@@ -945,7 +945,12 @@ def collide_point(
                     # on the marble for four seconds before a scripted-looking
                     # drop.  Keep rigid stages crisp and soft stages damped,
                     # while allowing both to become airborne after real hits.
-                    restitution = (0.52 - softness * 0.28) * variant.bounce_scale
+                    # Rigid rods transfer more of the ramp's normal impulse
+                    # into horizontal travel than folding bodies.  Keep the
+                    # same 100% softness response, but trim the rigid rebound
+                    # so deterministic floating-point differences cannot turn
+                    # a valid fall into a sustained side/top camera exit.
+                    restitution = (0.42 - softness * 0.18) * variant.bounce_scale
                     tangent = Vector((normal.y, -normal.x))
                     normal_impulse = -(1.0 + restitution) * normal_speed
                     velocity += normal * normal_impulse
