@@ -767,6 +767,37 @@ def constrain_distance(points, first: int, second: int, target: float, strength:
     points[second] -= correction
 
 
+def limit_solver_velocity(velocity: Vector, dt: float, maximum_speed: float = 24.0) -> Vector:
+    """Bound recycled Verlet energy while leaving authored impacts untouched."""
+
+    maximum_step = maximum_speed * dt
+    length = velocity.length
+    if length <= maximum_step or length <= 1e-12:
+        return velocity
+    return velocity * (maximum_step / length)
+
+
+def limit_solver_translation(
+    points,
+    previous,
+    origin,
+    maximum_step: float = 0.20,
+) -> float:
+    """Spread a pathological contact projection across fixed-clock ticks."""
+
+    center_before = sum(origin, Vector((0.0, 0.0))) / len(origin)
+    center_after = sum(points, Vector((0.0, 0.0))) / len(points)
+    displacement = center_after - center_before
+    distance = displacement.length
+    if distance <= maximum_step or distance <= 1e-12:
+        return 0.0
+    correction = displacement * (maximum_step / distance - 1.0)
+    for index in range(len(points)):
+        points[index] += correction
+        previous[index] += correction
+    return distance - maximum_step
+
+
 def constrain_self_collision(points, radii, neighbor_skip: int, softness: float) -> None:
     """Prevent distant sections of the capsule from passing through each other."""
     separation_scale = 0.96 - softness * 0.04
@@ -870,13 +901,30 @@ def collide_point(
     ramp_contact = False
     if variant.obstacle.key == "stair-cascade":
         project_inside_stair(point, previous, radius, closest_segment_point)
-    local_x = point.x - ramp_position(time, variant, trial_duration, ramp_phase_offset)
+    ramp_x = ramp_position(time, variant, trial_duration, ramp_phase_offset)
+    local_x = point.x - ramp_x
     if variant.obstacle.key == "moving-slide" and variant.ramp.minimum <= local_x <= variant.ramp.maximum:
         height = physics_ramp_height(local_x, variant)
         slope = physics_ramp_slope(local_x, variant)
         normal = Vector((-slope, 1.0)).normalized()
         signed_distance = (point.y - height) / math.sqrt(1.0 + slope * slope)
-        if point.y > height - 0.55 and signed_distance < radius:
+        previous_local_x = previous.x - ramp_x
+        previous_on_ramp = variant.ramp.minimum <= previous_local_x <= variant.ramp.maximum
+        previous_signed_distance = -math.inf
+        if previous_on_ramp:
+            previous_height = physics_ramp_height(previous_local_x, variant)
+            previous_slope = physics_ramp_slope(previous_local_x, variant)
+            previous_signed_distance = (
+                (previous.y - previous_height)
+                / math.sqrt(1.0 + previous_slope * previous_slope)
+            )
+        # The ramp top is one-sided. A body that has already fallen below it
+        # must not be caught and teleported upward merely because the animated
+        # ramp sweeps horizontally over its X coordinate. Preserve genuine
+        # crossings from above and small resting/constraint overlaps.
+        entered_from_top = previous_on_ramp and previous_signed_distance >= -0.02
+        shallow_overlap = signed_distance >= -0.08
+        if signed_distance < radius and (entered_from_top or shallow_overlap):
             ramp_contact = True
             correction = normal * (radius - signed_distance)
             point += correction
@@ -1220,6 +1268,14 @@ def _chain_ticks(
                         velocity * porous_retention
                         for velocity in integrated_velocities
                     ]
+                # A positional contact can leave a pathological displacement
+                # in Verlet's previous/current pair. Do not recycle that
+                # numerical correction as more than three times the fastest
+                # authored obstacle speed on the next fixed-clock tick.
+                integrated_velocities = [
+                    limit_solver_velocity(velocity, dt)
+                    for velocity in integrated_velocities
+                ]
                 for index, velocity in enumerate(integrated_velocities):
                     previous[index] = points[index].copy()
                     points[index] += velocity + Vector(
@@ -1281,7 +1337,7 @@ def _chain_ticks(
                     # contact surface.
                     # Numerical cleanup must not inject a new velocity.
                     before_cleanup = [point.copy() for point in points]
-                    for cleanup in range(80):
+                    for cleanup in range(160):
                         error = max(abs((second - first).length / rest - 1.0)
                                     for first, second in zip(points, points[1:]))
                         if error < 0.035:
@@ -1289,8 +1345,6 @@ def _chain_ticks(
                         direction = range(node_count - 1) if cleanup % 2 == 0 else range(node_count - 2, -1, -1)
                         for index in direction:
                             constrain_distance(points, index, index + 1, rest)
-                        if softness >= 0.45 and cleanup % 8 == 0:
-                            constrain_self_collision(points, collision_radii, neighbor_skip, softness)
                         for index in range(node_count):
                             points[index], _unused, *_telemetry = collide_point(
                                 points[index], points[index].copy(), collision_radii[index],
@@ -1309,6 +1363,12 @@ def _chain_ticks(
                     "coupled_impacts": [0.0] * node_count,
                 }
                 yield shared_tick
+                # Sequential point/rod constraints can otherwise apply the
+                # same external ramp correction to many nodes in one tick,
+                # translating the complete body by half a world unit. Keep
+                # contact resolution continuous; ordinary motion is far below
+                # this 48-units/second safety envelope.
+                limit_solver_translation(points, previous, previous_substep_points)
                 for index, strength in enumerate(shared_tick["coupled_impacts"]):
                     node_intensity[index] = max(node_intensity[index], strength)
                     frame_intensity = max(frame_intensity, strength)
