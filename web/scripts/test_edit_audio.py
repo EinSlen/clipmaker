@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
+from datetime import date, timedelta
 
 import edit_audio as edit
 
@@ -84,6 +85,56 @@ class EditAudioTests(unittest.TestCase):
         self.save()
         with self.assertRaisesRegex(ValueError, 'désactivé'):
             edit.select_clip(1, 'edit-sad', '2026-08-31', 'one')
+
+    def selection_pool(self):
+        # Metadata-only fixtures: selection tests do not claim these are audio.
+        baseline = self.add()
+        self.clips = [{**baseline, 'id': hashlib.sha256(f'selection-fixture-{i}'.encode()).hexdigest()}
+                      for i in range(4)]
+        self.save()
+
+    def test_daily_rotation_uses_the_whole_mood_pool_and_preserves_retries(self):
+        self.selection_pool()
+        start = date(2026, 9, 1)
+        selected = []
+        for index in range(12):
+            day = (start + timedelta(days=index)).isoformat()
+            clip = edit.select_clip(index, 'edit-sad', day, 'softbody-dvlad')
+            selected.append(clip['id'])
+            self.assertEqual(clip, edit.select_clip(index + 9000, 'edit-sad', day, 'softbody-dvlad'))
+            self.assertEqual(clip['mood'], 'sad')
+        for offset in (0, 4, 8):
+            self.assertEqual(len(set(selected[offset:offset + 4])), 4)
+        self.assertTrue(all(first != second for first, second in zip(selected, selected[1:])))
+
+    def test_dated_manual_previews_get_seed_specific_pins_without_changing_daily_keys(self):
+        self.selection_pool()
+        manual = [edit.select_clip(seed, 'edit-sad', '2026-09-01', 'manual-3d') for seed in range(8)]
+        self.assertEqual(len({clip['selectionKey'] for clip in manual}), 8)
+        self.assertEqual(len({clip['id'] for clip in manual[:4]}), 4)
+        self.clips.reverse()
+        self.save()
+        for seed, expected in enumerate(manual):
+            self.assertEqual(edit.select_clip(seed, 'edit-sad', '2026-09-01', 'manual-3d'), expected)
+            self.assertEqual(edit.select_clip(seed, 'edit-sad', '2026-09-02', 'manual-3d'), expected)
+        daily = edit.select_clip(1, 'edit-sad', '2026-09-01', 'softbody-dvlad')
+        self.assertEqual(daily['selectionKey'], 'edit-selection-v1:softbody-dvlad:2026-09-01:edit-sad')
+
+    def test_cloud_manual_preview_uses_a_seed_namespace_but_daily_retry_does_not(self):
+        clip = self.add()
+        with patch.dict(os.environ, {'CLIPMAKER_EDIT_AUDIO_DIR': ''}), patch.object(edit, 'cloud', return_value=json.dumps({'clip': clip}).encode()) as request:
+            for seed in (910103, 910104, 910103):
+                edit.select_clip(seed, 'edit-sad', '2026-09-01', 'manual-3d')
+            previews = [call.args[1]['channel'] for call in request.call_args_list]
+            self.assertEqual(previews, ['preview-910103', 'preview-910104', 'preview-910103'])
+            self.assertTrue(all(call.args[1]['date'] == '1970-01-01' for call in request.call_args_list))
+            edit.select_clip(910103, 'edit-sad', '2026-09-02', 'manual-3d')
+            self.assertEqual(request.call_args.args[1], request.call_args_list[0].args[1])
+            request.reset_mock()
+            for seed in (1, 999):
+                edit.select_clip(seed, 'edit-sad', '2026-09-01', 'softbody-dvlad')
+            self.assertEqual([call.args[1]['channel'] for call in request.call_args_list], ['softbody-dvlad'] * 2)
+            self.assertTrue(all(call.args[1]['date'] == '2026-09-01' for call in request.call_args_list))
 
     def test_rejects_wrong_mood_non_speech_and_unconfirmed_rights(self):
         clip = self.add()

@@ -50,9 +50,9 @@ on:
         default: HOW SOFT CAN IT GET?
         type: string
       music_profile:
-        description: Spoken edit library, optional songs or original instrumental
+        description: Random reviewed spoken edit from the selected mood, or original instrumental
         required: false
-        default: original
+        default: edit-sad
         type: choice
         options: [edit-auto, edit-sad, edit-revenge, original, auto, revenge, sad-english]
 
@@ -132,7 +132,7 @@ jobs:
                   "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
-                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "original",
+                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "edit-sad",
                   "music_volume": 0.58,
               })
           else:
