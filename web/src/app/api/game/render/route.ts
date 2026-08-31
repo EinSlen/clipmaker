@@ -22,7 +22,7 @@ type RenderRequest = {
   soundPack?: 'auto' | 'meme' | 'funny' | 'arcade' | 'impact' | 'asmr';
   musicFile?: string;
   musicMode?: 'hit-reveal' | 'continuous';
-  musicProfile?: 'auto' | 'revenge' | 'sad-english' | 'original';
+  musicProfile?: 'edit-auto' | 'edit-sad' | 'edit-revenge' | 'auto' | 'revenge' | 'sad-english' | 'original';
   musicVolume?: number;
   title?: string;
   obstacle?: 'auto' | 'moving-slide' | 'stair-cascade' | 'v-stairs' | 'pipe-bend' | 'peg-grid' | 'twin-gears' | 'compression-ring';
@@ -119,9 +119,12 @@ export async function POST(request: Request) {
       ? body.musicMode
       : defaultMusicMode;
     const musicVolume = numberInRange(Number(body.musicVolume) * 100, 55, 0, 100) / 100;
-    const musicProfile = body.musicProfile ?? 'auto';
-    if (!['auto', 'revenge', 'sad-english', 'original'].includes(musicProfile)) {
+    const musicProfile = body.musicProfile ?? 'original';
+    if (!['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original'].includes(musicProfile)) {
       return NextResponse.json({ ok: false, error: 'Playlist vocale invalide.' }, { status: 400 });
+    }
+    if (musicProfile.startsWith('edit-') && (game !== 'soft-body-slide' || musicVolume <= 0)) {
+      return NextResponse.json({ ok: false, error: 'Les voix d’edit nécessitent Souplesse 3D et un volume supérieur à zéro.' }, { status: 400 });
     }
     const title = String(body.title || definition.defaultHook).trim().slice(0, 52) || definition.defaultHook;
     const obstacleKeys = ['auto', 'moving-slide', 'stair-cascade', 'v-stairs', 'pipe-bend', 'peg-grid', 'twin-gears', 'compression-ring'] as const;

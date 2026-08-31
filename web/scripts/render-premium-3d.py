@@ -22,6 +22,7 @@ from soft_body_variants import (
 from soft_body_framing import validate_stair_outlet_evidence
 from soft_body_stair_geometry import VOLUME_CONTACT
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
+from edit_audio import EDIT_PROFILES, prepare_edit_soundtrack
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -332,14 +333,14 @@ def synth_soft_body_bed(duration: float, output: Path, seed: int) -> None:
         destination.writeframes(pcm.tobytes())
 
 
-def build_continuous_audio_filter(music_volume: float, vocals: bool = False) -> str:
+def build_continuous_audio_filter(music_volume: float, vocals: bool = False, spoken: bool = False) -> str:
     """Mix readable vocals or a quiet instrumental bed with collision Foley."""
     bounded_volume = max(0.0, min(1.5, music_volume))
     if vocals:
         # Keep the actual recording's character and stereo image. No pitch,
         # reverb, synthetic voice or impact-triggered chopping of the lyrics.
         return (
-            "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.75[fx];"
+            f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={0.16 if spoken else 0.75}[fx];"
             "[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={bounded_volume:.4f}[music];"
             "[music][fx]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
@@ -429,6 +430,8 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if external_music is None:
             if args.music_profile == "original":
                 synth_soft_body_bed(args.duration, generated_bed, args.seed)
+            elif args.music_profile in EDIT_PROFILES:
+                soundtrack = prepare_edit_soundtrack(args.duration, generated_bed, args.seed, args.music_profile, synth_bed=synth_soft_body_bed)
             else:
                 soundtrack = prepare_vocal_soundtrack(args.duration, generated_bed, args.seed, args.music_profile)
         motion_events = root / "motion-events.json"
@@ -485,10 +488,10 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         ], check=True)
         synth_premium_foley(args.duration, events, effects, args.seed)
         music_source = external_music or generated_bed
-        audio_filter = build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")))
+        audio_filter = build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
         audio_command = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
-            "-stream_loop", "-1", "-i", str(music_source), "-filter_complex", audio_filter,
+            *([] if soundtrack.get("music_content_kind") == "spoken" else ["-stream_loop", "-1"]), "-i", str(music_source), "-filter_complex", audio_filter,
         ]
         subprocess.run(audio_command + [
             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000",
@@ -505,7 +508,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "sound_pack": "premium-foley",
         "requested_sound_pack": args.sound_pack,
         **soundtrack,
-        "music_mode": "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed",
+        "music_mode": soundtrack.get("music_mode", "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed"),
         "requested_music_mode": args.music_mode,
         "music_hits": len(events),
         "events": len(events),
@@ -544,7 +547,7 @@ def main() -> None:
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--music")
     parser.add_argument("--music-mode", choices=("hit-reveal", "continuous"), default="continuous")
-    parser.add_argument("--music-profile", choices=PROFILES, default="auto")
+    parser.add_argument("--music-profile", choices=PROFILES, default="original")
     parser.add_argument("--music-volume", type=float, default=0.58)
     parser.add_argument("--title", default="0% VS 100% SOFTNESS")
     args = parser.parse_args()

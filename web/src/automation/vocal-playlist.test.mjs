@@ -14,7 +14,7 @@ test('vocal playlists round-trip into daily requests without mutating legacy pla
   await fs.writeFile(file, JSON.stringify(raw));
   const legacy = await readPublisherConfig(file, {});
   assert.equal(Object.hasOwn(legacy.channels[0].game, 'musicProfile'), false);
-  for (const musicProfile of ['auto', 'revenge', 'sad-english', 'original']) {
+  for (const musicProfile of ['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original']) {
     raw.channels[0].game.musicProfile = musicProfile;
     await fs.writeFile(file, JSON.stringify(raw));
     const config = await readPublisherConfig(file, {});
@@ -24,4 +24,12 @@ test('vocal playlists round-trip into daily requests without mutating legacy pla
   raw.channels[0].game.musicProfile = 'https://untrusted.test/playlist';
   await fs.writeFile(file, JSON.stringify(raw));
   await assert.rejects(() => readPublisherConfig(file, {}), /Invalid musicProfile/);
+  for (const game of [
+    { id: 'ball-escape', musicProfile: 'edit-sad' },
+    { id: 'soft-body-slide', musicProfile: 'edit-sad', musicVolume: 0 },
+  ]) {
+    raw.channels[0].game = game;
+    await fs.writeFile(file, JSON.stringify(raw));
+    await assert.rejects(() => readPublisherConfig(file, {}), /Spoken edits require/);
+  }
 });

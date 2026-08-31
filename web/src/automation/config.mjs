@@ -21,7 +21,7 @@ const GAME_LIMITS = Object.freeze({
 const THEMES = new Set(['neon', 'sunset', 'ice']);
 const SOUND_PACKS = new Set(['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr']);
 const MUSIC_MODES = new Set(['hit-reveal', 'continuous']);
-const MUSIC_PROFILES = new Set(['auto', 'revenge', 'sad-english', 'original']);
+const MUSIC_PROFILES = new Set(['edit-auto', 'edit-sad', 'edit-revenge', 'auto', 'revenge', 'sad-english', 'original']);
 const PRIVACY = new Set(['private', 'unlisted', 'public']);
 const OBSTACLES = new Set([
   'auto',
@@ -101,6 +101,7 @@ function normalizeGameEntry(entry, channelId, source = 'game') {
   if (entry.musicVolume !== undefined) normalized.musicVolume = finiteNumber(entry.musicVolume, 0.55, 0, 1, 'musicVolume');
   if (entry.musicProfile !== undefined) {
     if (!MUSIC_PROFILES.has(entry.musicProfile)) throw new Error(`Invalid musicProfile: ${entry.musicProfile}`);
+    if (entry.musicProfile.startsWith('edit-') && (game !== 'soft-body-slide' || (normalized.musicVolume ?? .55) <= 0)) throw new Error('Spoken edits require soft-body-slide and non-zero volume');
     normalized.musicProfile = entry.musicProfile;
   }
   if (entry.title !== undefined) normalized.title = requiredString(entry.title, 'title').slice(0, 52);

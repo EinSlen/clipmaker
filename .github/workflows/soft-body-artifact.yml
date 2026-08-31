@@ -50,11 +50,11 @@ on:
         default: HOW SOFT CAN IT GET?
         type: string
       music_profile:
-        description: Vocal playlist (real English lyrics) or original instrumental
+        description: Spoken edit library, optional songs or original instrumental
         required: false
-        default: auto
+        default: original
         type: choice
-        options: [auto, revenge, sad-english, original]
+        options: [edit-auto, edit-sad, edit-revenge, original, auto, revenge, sad-english]
 
 permissions:
   contents: read
@@ -94,6 +94,7 @@ jobs:
       PLAN_ONLY: ${{ inputs.plan_only || false }}
       REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
     steps:
+      - uses: actions/checkout@v6
       - name: Load the private cloud configuration for a scheduled run
         if: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
         run: |
@@ -110,9 +111,12 @@ jobs:
           import json
           import os
           import re
+          import sys
           from datetime import datetime
           from pathlib import Path
           from zoneinfo import ZoneInfo
+          sys.path.insert(0, "web/scripts")
+          from edit_audio import EDIT_PROFILES, select_clip, fetch_clip
 
           today = datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
           channels = []
@@ -128,7 +132,7 @@ jobs:
                   "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
-                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "auto",
+                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "original",
                   "music_volume": 0.58,
               })
           else:
@@ -149,7 +153,7 @@ jobs:
                       "samples": 64, "chunk_size": 15,
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
-                      "music_profile": game.get("musicProfile", "auto"),
+                      "music_profile": game.get("musicProfile", "original"),
                       "music_volume": game.get("musicVolume", 0.58),
                   })
           if len(channels) > 8:
@@ -163,10 +167,16 @@ jobs:
                       channel["chunk_size"] = 30
           frames = []
           for channel in channels:
-              if channel["music_profile"] not in ("auto", "revenge", "sad-english", "original"):
+              if channel["music_profile"] not in (*EDIT_PROFILES, "auto", "revenge", "sad-english", "original"):
                   raise SystemExit("Invalid vocal playlist")
               if not isinstance(channel["music_volume"], (int, float)) or not 0 <= channel["music_volume"] <= 1:
                   raise SystemExit("Invalid soundtrack volume")
+              if channel["music_profile"] in EDIT_PROFILES:
+                  if channel["music_volume"] <= 0:
+                      raise SystemExit("Spoken edit volume must be greater than zero")
+                  clip = select_clip(channel["seed"], channel["music_profile"], channel["date"], channel["channel_id"])
+                  fetch_clip(clip)
+                  channel["edit_clip_id"] = clip["id"]
           total = int(os.environ["FRAME_COUNT"])
           for channel in channels:
               for index, start in enumerate(range(1, total + 1, channel["chunk_size"]), 1):
@@ -370,6 +380,7 @@ jobs:
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
       - name: Encode video, selected soundtrack and collision Foley
         env:
+          CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
           MUSIC_PROFILE: ${{ matrix.music_profile }}
           MUSIC_VOLUME: ${{ matrix.music_volume }}
           MUSIC_DATE: ${{ matrix.date }}
@@ -377,7 +388,7 @@ jobs:
         run: |
           mkdir -p artifacts/final
           docker run --rm --init --volume "$PWD/artifacts/frames:/frames:ro" --volume "$PWD/artifacts/scene:/scene:ro" \
-            --volume "$PWD/artifacts/final:/final" clipmaker-ci:3d python3 scripts/finalize-premium-3d.py \
+            --volume "$PWD/artifacts/final:/final" --env CLIPMAKER_UPLOAD_TOKEN clipmaker-ci:3d python3 scripts/finalize-premium-3d.py \
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${{ matrix.obstacle }}-${{ matrix.seed }}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
@@ -391,7 +402,9 @@ jobs:
           DAILY_SEED: ${{ matrix.seed }}
           DAILY_OBSTACLE: ${{ matrix.obstacle }}
           DAILY_TITLE: ${{ matrix.title }}
+          DAILY_EDIT_CLIP_ID: ${{ matrix.edit_clip_id || '' }}
         run: |
+          node --input-type=module -e "import fs from 'node:fs'; import {assertEditAudioQuality} from './web/src/automation/edit-audio-quality.mjs'; assertEditAudioQuality(JSON.parse(fs.readFileSync('artifacts/final/metadata.json','utf8')));"
           video="artifacts/final/soft-body-${DAILY_OBSTACLE}-${DAILY_SEED}.mp4"
           docker run --rm --volume "$PWD/artifacts/final:/final:ro" clipmaker-ci:3d \
             ffprobe -v error \
@@ -404,6 +417,8 @@ jobs:
           from pathlib import Path
 
           metadata = json.loads(Path("artifacts/final/metadata.json").read_text(encoding="utf-8"))
+          if os.environ.get("DAILY_EDIT_CLIP_ID") and metadata.get("music_track_id") != os.environ["DAILY_EDIT_CLIP_ID"]:
+              raise SystemExit("Spoken clip differs from the preflight selection; refusing replacement")
           probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
           streams = probe.get("streams", [])
           video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
@@ -424,7 +439,14 @@ jobs:
                             and metadata.get("music_clearance") == "ncs-independent-creator-ugc"
                             and metadata.get("music_license_url") == "https://ncs.io/usage-policy/terms"
                             and bool(metadata.get("music_credit")) and bool(metadata.get("music_source_sha256")))
-          if (metadata.get("music_generated") is not True and not cleared_vocals) or metadata.get("sound_pack") != "premium-foley":
+          spoken_edit = (metadata.get("music_provider") == "private-edit-library"
+                         and metadata.get("music_content_kind") == "spoken"
+                         and metadata.get("music_clearance") == "user-attested-cross-platform"
+                         and metadata.get("music_sentence_reviewed") is True
+                         and metadata.get("music_looped") is False
+                         and bool(metadata.get("music_rights_evidence"))
+                         and bool(metadata.get("music_source_sha256")))
+          if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or metadata.get("sound_pack") != "premium-foley":
               raise SystemExit("Missing soundtrack clearance or collision Foley metadata")
           title = os.environ["DAILY_TITLE"]
           video = f"soft-body-{os.environ['DAILY_OBSTACLE']}-{os.environ['DAILY_SEED']}.mp4"
@@ -465,7 +487,8 @@ jobs:
       SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
       RECOVERY_SEED: ${{ inputs.seed }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
-      RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'auto' }}
+      RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'original' }}
+      CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Download the previous native scene and all frame chunks
@@ -489,7 +512,7 @@ jobs:
         run: |
           mkdir -p artifacts/final
           docker run --rm --init --volume "$PWD/artifacts/frames:/frames:ro" --volume "$PWD/artifacts/scene:/scene:ro" \
-            --volume "$PWD/artifacts/final:/final" clipmaker-ci:3d python3 scripts/finalize-premium-3d.py \
+            --volume "$PWD/artifacts/final:/final" --env CLIPMAKER_UPLOAD_TOKEN clipmaker-ci:3d python3 scripts/finalize-premium-3d.py \
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \

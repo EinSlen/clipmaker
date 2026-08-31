@@ -107,7 +107,7 @@ class VocalPlaylistTests(unittest.TestCase):
             self.assertIn('"--music-profile"', source)
             self.assertIn('bool(soundtrack.get("music_has_vocals"))', source)
         workflow = (scripts.parents[1] / ".github/workflows/soft-body-artifact.yml").read_text(encoding="utf-8")
-        self.assertIn('game.get("musicProfile", "auto")', workflow)
+        self.assertIn('game.get("musicProfile", "original")', workflow)
         self.assertIn('--date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"', workflow)
         self.assertIn('metadata["music_credit"]', workflow)
 

@@ -23,6 +23,7 @@ process.stdout.write('Running deterministic engine tests...\n');
 const unitOutput = run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_game_variants.py', '-v'], { includeStderr: true });
 process.stdout.write(`${unitOutput}\n`);
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_vocal_playlist.py', '-v'], { includeStderr: true })}\n`);
+process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_edit_audio.py', '-v'], { includeStderr: true })}\n`);
 
 if (!process.argv.includes('--smoke')) process.exit(0);
 

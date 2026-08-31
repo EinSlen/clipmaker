@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
+from edit_audio import EDIT_PROFILES, prepare_edit_soundtrack
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -80,7 +81,7 @@ def main() -> None:
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--obstacle", required=True)
     parser.add_argument("--music-volume", type=float, default=0.58)
-    parser.add_argument("--music-profile", choices=PROFILES, default="auto")
+    parser.add_argument("--music-profile", choices=PROFILES, default="original")
     parser.add_argument("--date")
     parser.add_argument("--channel-id", default="preview")
     parser.add_argument("--preset", default="slow")
@@ -118,6 +119,8 @@ def main() -> None:
         if args.music_profile == "original":
             renderer.synth_soft_body_bed(args.duration, music, args.seed)
             soundtrack = {"music": "Original seeded ambient bed", "music_generated": True, "music_profile": "original"}
+        elif args.music_profile in EDIT_PROFILES:
+            soundtrack = prepare_edit_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id, synth_bed=renderer.synth_soft_body_bed)
         else:
             soundtrack = prepare_vocal_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id)
         video_filter = renderer.build_video_filter(args.duration, stages, variant.obstacle.key)
@@ -132,11 +135,12 @@ def main() -> None:
             check=True,
         )
         renderer.synth_premium_foley(args.duration, events, effects, args.seed)
-        audio_filter = renderer.build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")))
+        audio_filter = renderer.build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(silent), "-i", str(effects), "-stream_loop", "-1", "-i", str(music),
+                "-i", str(silent), "-i", str(effects),
+                *([] if soundtrack.get("music_content_kind") == "spoken" else ["-stream_loop", "-1"]), "-i", str(music),
                 "-filter_complex", audio_filter,
                 "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac",
                 "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart",
@@ -154,7 +158,7 @@ def main() -> None:
         "difficulty": args.difficulty,
         "sound_pack": "premium-foley",
         **soundtrack,
-        "music_mode": "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed",
+        "music_mode": soundtrack.get("music_mode", "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed"),
         "music_hits": len(events),
         "events": len(events),
         "event_source": "simulated-collision-peaks" if events else "no-physical-events",

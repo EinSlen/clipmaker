@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-PROFILES = ("auto", "revenge", "sad-english", "original")
+PROFILES = ("edit-auto", "edit-sad", "edit-revenge", "auto", "revenge", "sad-english", "original")
 CATALOG = Path(__file__).resolve().parent.parent / "data" / "vocal-playlists.json"
 ALLOWED_HOSTS = frozenset(("ncs.io", "www.ncs.io", "ncsmusic.s3.eu-west-1.amazonaws.com"))
 LICENSE_URL = "https://ncs.io/usage-policy/terms"
@@ -101,7 +101,7 @@ def load_catalog(path: Path = CATALOG) -> list[dict]:
 
 def select_track(seed: int, profile: str = "auto", daily_date: str | None = None,
                  channel_id: str = "preview", tracks: list[dict] | None = None) -> dict:
-    if profile not in PROFILES or profile == "original":
+    if profile not in ("auto", "revenge", "sad-english"):
         raise ValueError("A vocal playlist must be auto, revenge or sad-english")
     pool = [track for track in (tracks if tracks is not None else load_catalog())
             if profile == "auto" or track["profile"] == profile]
@@ -181,7 +181,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--profile", choices=PROFILES[:-1], default="auto")
+    parser.add_argument("--profile", choices=("auto", "revenge", "sad-english"), default="auto")
     parser.add_argument("--duration", type=float, default=30)
     parser.add_argument("--date")
     parser.add_argument("--channel-id", default="preview")

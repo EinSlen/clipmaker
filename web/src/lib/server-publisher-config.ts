@@ -18,7 +18,7 @@ const LIMITS: Record<GameId, { difficulty: [number, number]; duration: [number, 
 const THEMES = new Set(["neon", "sunset", "ice"]);
 const SOUND_PACKS = new Set(["auto", "meme", "funny", "arcade", "impact", "asmr"]);
 const MUSIC_MODES = new Set(["hit-reveal", "continuous"]);
-const MUSIC_PROFILES = new Set(["auto", "revenge", "sad-english", "original"]);
+const MUSIC_PROFILES = new Set(["edit-auto", "edit-sad", "edit-revenge", "auto", "revenge", "sad-english", "original"]);
 const OBSTACLES = new Set([
   "auto",
   "moving-slide",
@@ -78,6 +78,7 @@ function normalizeChannel(value: unknown, index: number): PublisherChannelConfig
   if (!MUSIC_MODES.has(musicMode)) throw new Error(`Mode musical invalide : ${musicMode}.`);
   const musicProfile = gameRaw.musicProfile as PublisherChannelConfig["game"]["musicProfile"];
   if (musicProfile !== undefined && !MUSIC_PROFILES.has(musicProfile)) throw new Error("Playlist vocale invalide.");
+  if (musicProfile?.startsWith("edit-") && (gameId !== "soft-body-slide" || Number(gameRaw.musicVolume ?? .55) <= 0)) throw new Error("Les voix d’edit nécessitent Souplesse 3D et un volume supérieur à zéro.");
   const obstacle = gameRaw.obstacle === undefined ? undefined : text(gameRaw.obstacle, "Obstacle");
   if (obstacle && !OBSTACLES.has(obstacle)) throw new Error(`Obstacle invalide : ${obstacle}.`);
 

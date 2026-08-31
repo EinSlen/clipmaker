@@ -1,3 +1,5 @@
+import { assertEditAudioQuality } from './edit-audio-quality.mjs';
+
 const SPECIMENS = {
   'moving-slide': 1,
   'stair-cascade': 3,
@@ -11,6 +13,7 @@ const SPECIMENS = {
 // Recheck persisted/imported evidence at the upload boundary too. A ready MP4
 // from an older renderer must not bypass today's physics checks.
 export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle = 'auto', musicProfile }) {
+  assertEditAudioQuality(metadata, duration);
   const fail = () => { throw new Error('3D publication blocked: missing, incomplete or failed native physics preflight. Regenerate this video.'); };
   const frames = metadata?.frames;
   const stages = metadata?.softness_stages;

@@ -255,7 +255,7 @@
       musicMode: definition.musicMode,
     };
     if (definition.id === 'soft-body-slide') channel.game.obstacle = 'auto';
-    else delete channel.game.obstacle;
+    else { delete channel.game.obstacle; delete channel.game.musicProfile; }
     renderChannels();
   }
 
@@ -348,21 +348,22 @@
     fields.append(field('Accroche vidéo (anglais)', inputNode(channel.game.title, 'text', (value) => { channel.game.title = value; }), 'field-span-2'));
     if (channel.game.id === 'soft-body-slide') {
       fields.append(field('Obstacle 3D', selectNode(OBSTACLES, channel.game.obstacle || 'auto', (value) => { channel.game.obstacle = value; }), 'field-span-2'));
-      fields.append(field('Playlist avec paroles anglaises', selectNode([
-        ['auto', 'Mix aléatoire — triste + revenge (9 titres)'],
-        ['revenge', 'Revenge — sombre et puissant (5 titres)'],
-        ['sad-english', 'Triste — chants en anglais (4 titres)'],
+      fields.append(field('Voix et ambiance', selectNode([
+        ['edit-auto', 'Voix d’edit — mix aléatoire'],
+        ['edit-sad', 'Voix d’edit — triste'],
+        ['edit-revenge', 'Voix d’edit — revenge'],
+        ['auto', 'Chansons NCS — mix (option historique)'],
+        ['revenge', 'Chansons NCS — puissant'],
+        ['sad-english', 'Chansons NCS — mélancolique'],
         ['original', 'Ambiance originale — sans paroles'],
-      ], channel.game.musicProfile || 'auto', (value) => { channel.game.musicProfile = value; }), 'field-span-2'));
+      ], channel.game.musicProfile || 'original', (value) => { channel.game.musicProfile = value; }), 'field-span-2'));
       const musicNote = document.createElement('p');
       musicNote.className = 'field-span-2';
-      musicNote.textContent = 'Rotation quotidienne sans répétition avant la fin de la playlist. Vrais chants NCS, crédits inclus dans les publications. Une relance conserve le même morceau.';
+      musicNote.textContent = 'Voix d’edit : extraits parlés complets de la bibliothèque privée. Un choix par jour et par compte, stable en cas de relance. Une bibliothèque vide ne remplace jamais une voix par une chanson.';
       fields.append(musicNote);
       const libraryLink = document.createElement('a');
-      libraryLink.href = 'https://ncs.io/music';
-      libraryLink.target = '_blank';
-      libraryLink.rel = 'noreferrer';
-      libraryLink.textContent = 'Écouter le catalogue NCS';
+      libraryLink.href = '#audio-library';
+      libraryLink.textContent = 'Importer et écouter mes voix d’edit';
       fields.append(libraryLink);
     } else {
       fields.append(field('Durée', selectNode([['15', '15 secondes'], ['30', '30 secondes'], ['45', '45 secondes'], ['60', '60 secondes']], String(channel.game.duration), (value) => { channel.game.duration = Number(value); })));
@@ -464,7 +465,7 @@
       elements.authState.style.color = '#58e6a9';
       lockCommands();
       if (window.location.hash) window.history.replaceState({}, document.title, window.location.pathname);
-      await Promise.all([refreshAll(), loadConfig()]);
+      await Promise.all([refreshAll(), loadConfig(), audioLibrary.load()]);
     } catch (error) {
       session = '';
       forgetSession();
@@ -480,6 +481,7 @@
     session = '';
     publisherConfig = null;
     accountCatalog = { tiktok: [], youtube: [] };
+    audioLibrary.clear();
     forgetSession();
     elements.authState.textContent = 'Lecture publique · connexion GitHub requise pour commander';
     elements.authState.style.color = '';
@@ -691,6 +693,7 @@
         samples: document.querySelector('#samples').value,
         chunk_size: document.querySelector('#chunk-size').value,
         title: 'HOW SOFT CAN IT GET?',
+        music_profile: document.querySelector('#three-d-music-profile').value,
       }, 'Rendu Blender 3D lancé sur GitHub.');
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), true);
@@ -718,6 +721,15 @@
   document.querySelectorAll('.nav-link').forEach((link) => link.addEventListener('click', () => {
     document.querySelectorAll('.nav-link').forEach((item) => item.classList.toggle('active', item === link));
   }));
+
+  const audioLibrary = window.createEditAudioLibrary({ control, notify, connected: () => Boolean(session), media: async path => {
+    await control('/api/session');
+    const response = await fetch(`${CONTROL_API}${path}`, { headers: { Authorization: `Bearer ${session}` } });
+    if (!response.ok) throw new Error((await response.json()).error || 'Extrait indisponible.');
+    const renewed = response.headers.get('X-ClipMaker-Session');
+    if (renewed) { session = renewed; saveSession(session); }
+    return response.blob();
+  } });
 
   if (session) {
     lockCommands();

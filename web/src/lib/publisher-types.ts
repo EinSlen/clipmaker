@@ -7,7 +7,7 @@ export type PublisherGameConfig = {
   theme: "neon" | "sunset" | "ice";
   soundPack: "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
   musicMode: "hit-reveal" | "continuous";
-  musicProfile?: "auto" | "revenge" | "sad-english" | "original";
+  musicProfile?: "edit-auto" | "edit-sad" | "edit-revenge" | "auto" | "revenge" | "sad-english" | "original";
   musicVolume: number;
   title: string;
   obstacle?: string;

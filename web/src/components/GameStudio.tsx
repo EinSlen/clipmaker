@@ -29,10 +29,10 @@ import type { MusicTrack } from "@/lib/types";
 type Theme = "neon" | "sunset" | "ice";
 type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
-type MusicProfile = "auto" | "revenge" | "sad-english" | "original";
+type MusicProfile = "edit-auto" | "edit-sad" | "edit-revenge" | "auto" | "revenge" | "sad-english" | "original";
 type SoftBodyObstacle = "auto" | "moving-slide" | "stair-cascade" | "v-stairs" | "pipe-bend" | "peg-grid" | "twin-gears" | "compression-ring";
 type RenderedSoundPack = SoundPack | "glass" | "premium-foley";
-type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed" | "vocal-playlist";
+type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed" | "vocal-playlist" | "spoken-edit";
 type GameOutcome =
   | "escaped"
   | "failed"
@@ -192,7 +192,7 @@ export function GameStudio() {
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
   const [musicFile, setMusicFile] = React.useState("__discover__");
   const [musicMode, setMusicMode] = React.useState<MusicMode>("hit-reveal");
-  const [musicProfile, setMusicProfile] = React.useState<MusicProfile>("auto");
+  const [musicProfile, setMusicProfile] = React.useState<MusicProfile>("original");
   const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -333,7 +333,7 @@ export function GameStudio() {
             soundPack,
             musicFile: musicFile || undefined,
             musicMode,
-            musicProfile,
+            musicProfile: game === "soft-body-slide" ? musicProfile : undefined,
             musicVolume,
             title,
             obstacle: game === "soft-body-slide" ? softBodyObstacle : undefined,
@@ -753,13 +753,13 @@ export function GameStudio() {
                 </h4>
                 <p className="mt-1 text-xs text-ink-500">
                   {game === "soft-body-slide"
-                    ? "Vrais morceaux avec paroles anglaises, sélectionnés dans les playlists NCS. Les collisions restent audibles."
+                    ? "Voix d’edit : monologues anglais, phrases complètes et émotions conservées. Le fond et les collisions restent discrets."
                     : "Associe une musique sous licence et des effets de collision adaptés au jeu."}
                 </p>
               </div>
             </div>
             <div className="grid gap-4">
-              {game === "soft-body-slide" && !musicFile && <label className="block space-y-1.5 text-xs text-ink-400"><span>Playlist vocale</span><select value={musicProfile} onChange={(event) => setMusicProfile(event.target.value as MusicProfile)} className="field-control h-11"><option value="auto">Mix aléatoire — triste + revenge</option><option value="revenge">Revenge — sombre et puissant</option><option value="sad-english">Triste — chants en anglais</option><option value="original">Ambiance originale — sans paroles</option></select><p>La graine choisit le titre. Les paroles viennent du morceau, sans voix robotique ajoutée.</p></label>}
+              {game === "soft-body-slide" && !musicFile && <div className="space-y-2 text-xs text-ink-400"><label className="block space-y-1.5"><span>Voix et ambiance</span><select value={musicProfile} onChange={(event) => setMusicProfile(event.target.value as MusicProfile)} className="field-control h-11"><option value="edit-auto">Voix d’edit — mix aléatoire</option><option value="edit-sad">Voix d’edit — triste</option><option value="edit-revenge">Voix d’edit — revenge</option><option value="original">Ambiance originale — sans paroles</option><option value="auto">Chansons NCS — mix (option historique)</option><option value="revenge">Chansons NCS — puissant</option><option value="sad-english">Chansons NCS — mélancolique</option></select></label><p>Extraits parlés complets, sans boucle ni chant de remplacement. Une relance garde la même voix.</p><a className="text-cyan-300 underline" href="https://einslen.github.io/clipmaker/#audio-library" target="_blank" rel="noreferrer">Importer et écouter mes voix dans le cloud ↗</a></div>}
               <label className="block space-y-1.5 text-xs text-ink-400">
                 <span>Jeu de sons de collision</span>
                 <select
@@ -799,7 +799,7 @@ export function GameStudio() {
                     </option>
                     <option value="">
                       {game === "soft-body-slide"
-                        ? "Playlist vocale NCS — recommandé"
+                        ? "Voix / ambiance sélectionnée ci-dessus"
                         : "Piste électronique originale générée"}
                     </option>
                     {musicTracks.length > 0 && (
@@ -1139,6 +1139,8 @@ export function GameStudio() {
                 <p className="mt-1 text-[11px] text-cyan-200/80">
                   {result.musicMode === "hit-reveal"
                     ? `${result.musicHits} séquences déclenchées par collision`
+                    : result.musicMode === "spoken-edit"
+                    ? "Voix parlée complète · sans boucle · crédit inclus"
                     : result.musicMode === "vocal-playlist"
                     ? "Playlist avec paroles anglaises · crédit inclus"
                     : result.musicMode === "continuous"

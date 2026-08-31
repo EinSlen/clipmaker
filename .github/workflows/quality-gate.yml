@@ -47,6 +47,8 @@ jobs:
           python-version: "3.13"
       - name: Install the renderer test dependency
         run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Install audio validation tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install the web application
         run: npm ci --prefix web
       - name: Test and build the web application
