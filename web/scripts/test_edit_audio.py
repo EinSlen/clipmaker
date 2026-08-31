@@ -186,6 +186,25 @@ class EditAudioTests(unittest.TestCase):
         self.assertNotIn('sidechaincompress', edit.mix_filter(30, True))
         self.assertNotIn('aloop', edit.mix_filter(30, False))
 
+    def test_automatically_audited_cc_voice_is_not_mislabeled_as_human_reviewed(self):
+        clip = self.add(mix='voice-only')
+        clip.update({
+            'rights': 'licensed', 'speechReviewed': False, 'rightsConfirmed': False,
+            'reviewMode': 'freesound-whisper-v1', 'auditSha256': 'a' * 64,
+            'source': 'https://freesound.org/people/voice_actor/sounds/123456/',
+            'rightsEvidence': 'https://creativecommons.org/licenses/by/4.0/',
+        })
+        self.save()
+        def bed(duration, target, seed):
+            with wave.open(str(target), 'wb') as wav:
+                wav.setparams((2, 2, 48000, 0, 'NONE', 'not compressed'))
+                wav.writeframes(struct.pack('<hh', 300, 300) * int(duration * 48000))
+        metadata = edit.prepare_edit_soundtrack(30, self.root / 'automatic.wav', 1, 'edit-sad', synth_bed=bed)
+        self.assertEqual(metadata['music_clearance'], 'verified-source-cc')
+        self.assertEqual(metadata['music_review_mode'], 'freesound-whisper-v1')
+        self.assertFalse(metadata['music_sentence_reviewed'])
+        self.assertEqual(metadata['music_audit_sha256'], 'a' * 64)
+
     def test_workflow_preflights_audio_before_blender_and_pins_the_final_clip(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/soft-body-artifact.yml').read_text(encoding='utf-8')

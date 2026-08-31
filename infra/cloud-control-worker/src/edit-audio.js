@@ -2,6 +2,7 @@
 // in media URLs. CONFIG is already provisioned; no paid storage setup required.
 export const EDIT_PROFILES = ['edit-auto', 'edit-sad', 'edit-revenge'];
 export const CLIP_PREFIX = 'edit-audio-v1:';
+export const USED_PREFIX = 'edit-audio-used-v1:';
 export const MAX_CLIP_BYTES = 5_700_000;
 const ID = /^[a-f0-9]{64}$/u;
 
@@ -127,6 +128,7 @@ export async function chooseClip(kv, request) {
     const { metadata, value } = await readClip(kv, pinned.id);
     await value.cancel();
     if (!metadata.active) fail('L’extrait prévu a été désactivé. Aucun remplacement automatique.', 409);
+    await kv.put(USED_PREFIX + pinned.id, '1', { expirationTtl: 125 * 86400 });
     return pinned;
   }
   const pool = (await listClips(kv)).filter(clip => clip.active && (profile === 'edit-auto' || profile === `edit-${clip.mood}`));
@@ -138,5 +140,6 @@ export async function chooseClip(kv, request) {
   const chosen = deck[((day % deck.length) + deck.length) % deck.length].clip;
   const selection = { ...chosen, profile, selectionKey, poolSize: pool.length, sha256: chosen.id };
   await kv.put(selectionKey, JSON.stringify(selection), { expirationTtl: 120 * 86400 });
+  await kv.put(USED_PREFIX + chosen.id, '1', { expirationTtl: 125 * 86400 });
   return selection;
 }

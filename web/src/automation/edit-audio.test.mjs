@@ -24,3 +24,13 @@ test('legacy instrumentals stay unchanged; edit-auto may choose either spoken mo
   assert.doesNotThrow(() => assertEditAudioQuality({ music_generated: true }));
   assert.doesNotThrow(() => assertEditAudioQuality({ ...clip, requested_music_profile: 'edit-auto', music_profile: 'edit-revenge' }));
 });
+test('automatically audited CC speech is accepted without pretending human review', () => {
+  const automatic = { ...clip, music_sentence_reviewed: false, music_clearance: 'verified-source-cc',
+    music_review_mode: 'freesound-whisper-v1', music_audit_sha256: 'b'.repeat(64),
+    music_source_url: 'https://freesound.org/people/voice_actor/sounds/123456/',
+    music_rights_evidence: 'https://creativecommons.org/licenses/by/4.0/',
+    music_preserves_original_mix: false, music_added_bed: true };
+  assert.doesNotThrow(() => assertEditAudioQuality(automatic));
+  assert.throws(() => assertEditAudioQuality({ ...automatic, music_audit_sha256: '' }), /Spoken edit/);
+  assert.throws(() => assertEditAudioQuality({ ...automatic, music_sentence_reviewed: true }), /Spoken edit/);
+});

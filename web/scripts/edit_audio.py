@@ -64,9 +64,17 @@ def cloud(path: str, payload: dict | None = None, maximum: int = MAX_BYTES) -> b
 
 
 def validate_clip(clip: dict, profile: str, duration: float = 30) -> dict:
+    automatic = isinstance(clip, dict) and clip.get("reviewMode") == "freesound-whisper-v1"
+    reviewed = isinstance(clip, dict) and clip.get("speechReviewed") is True and clip.get("rightsConfirmed") is True
+    if automatic:
+        reviewed = (clip.get("speechReviewed") is False and clip.get("rightsConfirmed") is False
+                    and clip.get("rights") == "licensed" and clip.get("mix") == "voice-only"
+                    and bool(re.fullmatch(r"[a-f0-9]{64}", clip.get("auditSha256", "")))
+                    and bool(re.fullmatch(r"https://freesound\.org/people/[A-Za-z0-9_.-]+/sounds/[0-9]+/", clip.get("source", "")))
+                    and bool(re.fullmatch(r"https://creativecommons\.org/(?:licenses/by/(?:2\.0|2\.5|3\.0|4\.0)|publicdomain/zero/1\.0)/", clip.get("rightsEvidence", ""))))
     if (profile not in EDIT_PROFILES or not isinstance(clip, dict)
             or clip.get("kind") != "spoken" or clip.get("language") != "en"
-            or clip.get("speechReviewed") is not True or clip.get("rightsConfirmed") is not True
+            or not reviewed
             or clip.get("active") is not True or clip.get("rights") not in ("original", "licensed")
             or clip.get("mood") not in ("sad", "revenge") or clip.get("mix") not in ("voice-only", "premixed")
             or (profile != "edit-auto" and profile != "edit-" + clip.get("mood", ""))
@@ -183,10 +191,11 @@ def prepare_edit_soundtrack(duration: float, output: Path, seed: int, profile: s
         "music_mode": "spoken-edit", "music_generated": False, "music_provider": "private-edit-library",
         "music_has_vocals": True, "music_content_kind": "spoken", "music_language": "en",
         "music_track_id": clip["id"], "music_source_sha256": clip["id"], "music_source_url": clip["source"],
-        "music_clearance": "user-attested-cross-platform", "music_rights_evidence": clip["rightsEvidence"],
+        "music_clearance": "verified-source-cc" if clip.get("reviewMode") == "freesound-whisper-v1" else "user-attested-cross-platform", "music_rights_evidence": clip["rightsEvidence"],
+        "music_review_mode": clip.get("reviewMode", "owner-attested"), "music_audit_sha256": clip.get("auditSha256"),
         "music_credit": clip["credit"], "music_selection_key": clip["selectionKey"],
         "music_excerpt_start": 0, "music_excerpt_duration": clip["duration"], "music_voice_start": .15,
-        "music_looped": False, "music_sentence_reviewed": True, "music_preserves_original_mix": clip["mix"] == "premixed",
+        "music_looped": False, "music_sentence_reviewed": clip["speechReviewed"], "music_preserves_original_mix": clip["mix"] == "premixed",
         "music_added_bed": clip["mix"] == "voice-only", "music_pool_size": clip.get("poolSize", 1),
     }
 

@@ -2,13 +2,20 @@ export function assertEditAudioQuality(metadata, duration = 30) {
   const requested = metadata?.requested_music_profile;
   const spoken = metadata?.music_content_kind === 'spoken';
   if (!String(requested || '').startsWith('edit-') && !spoken) return;
+  const automatic = metadata.music_review_mode === 'freesound-whisper-v1';
+  const reviewed = automatic
+    ? metadata.music_clearance === 'verified-source-cc' && metadata.music_sentence_reviewed === false
+      && /^[a-f0-9]{64}$/u.test(metadata.music_audit_sha256 || '')
+      && /^https:\/\/freesound\.org\/people\/[A-Za-z0-9_.-]+\/sounds\/[0-9]+\/$/u.test(metadata.music_source_url || '')
+      && /^https:\/\/creativecommons\.org\/(?:licenses\/by\/(?:2\.0|2\.5|3\.0|4\.0)|publicdomain\/zero\/1\.0)\/$/u.test(metadata.music_rights_evidence || '')
+      && metadata.music_preserves_original_mix === false
+    : metadata.music_clearance === 'user-attested-cross-platform' && metadata.music_sentence_reviewed === true;
   if (!['edit-auto', 'edit-sad', 'edit-revenge'].includes(requested)
     || !['edit-sad', 'edit-revenge'].includes(metadata.music_profile)
     || (requested !== 'edit-auto' && metadata.music_profile !== requested)
     || !spoken || metadata.music_provider !== 'private-edit-library'
     || metadata.music_mode !== 'spoken-edit' || metadata.music_generated !== false
-    || metadata.music_clearance !== 'user-attested-cross-platform'
-    || metadata.music_language !== 'en' || metadata.music_sentence_reviewed !== true
+    || !reviewed || metadata.music_language !== 'en'
     || metadata.music_looped !== false || metadata.music_excerpt_start !== 0
     || metadata.music_voice_start !== 0.15 || metadata.music_has_vocals !== true
     || !Number.isFinite(metadata.music_excerpt_duration) || metadata.music_excerpt_duration < 10

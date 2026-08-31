@@ -75,6 +75,9 @@ test('3D accounts distinguish spoken edit libraries from optional songs', async 
   assert.match(app, /#audio-library/u);
   const html = await source('index.html');
   assert.match(html, /media-src 'self' blob:/u);
+  assert.match(html, /id="run-edit-audio-collection"/u);
+  assert.match(html, /Freesound via Openverse/u);
+  assert.match(await source('edit-audio.js'), /freesound-whisper-v1/u);
   assert.match(html, /name="speechReviewed"/u);
   assert.match(html, /name="rightsConfirmed"/u);
   assert.match(html, /Son d’edit déjà mixé/u);
