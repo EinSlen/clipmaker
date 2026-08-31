@@ -1,6 +1,6 @@
 // The authorized runner performs speech analysis. This endpoint verifies its
 // bounded evidence and hashes; it never labels that analysis as human review.
-import { AudioError, CLIP_PREFIX, MAX_CLIP_BYTES, boundedBytes, inspectWav, listClips } from './edit-audio.js';
+import { AudioError, CLIP_PREFIX, MAX_CLIP_BYTES, USED_PREFIX, boundedBytes, inspectWav, listClips } from './edit-audio.js';
 
 export const DISCOVERY_VERSION = 'freesound-whisper-v1';
 export const COLLECTION_KEY = 'edit-collection-v1';
@@ -128,11 +128,39 @@ export async function importDiscoveredClip(request, kv) {
     return { id, ...existing.metadata, duplicate: true };
   }
   if (sourceId || textId) fail('Source ou paroles déjà importées.', 409);
-  if ((await listClips(kv)).length >= 190) fail('Bibliothèque pleine : collecte suspendue, sons existants conservés.', 409);
+  let library = await listClips(kv);
+  if (library.length >= 175) {
+    await pruneDiscoveredClips(kv, library);
+    library = await listClips(kv);
+  }
+  if (library.length >= 190) fail('Bibliothèque pleine : collecte suspendue, sons existants conservés.', 409);
   // Audit is written first. An audit orphan is safe; unaudited audio is not.
   await kv.put(AUDIT_PREFIX + id, JSON.stringify(audit));
   await kv.put(CLIP_PREFIX + id, audio, { metadata });
   await kv.put(sourceKey, id);
   await kv.put(transcriptKey, id);
   return { id, ...metadata };
+}
+
+export async function pruneDiscoveredClips(kv, supplied, now = new Date()) {
+  const library = supplied || await listClips(kv);
+  const threshold = now.getTime() - 130 * 86400_000;
+  const candidates = library.filter(clip => clip.reviewMode === DISCOVERY_VERSION
+    && Number.isFinite(Date.parse(clip.createdAt)) && Date.parse(clip.createdAt) < threshold)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  let removed = 0;
+  for (const clip of candidates) {
+    if (library.length - removed <= 165 || await kv.get(USED_PREFIX + clip.id)) continue;
+    const audit = await kv.get(AUDIT_PREFIX + clip.id, 'json');
+    // An incomplete audit must be kept for investigation instead of becoming
+    // an unsafe partially-deleted source index.
+    if (audit?.sourceId !== clip.sourceId || !HASH.test(audit?.speech?.transcriptSha256 || '')) continue;
+    await kv.delete(CLIP_PREFIX + clip.id);
+    await kv.delete(AUDIT_PREFIX + clip.id);
+    await kv.delete(`edit-discovered-source-v1:${clip.sourceId}`);
+    await kv.delete(`edit-discovered-text-v1:${audit.speech.transcriptSha256}`);
+    await kv.delete(USED_PREFIX + clip.id);
+    removed += 1;
+  }
+  return removed;
 }

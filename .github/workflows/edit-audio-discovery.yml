@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y -qq ffmpeg
           python -m pip install --disable-pip-version-check --quiet faster-whisper==1.2.1
       - name: Find, verify and privately import new spoken clips
-        run: python web/scripts/discover_edit_audio.py --output "$RUNNER_TEMP/edit-audio" --publish --max-imports 2 --scan-limit 12
+        run: python web/scripts/discover_edit_audio.py --output "$RUNNER_TEMP/edit-audio" --publish --max-imports 1 --scan-limit 12
       - name: Print only the non-sensitive collection summary
         if: always()
         run: |

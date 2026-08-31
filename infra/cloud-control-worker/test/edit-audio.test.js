@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import worker, { sealSession } from '../src/index.js';
 import { CLIP_PREFIX, boundedBytes, chooseClip, clipMetadata, inspectWav, listClips, putClip } from '../src/edit-audio.js';
-import { AUDIT_PREFIX, DISCOVERY_VERSION, collectionState, importDiscoveredClip } from '../src/audio-discovery.js';
+import { AUDIT_PREFIX, DISCOVERY_VERSION, collectionState, importDiscoveredClip, pruneDiscoveredClips } from '../src/audio-discovery.js';
 
 function wav(seconds = 12, signal = 1000) {
   const bytes = Buffer.alloc(44 + seconds * 192000);
@@ -26,6 +26,7 @@ function memoryKv() {
     async get(key, type) { const item = map.get(key); return !item ? null : type === 'json' ? JSON.parse(item.value) : type === 'stream' ? stream(item.value) : item.value; },
     async getWithMetadata(key, type) { return { value: await this.get(key, type), metadata: map.get(key)?.metadata || null }; },
     async list({ prefix }) { return { keys: [...map].filter(([key]) => key.startsWith(prefix)).map(([name, item]) => ({ name, metadata: item.metadata })), list_complete: true }; },
+    async delete(key) { map.delete(key); },
   };
 }
 function upload(audio = wav(), metadata = info, headers = {}) {
@@ -172,4 +173,26 @@ test('runner reports cannot unpause collection or smuggle arbitrary state fields
   const saved = await worker.fetch(new Request('https://worker.test/api/workflow/edit-audio/collection', { method: 'POST',
     headers: { Authorization: 'Bearer runner-test-only', 'Content-Type': 'application/json' }, body: JSON.stringify(report) }), env);
   assert.equal(saved.status, 200); const stored = await saved.json(); assert.equal(stored.enabled, false); assert.equal(stored.accounts, undefined);
+});
+test('rolling cleanup removes only expired, unused automatic clips and preserves their indexes until safe', async () => {
+  const kv = memoryKv(); const old = '2026-01-01T00:00:00Z', recent = '2026-08-01T00:00:00Z';
+  const base = { kind: 'spoken', language: 'en', duration: 12, active: true, mood: 'sad', mix: 'voice-only',
+    rights: 'licensed', reviewMode: DISCOVERY_VERSION, speechReviewed: false, rightsConfirmed: false };
+  for (const [index, createdAt, automatic] of [[1, old, true], [2, old, true], [3, old, false], [4, recent, true]]) {
+    const id = String(index).repeat(64); const sourceId = String(120000 + index);
+    const metadata = { ...base, id, sourceId, createdAt, ...(automatic ? {} : { reviewMode: 'owner-attested' }) };
+    await kv.put(CLIP_PREFIX + id, wav(), { metadata });
+    await kv.put(AUDIT_PREFIX + id, JSON.stringify({ sourceId, speech: { transcriptSha256: String(index + 4).repeat(64) } }));
+    await kv.put(`edit-discovered-source-v1:${sourceId}`, id);
+    await kv.put(`edit-discovered-text-v1:${String(index + 4).repeat(64)}`, id);
+  }
+  await kv.put('edit-audio-used-v1:' + '2'.repeat(64), '1');
+  const supplied = await listClips(kv);
+  // Padding makes the rolling bank large enough to request one safe deletion.
+  for (let i = 0; i < 163; i++) supplied.push({ ...base, id: `pad-${i}`, createdAt: recent });
+  assert.equal(await pruneDiscoveredClips(kv, supplied, new Date('2026-08-31T00:00:00Z')), 1);
+  assert.equal(await kv.get(CLIP_PREFIX + '1'.repeat(64)), null);
+  assert.ok(await kv.get(CLIP_PREFIX + '2'.repeat(64))); // selected during the last 125 days
+  assert.ok(await kv.get(CLIP_PREFIX + '3'.repeat(64))); // owner-managed clip
+  assert.ok(await kv.get(CLIP_PREFIX + '4'.repeat(64))); // too recent
 });
