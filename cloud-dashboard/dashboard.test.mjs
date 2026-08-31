@@ -118,6 +118,14 @@ test('manual 3D renders default to the reliable 15-frame chunks', async () => {
   assert.doesNotMatch(html, /<option value="30" selected>/u);
 });
 
+test('manual 3D previews default to random sad spoken edits rather than instrumental music', async () => {
+  const html = await source('index.html');
+  assert.match(html, /id="three-d-music-profile"><option value="edit-sad">/u);
+  assert.match(html, /Un tirage par vidéo, conservé en cas de relance/u);
+  assert.match(html, /après rotation de la bibliothèque/u);
+  assert.match(html, /value="original">Ambiance originale sans voix/u);
+});
+
 test('generation explains saved assignments and shows the server-selected pipeline', async () => {
   const html = await source('index.html');
   const app = await source('app.js');

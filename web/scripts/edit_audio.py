@@ -84,6 +84,14 @@ def select_clip(seed: int, profile: str, daily_date: str | None = None, channel_
         raise ValueError("Unknown spoken edit profile")
     selected_date = daily_date or Date.today().isoformat()
     Date.fromisoformat(selected_date)
+    # The GitHub manual renderer also supplies a date, but multiple manual
+    # videos on that date are different previews, not retries of a daily job.
+    # Real account/day jobs deliberately ignore seed changes on retry.
+    daily_selection = bool(daily_date) and channel_id != "manual-3d"
+    if not daily_selection:
+        # A preview is identified by its seed, not the wall clock. Encoding
+        # after midnight must fetch the same clip as the initial preflight.
+        selected_date = "1970-01-01"
     offline = os.environ.get("CLIPMAKER_EDIT_AUDIO_DIR")
     if offline:
         root = Path(offline).resolve()
@@ -94,15 +102,16 @@ def select_clip(seed: int, profile: str, daily_date: str | None = None, channel_
             raise ValueError("Aucune voix d’edit disponible. Importe des extraits parlés autorisés.")
         pool.sort(key=lambda clip: hashlib.sha256(f"{channel_id}:{profile}:{clip['id']}".encode()).hexdigest())
         key = f"edit-selection-v1:{channel_id}:{selected_date}:{profile}"
-        index = (Date.fromisoformat(selected_date) - Date(1970, 1, 1)).days if daily_date else seed
+        index = (Date.fromisoformat(selected_date) - Date(1970, 1, 1)).days if daily_selection else seed
         # Persist a snapshot, so editing the library never changes a retry.
-        pin = root / ("selection-" + hashlib.sha256(f"{key}:{'' if daily_date else seed}".encode()).hexdigest() + ".json")
+        pin = root / ("selection-" + hashlib.sha256(f"{key}:{'' if daily_selection else seed}".encode()).hexdigest() + ".json")
         if pin.exists():
             clip = json.loads(pin.read_text(encoding="utf-8"))
             if not any(item["id"] == clip["id"] for item in pool):
                 raise ValueError("L’extrait prévu a été désactivé ; aucun remplacement automatique.")
         else:
-            clip = {**pool[index % len(pool)], "sha256": pool[index % len(pool)]["id"], "selectionKey": key, "poolSize": len(pool)}
+            clip = {**pool[index % len(pool)], "sha256": pool[index % len(pool)]["id"],
+                    "selectionKey": key if daily_selection else f"{key}:{seed}", "poolSize": len(pool)}
             try:
                 with pin.open("x", encoding="utf-8") as handle:
                     json.dump(clip, handle)
@@ -110,7 +119,7 @@ def select_clip(seed: int, profile: str, daily_date: str | None = None, channel_
                 clip = json.loads(pin.read_text(encoding="utf-8"))
         return validate_clip(clip, profile, duration)
     # A preview seed gets its own key. Daily reruns ignore seed changes.
-    channel = channel_id if daily_date else f"preview-{seed}"
+    channel = channel_id if daily_selection else f"preview-{seed}"
     result = json.loads(cloud("/select", {"profile": profile, "channel": channel, "date": selected_date,
                                           "seed": seed, "duration": duration}, maximum=12_000))
     return validate_clip(result["clip"], profile, duration)
