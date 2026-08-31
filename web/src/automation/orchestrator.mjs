@@ -12,6 +12,7 @@ import {
 import { doctorEndpoints, renderVideo, uploadTiktok, uploadYoutube } from './api-client.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 import { assertNative3dQuality } from './native-3d-quality.mjs';
+import { publicationCopy } from './edit-captions.mjs';
 
 function deterministicSeed(date, channelId, namespace) {
   const digest = crypto.createHash('sha256').update(`${namespace}:${channelId}:${date}`).digest();
@@ -200,11 +201,12 @@ function enabledPlatformNames(channel) {
 }
 
 async function publishYoutube(config, channel, job) {
+  const copy = job.publicationCopy || job.render;
   return uploadYoutube(config, {
     filename: job.render.filename,
-    title: job.render.youtubeTitle || `${job.render.title || 'Satisfying simulation'} #shorts`,
-    description: job.render.caption || job.render.title || '',
-    tags: job.render.tags || [],
+    title: copy.youtubeTitle || `${job.render.title || 'Satisfying simulation'} #shorts`,
+    description: copy.caption || job.render.title || '',
+    tags: copy.tags || [],
     privacy: channel.youtube.privacy,
     confirmPublic: channel.youtube.confirmPublic,
     account: channel.youtube.account,
@@ -212,7 +214,8 @@ async function publishYoutube(config, channel, job) {
 }
 
 async function publishTiktok(config, channel, job) {
-  const caption = [job.render.caption || job.render.title || '', ...(job.render.tags || [])]
+  const copy = job.publicationCopy || job.render;
+  const caption = [copy.caption || job.render.title || '', ...(copy.tags || [])]
     .filter(Boolean)
     .join(' ')
     .slice(0, 2000);
@@ -272,6 +275,12 @@ export async function publishChannel(config, channel, date, options = {}) {
       target.receipt = null;
       target.raw = null;
       await appendEvent(config.stateDir, { type: 'publish-forced', jobId: job.id, platform });
+    }
+    if (!publicationStarted(job)) {
+      // Freeze the same description before the first platform request. A
+      // partial retry never changes already accepted copy or drops credits.
+      job.publicationCopy = publicationCopy({ style: channel.captionStyle, channelId: channel.id,
+        date: job.date, seed: job.seed, raw: job.render.raw?.native3d || job.render.raw });
     }
     job.status = 'publishing';
     touch(job);

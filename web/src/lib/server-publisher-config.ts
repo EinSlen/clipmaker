@@ -65,6 +65,8 @@ function time(value: unknown, label: string): string {
 function normalizeChannel(value: unknown, index: number): PublisherChannelConfig {
   const raw = object(value, `Canal ${index + 1}`);
   const id = text(raw.id, `Identifiant du canal ${index + 1}`, 32);
+  const captionStyle = raw.captionStyle as PublisherChannelConfig['captionStyle'];
+  if (captionStyle !== undefined && !['auto', 'melancholic', 'revenge', 'gameplay'].includes(captionStyle)) throw new Error('Style de description invalide.');
   if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(id)) throw new Error(`Identifiant de canal invalide : ${id}.`);
   const gameRaw = object(raw.game, `Jeu du canal ${id}`);
   const gameId = text(gameRaw.id, `Jeu du canal ${id}`) as GameId;
@@ -105,6 +107,7 @@ function normalizeChannel(value: unknown, index: number): PublisherChannelConfig
 
   return {
     id,
+    ...(captionStyle !== undefined ? { captionStyle } : {}),
     enabled: raw.enabled !== false,
     generateTime: time(raw.generateTime ?? "00:30", "Heure de génération"),
     publishTime: time(raw.publishTime ?? "18:30", "Heure de publication"),

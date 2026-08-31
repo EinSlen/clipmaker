@@ -24,6 +24,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 EDIT_PROFILES = ("edit-auto", "edit-sad", "edit-revenge")
 BASE = "https://clipmaker-cloud-control.einslen.workers.dev/api/workflow/edit-audio"
 MAX_BYTES = 5_700_000
+USER_AGENT = "ClipMaker/1.0 (+https://github.com/EinSlen/clipmaker)"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -37,7 +38,8 @@ def cloud(path: str, payload: dict | None = None, maximum: int = MAX_BYTES) -> b
         raise ValueError("Voix d’edit : CLIPMAKER_UPLOAD_TOKEN manque pour accéder à la bibliothèque privée.")
     for attempt in range(3):
         request = Request(BASE + path, data=json.dumps(payload).encode() if payload is not None else None,
-                          headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+                          headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                                   "User-Agent": USER_AGENT})
         try:
             with build_opener(NoRedirect()).open(request, timeout=30) as response:
                 data = response.read(maximum + 1)
@@ -48,9 +50,9 @@ def cloud(path: str, payload: dict | None = None, maximum: int = MAX_BYTES) -> b
             if error.code in (400, 401, 403, 404, 409):
                 # Server-supplied user messages only, no credentials/URLs.
                 try:
-                    message = json.loads(error.read(4096)).get("error", "Bibliothèque indisponible")
+                    message = json.loads(error.read(4096)).get("error", f"Bibliothèque indisponible (HTTP {error.code})")
                 except (ValueError, AttributeError):
-                    message = "Bibliothèque indisponible"
+                    message = f"Bibliothèque indisponible (HTTP {error.code})"
                 raise ValueError(f"Voix d’edit : {message}") from None
             if error.code not in (429, 500, 502, 503, 504) or attempt == 2:
                 raise ValueError("Le service audio est indisponible ; aucun remplacement par une chanson.") from None

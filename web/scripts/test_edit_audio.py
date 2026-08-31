@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -12,7 +13,8 @@ import unittest
 import wave
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 import edit_audio as edit
 
@@ -51,6 +53,27 @@ class EditAudioTests(unittest.TestCase):
         self.save()
         with self.assertRaisesRegex(ValueError, 'Aucune voix'):
             edit.select_clip(1, 'edit-sad')
+
+    def test_cloud_client_identifies_itself_without_changing_authentication_or_redirect_safety(self):
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.read.return_value = b'{}'
+        with patch.dict(os.environ, {'CLIPMAKER_UPLOAD_TOKEN': 'test-only-token'}), patch.object(edit, 'build_opener', return_value=opener) as factory:
+            for suffix, payload in [('/select', {'profile': 'edit-sad'}), ('/' + 'a' * 64, None)]:
+                self.assertEqual(edit.cloud(suffix, payload), b'{}')
+                request = opener.open.call_args.args[0]
+                self.assertEqual(request.get_header('User-agent'), 'ClipMaker/1.0 (+https://github.com/EinSlen/clipmaker)')
+                self.assertEqual(request.get_header('Authorization'), 'Bearer test-only-token')
+                self.assertNotIn('test-only-token', request.full_url)
+                self.assertIsInstance(factory.call_args.args[0], edit.NoRedirect)
+
+    def test_non_json_cloud_denial_reports_status_without_echoing_response_body(self):
+        opener = MagicMock()
+        opener.open.side_effect = HTTPError(edit.BASE, 403, 'Forbidden', {}, io.BytesIO(b'edge denied; not a JSON API response'))
+        with patch.dict(os.environ, {'CLIPMAKER_UPLOAD_TOKEN': 'test-only-token'}), patch.object(edit, 'build_opener', return_value=opener):
+            with self.assertRaisesRegex(ValueError, 'HTTP 403') as caught:
+                edit.cloud('/select', {})
+            self.assertNotIn('edge denied', str(caught.exception))
+            self.assertEqual(opener.open.call_count, 1, 'do not repeatedly retry an authentication/edge refusal')
 
     def test_selection_pins_retry_and_refuses_a_disabled_voice(self):
         first = self.add()

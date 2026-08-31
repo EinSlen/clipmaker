@@ -346,6 +346,13 @@
     fields.append(field('Génération', inputNode(channel.generateTime, 'time', (value) => { channel.generateTime = value; })));
     fields.append(field('Publication', inputNode(channel.publishTime, 'time', (value) => { channel.publishTime = value; })));
     fields.append(field('Accroche vidéo (anglais)', inputNode(channel.game.title, 'text', (value) => { channel.game.title = value; }), 'field-span-2'));
+    fields.append(field('Description de la publication', selectNode([
+      ['auto', 'Automatique — suit la voix choisie'], ['melancholic', 'Mélancolique — 48 phrases anglaises'],
+      ['revenge', 'Revenge — 24 phrases anglaises'], ['gameplay', 'Classique — description du jeu'],
+    ], channel.captionStyle || 'auto', (value) => { channel.captionStyle = value; }), 'field-span-2'));
+    const captionNote = document.createElement('p'); captionNote.className = 'field-span-2';
+    captionNote.textContent = 'Une description différente chaque jour, conservée lors des relances. Les crédits audio restent inclus. Exemple : “some feelings outlive the goodbye.”';
+    fields.append(captionNote);
     if (channel.game.id === 'soft-body-slide') {
       fields.append(field('Obstacle 3D', selectNode(OBSTACLES, channel.game.obstacle || 'auto', (value) => { channel.game.obstacle = value; }), 'field-span-2'));
       fields.append(field('Voix et ambiance', selectNode([

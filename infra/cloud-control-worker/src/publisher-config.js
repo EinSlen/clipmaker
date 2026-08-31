@@ -118,6 +118,7 @@ export function normalizePublisherConfig(raw) {
     if (ids.has(id)) fail(`Identifiant utilisé deux fois : ${id}.`);
     ids.add(id);
     const enabled = source.enabled !== false;
+    if (source.captionStyle !== undefined && !['auto', 'melancholic', 'revenge', 'gameplay'].includes(source.captionStyle)) fail('Style de description invalide.');
     const youtube = normalizeYoutube(source.youtube, id);
     const tiktok = normalizeTiktok(source.tiktok, id);
     if (enabled && !youtube.enabled && !tiktok.enabled) fail(`${id} doit publier sur TikTok ou YouTube.`);
@@ -134,6 +135,7 @@ export function normalizePublisherConfig(raw) {
     return {
       id,
       enabled,
+      ...(source.captionStyle !== undefined ? { captionStyle: source.captionStyle } : {}),
       generateTime: time(source.generateTime || '00:30', `Heure de génération de ${id}`),
       publishTime: time(source.publishTime || '18:00', `Heure de publication de ${id}`),
       game: normalizeGame(source.game, id),
