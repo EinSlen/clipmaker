@@ -689,19 +689,36 @@
     }
   }
 
+  function resolveRenderSeed(value) {
+    const text = value.trim();
+    if (text) {
+      const seed = Number(text);
+      if (!/^\d+$/u.test(text) || !Number.isSafeInteger(seed) || seed < 1 || seed > 2147483647) {
+        throw new Error('La graine doit être un entier entre 1 et 2147483647.');
+      }
+      return String(seed);
+    }
+    // Reject zero rather than biasing it onto another seed. Leave the input
+    // blank: another click means another variant; explicit seeds are replayable.
+    const values = new Uint32Array(1);
+    do { crypto.getRandomValues(values); } while ((values[0] & 0x7fffffff) === 0);
+    return String(values[0] & 0x7fffffff);
+  }
+
   async function run3d(event) {
     event.preventDefault();
     const button = elements.form3d.querySelector('button');
     button.disabled = true;
     try {
+      const seed = resolveRenderSeed(document.querySelector('#seed').value);
       await dispatch('soft-body-artifact.yml', {
         obstacle: document.querySelector('#obstacle').value,
-        seed: document.querySelector('#seed').value.trim() || '910104',
+        seed,
         samples: document.querySelector('#samples').value,
         chunk_size: document.querySelector('#chunk-size').value,
         title: 'HOW SOFT CAN IT GET?',
         music_profile: document.querySelector('#three-d-music-profile').value,
-      }, 'Rendu Blender 3D lancé sur GitHub.');
+      }, `Rendu Blender 3D lancé sur GitHub · graine ${seed}.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), true);
     } finally {

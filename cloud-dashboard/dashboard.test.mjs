@@ -118,6 +118,26 @@ test('manual 3D renders default to the reliable 15-frame chunks', async () => {
   assert.doesNotMatch(html, /<option value="30" selected>/u);
 });
 
+test('manual 3D renders sample a fresh seed when empty and preserve explicit replays', async () => {
+  const app = await source('app.js');
+  const html = await source('index.html');
+  const code = app.slice(app.indexOf('  function resolveRenderSeed('), app.indexOf('  async function run3d('));
+  const values = [0, 910103, 2147483647, 0x80000000, 42];
+  const resolve = vm.runInNewContext(`${code}; resolveRenderSeed`, {
+    crypto: { getRandomValues(array) { array[0] = values.shift(); return array; } },
+  });
+  assert.equal(resolve(''), '910103');
+  assert.equal(resolve(' '), '2147483647');
+  assert.equal(resolve(''), '42');
+  assert.equal(resolve(' 910104 '), '910104');
+  assert.equal(resolve('910104'), '910104');
+  for (const invalid of ['0', '-1', '2.5', '1e4', '2147483648', 'Infinity', 'invalid']) {
+    assert.throws(() => resolve(invalid), /La graine/u);
+  }
+  assert.doesNotMatch(html, /id="seed"[^>]*value="910104"/u);
+  assert.match(app, /seed = resolveRenderSeed\(document\.querySelector\('#seed'\)\.value\)/u);
+});
+
 test('generation explains saved assignments and shows the server-selected pipeline', async () => {
   const html = await source('index.html');
   const app = await source('app.js');

@@ -68,6 +68,7 @@ type GameResult = {
   musicCredit: string | null;
   musicNote: string | null;
   variantKey: string | null;
+  variationFingerprint?: string | null;
   variantLabel: string | null;
   variantShape: string | null;
   variantRamp: string | null;
@@ -960,10 +961,16 @@ export function GameStudio() {
                   </div>
                   {game === "soft-body-slide" && (
                     <span className="block text-[10px] leading-4 text-ink-500">
-                        La graine change la famille d’obstacles, la forme, le métal,
-                        le réceptacle, la physique et les niveaux.
+                        La graine renouvelle les profils de capsules, le métal,
+                        le réceptacle, la physique et les niveaux. En mode Auto,
+                        elle choisit aussi parmi les familles d’obstacles validées.
                     </span>
                   )}
+                  <span className="block text-[10px] leading-4 text-ink-500">
+                    Vide : nouvelle variante. Même graine et mêmes réglages :
+                    même partie avec cette version du moteur. Le planning quotidien
+                    choisit automatiquement une graine par compte et par jour.
+                  </span>
                   {game === "laser-dodge" && (
                     <span className="block text-[10px] leading-4 text-ink-500">
                       La graine change le parcours, les angles, les marges
@@ -1124,6 +1131,11 @@ export function GameStudio() {
                 {localizedSoftBodyVariant(result) && (
                   <p className="mt-1 text-[11px] text-amber-200/85">
                     Variante : {localizedSoftBodyVariant(result)}
+                  </p>
+                )}
+                {result.variationFingerprint && (
+                  <p className="mt-1 text-[10px] text-ink-500" title={result.variationFingerprint}>
+                    Empreinte de la variante : {result.variationFingerprint.slice(0, 12)}
                   </p>
                 )}
                 {result.outcome && (

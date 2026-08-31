@@ -17,7 +17,7 @@ from pathlib import Path
 
 from soft_body_variants import (
     OBSTACLE_KEYS, obstacle_specimen_offsets, stage_attempt_frame_spans,
-    stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary,
+    stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
 )
 from soft_body_framing import validate_stair_outlet_evidence
 from soft_body_stair_geometry import VOLUME_CONTACT
@@ -32,6 +32,7 @@ def softness_stages(seed: int) -> tuple[int, ...]:
 
 def validate_motion_preflight(payload, variant, frame_count, fps):
     """Require native physics/surface evidence for every body of every take."""
+    source_variant_summary(variant, payload)
     if (
         payload.get("preflight_schema") != 3
         or payload.get("obstacle") != variant.obstacle.key

@@ -38,6 +38,26 @@ class SurfaceContactTests(unittest.TestCase):
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         return renderer.ObstacleSurface((box,)).at_frame(1)
 
+    def test_procedural_capsule_profiles_have_closed_finite_meshes_at_range_extremes(self):
+        for baseline in SHAPES:
+            for groove in (.045, .13):
+                for bulge in (-.025, .055):
+                    variant = replace(self.variant, shape=replace(baseline, groove=groove, bulge=bulge))
+                    vertices, faces = renderer.capsule_geometry(variant)
+                    self.assertTrue(all(math.isfinite(value) for vertex in vertices for value in vertex))
+                    self.assertLessEqual(max(math.hypot(y, z) for _x, y, z in vertices), baseline.radius * 1.055 + 1e-9)
+                    self.assertAlmostEqual(max(x for x, _y, _z in vertices), baseline.cylinder_half + baseline.radius)
+                    mesh = bpy.data.meshes.new("Procedural profile audit")
+                    bm = renderer.bmesh.new()
+                    try:
+                        mesh.from_pydata(vertices, [], faces)
+                        bm.from_mesh(mesh)
+                        self.assertTrue(all(edge.is_manifold and edge.is_contiguous for edge in bm.edges))
+                        self.assertGreater(bm.calc_volume(signed=True), 0)
+                    finally:
+                        bm.free()
+                        bpy.data.meshes.remove(mesh)
+
     def stair_surface(self):
         variant = variant_for_seed(734193085, "stair-cascade")
         renderer.add_obstacle_geometry(self.material, self.material, variant, 240, 30)

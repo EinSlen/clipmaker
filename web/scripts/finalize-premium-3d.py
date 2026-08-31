@@ -14,6 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
 from edit_audio import EDIT_PROFILES, prepare_edit_soundtrack
+from soft_body_variants import source_variant_summary
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -101,6 +102,7 @@ def main() -> None:
     variant = renderer.variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
     motion_payload = json.loads(events_path.read_text(encoding="utf-8"))
+    source_variant = source_variant_summary(variant, motion_payload)
     attempt_quality = renderer.validate_motion_preflight(motion_payload, variant, frame_count, args.fps)
     events, attempt_cuts = read_motion_events(events_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +180,7 @@ def main() -> None:
         "repaired_cut_frames": list(repaired),
         "completed_at": args.duration,
         "outcome": "comparison-complete",
-        **renderer.variant_summary(variant),
+        **source_variant,
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(metadata, ensure_ascii=False), flush=True)

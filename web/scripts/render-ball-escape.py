@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from game_variants import GAME_CLASSES, SOCIAL_HOOK_CENTER_Y, create_game
+from procedural_variation import game_variation_manifest
 
 
 THEMES = {
@@ -1208,6 +1209,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         game = BallEscape(width, height, fps, args.duration, difficulty, args.seed, args.theme, args.title)
     else:
         game = create_game(args.game, width, height, fps, args.duration, difficulty, args.seed, args.theme, args.title)
+    variation = game_variation_manifest(args.game, game)
     ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg")
     external_music_file = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
 
@@ -1296,6 +1298,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
 
     return {
         "ok": True,
+        **variation,
         "output": output.name,
         "duration": round(actual_duration, 3),
         "seed": args.seed,

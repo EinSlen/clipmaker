@@ -40,6 +40,7 @@ from soft_body_variants import (
     stage_selection_for,
     supported_body_damping,
     variant_for_seed,
+    variant_summary,
 )
 from soft_body_framing import camera_location, inspect_simulation_framing
 from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
@@ -2506,6 +2507,7 @@ def main() -> None:
             json.dumps(
                 {
                     "preflight_schema": 3,
+                    **variant_summary(variant),
                     "obstacle": variant.obstacle.key,
                     "fps": args.fps,
                     "duration": frame_end / args.fps,

@@ -6,10 +6,11 @@ Blender scene and fast unit tests all resolve a seed to the exact same variant.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 import math
 import random
 from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, INNER_RADIUS
+from procedural_variation import scoped_random, variation_manifest
 
 
 Color = tuple[float, float, float]
@@ -539,6 +540,13 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
 
     positive = abs(int(seed))
     shape = SHAPES[positive % len(SHAPES)]
+    # Continuous surface profiles instead of cycling through five identical
+    # meshes. Keep the calibrated collision radius AND spine length unchanged:
+    # the narrow peg openings and stair landings still use the proven envelope.
+    # A dedicated stream cannot perturb releases, gravity or stage selection.
+    profile_rng = scoped_random(positive, "soft-body-profile")
+    shape = replace(shape, groove=profile_rng.uniform(.045, .13),
+                    bulge=profile_rng.uniform(-.025, .055))
     ramp = RAMPS[(positive * 3 + positive // 5 + 1) % len(RAMPS)]
     palette = PALETTES[(positive * 7 + positive // 11 + 2) % len(PALETTES)]
     receiver = RECEIVERS[(positive * 5 + positive // 7 + 1) % len(RECEIVERS)]
@@ -616,7 +624,17 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
 
 
 def variant_summary(variant: SoftBodyVariant) -> dict[str, object]:
+    parameters = asdict(variant)
+    # Names and seeds are not evidence of actual geometric/physical variety.
+    for key in ("key", "label", "stage_key", "motion_seed"):
+        parameters.pop(key)
+    for key in ("shape", "ramp", "palette", "receiver", "obstacle"):
+        for label in ("key", "label", "source_video"):
+            parameters[key].pop(label, None)
+    parameters["stage_motion"] = [asdict(stage_motion_for(variant, index))
+                                  for index in range(len(variant.stages))]
     return {
+        **variation_manifest("soft-body-slide", parameters),
         "variant_key": variant.key,
         "variant_label": variant.label,
         "variant_shape": variant.shape.key,
@@ -629,3 +647,14 @@ def variant_summary(variant: SoftBodyVariant) -> dict[str, object]:
         "stage_preset": variant.stage_key,
         "softness_stages": list(variant.stages),
     }
+
+
+def source_variant_summary(variant: SoftBodyVariant, motion_payload: dict) -> dict:
+    """Do not attribute today's generated profile to recovered legacy frames."""
+    summary = variant_summary(variant)
+    names = ("variation_version", "variation_fingerprint", "variation_parameters")
+    if not any(name in motion_payload for name in names):
+        return {key: value for key, value in summary.items() if key not in names}
+    if any(motion_payload.get(name) != summary[name] for name in names):
+        raise ValueError("Recovered frames use a different procedural variant or generator version")
+    return summary
