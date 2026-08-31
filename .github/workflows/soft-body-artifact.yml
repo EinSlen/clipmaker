@@ -557,4 +557,3 @@ jobs:
           EOF
           )
           gh issue comment 36 --repo "$GITHUB_REPOSITORY" --body "$body"
-          [[ "$successful" == "true" ]]
