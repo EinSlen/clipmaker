@@ -594,7 +594,10 @@ test('an invalid 3D import cannot replace an existing ready video on disk', asyn
 test('a partial platform failure retries only the missing upload', async (t) => {
   const directory = await temporaryDirectory(t);
   const calls = { render: 0, youtube: 0, tiktok: 0 };
-  const server = http.createServer((request, response) => {
+  const sent = { youtube: [], tiktok: [] };
+  const server = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
     response.setHeader('content-type', 'application/json');
     if (request.url === '/api/game/render') {
       calls.render += 1;
@@ -608,10 +611,12 @@ test('a partial platform failure retries only the missing upload', async (t) => 
         game: 'ball-escape',
         duration: 15,
         outcome: 'escaped',
+        musicCredit: 'Voice source / CC BY 3.0 / excerpt mixed by ClipMaker',
       }));
       return;
     }
     if (request.url === '/api/youtube/upload') {
+      sent.youtube.push(JSON.parse(body));
       calls.youtube += 1;
       response.end(JSON.stringify({
         ok: true,
@@ -626,6 +631,7 @@ test('a partial platform failure retries only the missing upload', async (t) => 
       return;
     }
     if (request.url === '/api/tiktok/upload') {
+      sent.tiktok.push(JSON.parse(body));
       calls.tiktok += 1;
       if (calls.tiktok === 1) {
         response.statusCode = 503;
@@ -651,6 +657,7 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   assert(address && typeof address === 'object');
 
   const channel = sampleChannel();
+  channel.captionStyle = 'melancholic';
   channel.youtube.enabled = true;
   channel.tiktok = {
     enabled: true,
@@ -685,11 +692,21 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   assert.equal(job.platforms.youtube.receipt.id, 'youtube-1');
   assert.equal(job.platforms.youtube.receipt.privacy, 'private');
 
+  const pinnedCopy = structuredClone(job.publicationCopy);
+  assert.equal(pinnedCopy.captionStyle, 'melancholic');
+  assert.match(pinnedCopy.caption, /Voice source \/ CC BY 3.0 \/ excerpt mixed by ClipMaker/);
+  assert.equal(sent.youtube[0].description, pinnedCopy.caption);
+  assert.ok(sent.tiktok[0].caption.startsWith(pinnedCopy.caption));
+  channel.captionStyle = 'revenge';
+  assert.equal((await generateChannel(config, channel, date)).skipped, true);
+
   await publishChannel(config, channel, date);
   job = (await loadState(directory)).jobs[0];
   assert.equal(job.status, 'published');
   assert.equal(calls.youtube, 1);
   assert.equal(calls.tiktok, 2);
+  assert.deepEqual(job.publicationCopy, pinnedCopy);
+  assert.deepEqual(sent.tiktok[1], sent.tiktok[0]);
   assert.equal(job.platforms.tiktok.receipt.id, 'tiktok-one');
   assert.equal(job.platforms.tiktok.receipt.provider, 'tiktok-web-upload');
   assert.equal(job.platforms.tiktok.receipt.privacy, 'private');

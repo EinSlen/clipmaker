@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertTime } from './time.mjs';
+import { CAPTION_STYLES } from './edit-captions.mjs';
 
 export const GAME_IDS = Object.freeze([
   'ball-escape',
@@ -154,6 +155,7 @@ function normalizeTiktok(value = {}, channelId) {
 
 function normalizeChannel(value, index) {
   if (!value || typeof value !== 'object') throw new Error(`channels[${index}] must be an object.`);
+  if (value.captionStyle !== undefined && !CAPTION_STYLES.includes(value.captionStyle)) throw new Error('Invalid caption style');
   const id = requiredString(value.id, `channels[${index}].id`);
   if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(id)) throw new Error(`Invalid channel id: ${id}`);
   if (value.game !== undefined && value.rotation !== undefined) {
@@ -175,6 +177,7 @@ function normalizeChannel(value, index) {
   return {
     id,
     enabled: value.enabled !== false,
+    ...(value.captionStyle !== undefined ? { captionStyle: value.captionStyle } : {}),
     generateTime: assertTime(value.generateTime || '00:30'),
     publishTime: assertTime(value.publishTime || '18:30'),
     game: normalizeGameEntry(gameEntry, id, gameSource),

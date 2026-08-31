@@ -472,6 +472,8 @@ export function AutomationPanel() {
                     <label className="space-y-1.5 text-xs text-ink-400"><span>{definition.uiMetricLabel}</span><input type="number" min={definition.metricMin} max={definition.metricMax} step={definition.metricStep} disabled={channel.game.id === "soft-body-slide"} className="field-control h-11" value={channel.game.difficulty} onChange={(event) => updateChannel(index, (item) => ({ ...item, game: { ...item.game, difficulty: Number(event.target.value) } }))} /></label>
                   </div>
 
+                  <label className="block space-y-1.5 text-xs text-ink-400"><span>Description de la publication</span><select className="field-control h-11" value={channel.captionStyle || "auto"} onChange={(event) => updateChannel(index, (item) => ({ ...item, captionStyle: event.target.value as PublisherChannelConfig['captionStyle'] }))}><option value="auto">Automatique — suit la voix</option><option value="melancholic">Mélancolique — 48 phrases anglaises</option><option value="revenge">Revenge — 24 phrases anglaises</option><option value="gameplay">Classique — description du jeu</option></select><span>Une phrase différente par jour, stable lors des relances. Crédits audio conservés.</span></label>
+
                   {channel.game.id === "soft-body-slide" && (
                     <label className="block space-y-1.5 text-xs text-ink-400"><span>Obstacle 3D</span><select className="field-control h-11" value={channel.game.obstacle || "auto"} onChange={(event) => updateChannel(index, (item) => ({ ...item, game: { ...item.game, obstacle: event.target.value } }))}>{OBSTACLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   )}
