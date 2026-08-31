@@ -21,6 +21,7 @@ const GAME_LIMITS = Object.freeze({
 const THEMES = new Set(['neon', 'sunset', 'ice']);
 const SOUND_PACKS = new Set(['auto', 'meme', 'funny', 'arcade', 'impact', 'asmr']);
 const MUSIC_MODES = new Set(['hit-reveal', 'continuous']);
+const MUSIC_PROFILES = new Set(['auto', 'revenge', 'sad-english', 'original']);
 const PRIVACY = new Set(['private', 'unlisted', 'public']);
 const OBSTACLES = new Set([
   'auto',
@@ -98,6 +99,10 @@ function normalizeGameEntry(entry, channelId, source = 'game') {
     normalized.musicMode = entry.musicMode;
   }
   if (entry.musicVolume !== undefined) normalized.musicVolume = finiteNumber(entry.musicVolume, 0.55, 0, 1, 'musicVolume');
+  if (entry.musicProfile !== undefined) {
+    if (!MUSIC_PROFILES.has(entry.musicProfile)) throw new Error(`Invalid musicProfile: ${entry.musicProfile}`);
+    normalized.musicProfile = entry.musicProfile;
+  }
   if (entry.title !== undefined) normalized.title = requiredString(entry.title, 'title').slice(0, 52);
   if (entry.obstacle !== undefined) {
     if (!OBSTACLES.has(entry.obstacle)) throw new Error(`Invalid obstacle: ${entry.obstacle}`);

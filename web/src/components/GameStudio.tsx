@@ -29,9 +29,10 @@ import type { MusicTrack } from "@/lib/types";
 type Theme = "neon" | "sunset" | "ice";
 type SoundPack = "auto" | "meme" | "funny" | "arcade" | "impact" | "asmr";
 type MusicMode = "hit-reveal" | "continuous";
+type MusicProfile = "auto" | "revenge" | "sad-english" | "original";
 type SoftBodyObstacle = "auto" | "moving-slide" | "stair-cascade" | "v-stairs" | "pipe-bend" | "peg-grid" | "twin-gears" | "compression-ring";
 type RenderedSoundPack = SoundPack | "glass" | "premium-foley";
-type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed";
+type RenderedMusicMode = MusicMode | "original" | "foley-only" | "subtle-bed" | "vocal-playlist";
 type GameOutcome =
   | "escaped"
   | "failed"
@@ -63,7 +64,7 @@ type GameResult = {
   outcome: GameOutcome | null;
   musicUsed: string | null;
   musicTitle: string | null;
-  musicSource: "jamendo" | "library" | "original";
+  musicSource: "jamendo" | "library" | "original" | "ncs";
   musicCredit: string | null;
   musicNote: string | null;
   variantKey: string | null;
@@ -191,6 +192,7 @@ export function GameStudio() {
   const [musicTracks, setMusicTracks] = React.useState<MusicTrack[]>([]);
   const [musicFile, setMusicFile] = React.useState("__discover__");
   const [musicMode, setMusicMode] = React.useState<MusicMode>("hit-reveal");
+  const [musicProfile, setMusicProfile] = React.useState<MusicProfile>("auto");
   const [musicVolume, setMusicVolume] = React.useState(0.55);
   const [uploadingMusic, setUploadingMusic] = React.useState(false);
   const musicInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -331,6 +333,7 @@ export function GameStudio() {
             soundPack,
             musicFile: musicFile || undefined,
             musicMode,
+            musicProfile,
             musicVolume,
             title,
             obstacle: game === "soft-body-slide" ? softBodyObstacle : undefined,
@@ -750,12 +753,13 @@ export function GameStudio() {
                 </h4>
                 <p className="mt-1 text-xs text-ink-500">
                   {game === "soft-body-slide"
-                    ? "Foley ASMR dynamique calé sur chaque obstacle et le réceptacle. La musique reste facultative."
+                    ? "Vrais morceaux avec paroles anglaises, sélectionnés dans les playlists NCS. Les collisions restent audibles."
                     : "Associe une musique sous licence et des effets de collision adaptés au jeu."}
                 </p>
               </div>
             </div>
             <div className="grid gap-4">
+              {game === "soft-body-slide" && !musicFile && <label className="block space-y-1.5 text-xs text-ink-400"><span>Playlist vocale</span><select value={musicProfile} onChange={(event) => setMusicProfile(event.target.value as MusicProfile)} className="field-control h-11"><option value="auto">Mix aléatoire — triste + revenge</option><option value="revenge">Revenge — sombre et puissant</option><option value="sad-english">Triste — chants en anglais</option><option value="original">Ambiance originale — sans paroles</option></select><p>La graine choisit le titre. Les paroles viennent du morceau, sans voix robotique ajoutée.</p></label>}
               <label className="block space-y-1.5 text-xs text-ink-400">
                 <span>Jeu de sons de collision</span>
                 <select
@@ -795,7 +799,7 @@ export function GameStudio() {
                     </option>
                     <option value="">
                       {game === "soft-body-slide"
-                        ? "Foley ASMR + ambiance originale — recommandé"
+                        ? "Playlist vocale NCS — recommandé"
                         : "Piste électronique originale générée"}
                     </option>
                     {musicTracks.length > 0 && (
@@ -1135,6 +1139,8 @@ export function GameStudio() {
                 <p className="mt-1 text-[11px] text-cyan-200/80">
                   {result.musicMode === "hit-reveal"
                     ? `${result.musicHits} séquences déclenchées par collision`
+                    : result.musicMode === "vocal-playlist"
+                    ? "Playlist avec paroles anglaises · crédit inclus"
                     : result.musicMode === "continuous"
                     ? "Bande-son continue"
                     : result.musicMode === "foley-only"

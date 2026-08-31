@@ -66,6 +66,15 @@ test('the one-account-one-game editor and all public destinations remain present
   assert.match(html, /actions\/workflows\/soft-body-artifact\.yml/u);
 });
 
+test('3D accounts expose real vocal playlists with stable retry behavior', async () => {
+  const app = await source('app.js');
+  assert.match(app, /channel\.game\.musicProfile/u);
+  for (const profile of ['auto', 'revenge', 'sad-english', 'original']) {
+    assert.ok(app.includes(`'${profile}'`), `${profile} should be selectable`);
+  }
+  assert.match(app, /https:\/\/ncs\.io\/music/u);
+});
+
 test('every game has a real gameplay preview in the account editor', async () => {
   const app = await source('app.js');
   const css = await source('styles.css');

@@ -50,6 +50,7 @@
         "theme": "sunset",
         "soundPack": "asmr",
         "musicMode": "continuous",
+        "musicProfile": "auto",
         "musicVolume": 0.35,
         "obstacle": "auto"
       },

@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from types import ModuleType
+from vocal_playlist import PROFILES, prepare_vocal_soundtrack
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -79,6 +80,9 @@ def main() -> None:
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--obstacle", required=True)
     parser.add_argument("--music-volume", type=float, default=0.58)
+    parser.add_argument("--music-profile", choices=PROFILES, default="auto")
+    parser.add_argument("--date")
+    parser.add_argument("--channel-id", default="preview")
     parser.add_argument("--preset", default="slow")
     parser.add_argument("--crf", default="14")
     args = parser.parse_args()
@@ -111,6 +115,11 @@ def main() -> None:
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
         music = root / "original-soft-body-bed.wav"
+        if args.music_profile == "original":
+            renderer.synth_soft_body_bed(args.duration, music, args.seed)
+            soundtrack = {"music": "Original seeded ambient bed", "music_generated": True, "music_profile": "original"}
+        else:
+            soundtrack = prepare_vocal_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id)
         video_filter = renderer.build_video_filter(args.duration, stages, variant.obstacle.key)
         subprocess.run(
             [
@@ -123,8 +132,7 @@ def main() -> None:
             check=True,
         )
         renderer.synth_premium_foley(args.duration, events, effects, args.seed)
-        renderer.synth_soft_body_bed(args.duration, music, args.seed)
-        audio_filter = renderer.build_continuous_audio_filter(args.music_volume)
+        audio_filter = renderer.build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")))
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -145,9 +153,8 @@ def main() -> None:
         "game": "soft-body-slide",
         "difficulty": args.difficulty,
         "sound_pack": "premium-foley",
-        "music": "Original seeded ambient bed",
-        "music_generated": True,
-        "music_mode": "subtle-bed",
+        **soundtrack,
+        "music_mode": "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed",
         "music_hits": len(events),
         "events": len(events),
         "event_source": "simulated-collision-peaks" if events else "no-physical-events",

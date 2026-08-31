@@ -49,6 +49,12 @@ on:
         required: true
         default: HOW SOFT CAN IT GET?
         type: string
+      music_profile:
+        description: Vocal playlist (real English lyrics) or original instrumental
+        required: false
+        default: auto
+        type: choice
+        options: [auto, revenge, sad-english, original]
 
 permissions:
   contents: read
@@ -83,6 +89,7 @@ jobs:
       MANUAL_SAMPLES: ${{ inputs.samples }}
       MANUAL_CHUNK_SIZE: ${{ inputs.chunk_size }}
       MANUAL_TITLE: ${{ inputs.title }}
+      MANUAL_MUSIC_PROFILE: ${{ inputs.music_profile }}
       USE_CLOUD_CONFIG: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
       PLAN_ONLY: ${{ inputs.plan_only || false }}
       REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
@@ -121,6 +128,8 @@ jobs:
                   "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
+                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "auto",
+                  "music_volume": 0.58,
               })
           else:
               payload = json.loads(Path("/tmp/cloud-bootstrap.json").read_text(encoding="utf-8"))
@@ -140,6 +149,8 @@ jobs:
                       "samples": 64, "chunk_size": 15,
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
+                      "music_profile": game.get("musicProfile", "auto"),
+                      "music_volume": game.get("musicVolume", 0.58),
                   })
           if len(channels) > 8:
               raise SystemExit("Maximum 8 canaux 3D par dépôt.")
@@ -151,6 +162,11 @@ jobs:
                   if channel["scheduled"]:
                       channel["chunk_size"] = 30
           frames = []
+          for channel in channels:
+              if channel["music_profile"] not in ("auto", "revenge", "sad-english", "original"):
+                  raise SystemExit("Invalid vocal playlist")
+              if not isinstance(channel["music_volume"], (int, float)) or not 0 <= channel["music_volume"] <= 1:
+                  raise SystemExit("Invalid soundtrack volume")
           total = int(os.environ["FRAME_COUNT"])
           for channel in channels:
               for index, start in enumerate(range(1, total + 1, channel["chunk_size"]), 1):
@@ -352,7 +368,12 @@ jobs:
         run: test "$(find artifacts/frames -maxdepth 1 -name 'frame_*.png' | wc -l)" -eq "$FRAME_COUNT"
       - name: Build the reproducible renderer
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
-      - name: Encode video, generated music and collision Foley
+      - name: Encode video, selected soundtrack and collision Foley
+        env:
+          MUSIC_PROFILE: ${{ matrix.music_profile }}
+          MUSIC_VOLUME: ${{ matrix.music_volume }}
+          MUSIC_DATE: ${{ matrix.date }}
+          MUSIC_CHANNEL: ${{ matrix.channel_id }}
         run: |
           mkdir -p artifacts/final
           docker run --rm --init --volume "$PWD/artifacts/frames:/frames:ro" --volume "$PWD/artifacts/scene:/scene:ro" \
@@ -360,7 +381,9 @@ jobs:
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${{ matrix.obstacle }}-${{ matrix.seed }}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
-              --seed "${{ matrix.seed }}" --obstacle "${{ matrix.obstacle }}"
+              --seed "${{ matrix.seed }}" --obstacle "${{ matrix.obstacle }}" \
+              --music-profile "$MUSIC_PROFILE" --music-volume "$MUSIC_VOLUME" \
+              --date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"
       - name: Create the publisher import manifest and verify the MP4
         env:
           CHANNEL_ID: ${{ matrix.channel_id }}
@@ -396,8 +419,13 @@ jobs:
           duration = float(probe.get("format", {}).get("duration", 0))
           if not 29.9 <= duration <= 30.1:
               raise SystemExit(f"Unexpected production duration: {duration}")
-          if metadata.get("music_generated") is not True or metadata.get("sound_pack") != "premium-foley":
-              raise SystemExit(f"Missing generated music or collision Foley metadata: {metadata}")
+          cleared_vocals = (metadata.get("music_provider") == "ncs"
+                            and metadata.get("music_has_vocals") is True
+                            and metadata.get("music_clearance") == "ncs-independent-creator-ugc"
+                            and metadata.get("music_license_url") == "https://ncs.io/usage-policy/terms"
+                            and bool(metadata.get("music_credit")) and bool(metadata.get("music_source_sha256")))
+          if (metadata.get("music_generated") is not True and not cleared_vocals) or metadata.get("sound_pack") != "premium-foley":
+              raise SystemExit("Missing soundtrack clearance or collision Foley metadata")
           title = os.environ["DAILY_TITLE"]
           video = f"soft-body-{os.environ['DAILY_OBSTACLE']}-{os.environ['DAILY_SEED']}.mp4"
           manifest = {
@@ -405,7 +433,7 @@ jobs:
               "seed": int(os.environ["DAILY_SEED"]), "video": video,
               "render": {
                   "title": title, "youtubeTitle": f"{title} #shorts",
-                  "caption": f"{title} 0% to 100% soft body comparison. Did you predict the ending?",
+                  "caption": f"{title} 0% to 100% soft body comparison. Did you predict the ending?" + ("\n\n" + metadata["music_credit"] if metadata.get("music_credit") else ""),
                   "tags": ["#softbody", "#satisfying", "#simulation", "#shorts"],
                   "duration": 30, "outcome": "comparison-complete",
                   "variantKey": metadata.get("variant_key", os.environ["DAILY_OBSTACLE"]), "raw": metadata,
@@ -413,7 +441,7 @@ jobs:
           }
           Path("artifacts/final/publisher-import.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           Path("artifacts/final/report.md").write_text(
-              f"# Soft Body 3D production\n\n- Channel: `{os.environ['CHANNEL_ID']}`\n- Obstacle: `{os.environ['DAILY_OBSTACLE']}`\n- Native: `1080x1920 @ 30 fps`\n- Frames: `{metadata['frames']}`\n- Outcome: `{metadata['outcome']}`\n",
+              f"# Soft Body 3D production\n\n- Channel: `{os.environ['CHANNEL_ID']}`\n- Obstacle: `{os.environ['DAILY_OBSTACLE']}`\n- Native: `1080x1920 @ 30 fps`\n- Frames: `{metadata['frames']}`\n- Outcome: `{metadata['outcome']}`\n- Music: {metadata.get('music', 'unknown')}\n- Playlist: `{metadata.get('music_profile', 'original')}`\n- Source: {metadata.get('music_source_url', 'original')}\n",
               encoding="utf-8",
           )
           PY
@@ -437,6 +465,7 @@ jobs:
       SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
       RECOVERY_SEED: ${{ inputs.seed }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
+      RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'auto' }}
     steps:
       - uses: actions/checkout@v6
       - name: Download the previous native scene and all frame chunks
@@ -464,7 +493,7 @@ jobs:
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
-              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE"
+              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE"
       - name: Verify and report the recovered production video
         run: |
           video="artifacts/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4"

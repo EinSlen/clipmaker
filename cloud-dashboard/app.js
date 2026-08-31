@@ -348,6 +348,22 @@
     fields.append(field('Accroche vidéo (anglais)', inputNode(channel.game.title, 'text', (value) => { channel.game.title = value; }), 'field-span-2'));
     if (channel.game.id === 'soft-body-slide') {
       fields.append(field('Obstacle 3D', selectNode(OBSTACLES, channel.game.obstacle || 'auto', (value) => { channel.game.obstacle = value; }), 'field-span-2'));
+      fields.append(field('Playlist avec paroles anglaises', selectNode([
+        ['auto', 'Mix aléatoire — triste + revenge (9 titres)'],
+        ['revenge', 'Revenge — sombre et puissant (5 titres)'],
+        ['sad-english', 'Triste — chants en anglais (4 titres)'],
+        ['original', 'Ambiance originale — sans paroles'],
+      ], channel.game.musicProfile || 'auto', (value) => { channel.game.musicProfile = value; }), 'field-span-2'));
+      const musicNote = document.createElement('p');
+      musicNote.className = 'field-span-2';
+      musicNote.textContent = 'Rotation quotidienne sans répétition avant la fin de la playlist. Vrais chants NCS, crédits inclus dans les publications. Une relance conserve le même morceau.';
+      fields.append(musicNote);
+      const libraryLink = document.createElement('a');
+      libraryLink.href = 'https://ncs.io/music';
+      libraryLink.target = '_blank';
+      libraryLink.rel = 'noreferrer';
+      libraryLink.textContent = 'Écouter le catalogue NCS';
+      fields.append(libraryLink);
     } else {
       fields.append(field('Durée', selectNode([['15', '15 secondes'], ['30', '30 secondes'], ['45', '45 secondes'], ['60', '60 secondes']], String(channel.game.duration), (value) => { channel.game.duration = Number(value); })));
       fields.append(field('Niveau', inputNode(channel.game.difficulty, 'number', (value) => { channel.game.difficulty = value; })));

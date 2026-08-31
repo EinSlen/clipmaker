@@ -97,6 +97,15 @@ test('publisher config enforces one game and one assignment per account', () => 
   assert.equal(config.channels[0].game.id, 'soft-body-slide');
   assert.equal(config.channels[0].game.duration, 30);
   assert.equal(config.channels[0].tiktok.username, 'dvlad');
+  assert.equal(Object.hasOwn(config.channels[0].game, 'musicProfile'), false);
+  for (const musicProfile of ['auto', 'revenge', 'sad-english', 'original']) {
+    const withPlaylist = structuredClone(base);
+    withPlaylist.channels[0].game.musicProfile = musicProfile;
+    assert.equal(normalizePublisherConfig(withPlaylist).channels[0].game.musicProfile, musicProfile);
+  }
+  const invalidPlaylist = structuredClone(base);
+  invalidPlaylist.channels[0].game.musicProfile = 'arbitrary-url';
+  assert.throws(() => normalizePublisherConfig(invalidPlaylist), /Playlist vocale invalide/u);
   assert.throws(() => normalizePublisherConfig({
     ...base,
     channels: [...base.channels, { ...base.channels[0], id: 'duplicate' }],

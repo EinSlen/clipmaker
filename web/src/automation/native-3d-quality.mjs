@@ -10,12 +10,17 @@ const SPECIMENS = {
 
 // Recheck persisted/imported evidence at the upload boundary too. A ready MP4
 // from an older renderer must not bypass today's physics checks.
-export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle = 'auto' }) {
+export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle = 'auto', musicProfile }) {
   const fail = () => { throw new Error('3D publication blocked: missing, incomplete or failed native physics preflight. Regenerate this video.'); };
   const frames = metadata?.frames;
   const stages = metadata?.softness_stages;
   const reports = metadata?.attempt_quality;
   const specimens = SPECIMENS[metadata?.variant_obstacle];
+  if (musicProfile !== undefined && (musicProfile === 'original'
+    ? metadata?.music_profile !== 'original'
+    : metadata?.requested_music_profile !== musicProfile)) {
+    throw new Error('3D publication blocked: the artifact does not match the selected vocal playlist. Regenerate this video.');
+  }
   if (metadata?.physics_preflight !== 'passed' || metadata?.seed !== seed
     || metadata?.game !== 'soft-body-slide' || !specimens
     || (obstacle !== 'auto' && metadata.variant_obstacle !== obstacle)
