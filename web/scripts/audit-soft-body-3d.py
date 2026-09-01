@@ -209,7 +209,7 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
     surface = renderer.ObstacleSurface(renderer.bpy.context.collection.objects)
     base, faces = renderer.capsule_geometry(variant)
     depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
-    maximum, peak, overlap_frames = 0.0, None, 0
+    maximum, maximum_spine, peak, overlap_frames = 0.0, 0.0, None, 0
     obstacle_inside, companion_inside = 0, 0
     companion_depth = 0.0
     for index in range(frame_count):
@@ -224,9 +224,10 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
                    for first_index, first in enumerate(bounds) for second in bounds[first_index + 1:]):
             continue
         overlap_frames += 1
-        penetration = renderer.specimen_geometry_penetration(bounds)
-        if penetration > maximum:
-            maximum, peak = penetration, index + 1
+        spine_penetration = renderer.specimen_spine_penetration(
+            simulations, index, softness, variant, depths)
+        maximum_spine = max(maximum_spine, spine_penetration)
+        bodies = []
         for instance, simulated in enumerate(simulations):
             shape, quality = renderer.capsule_frame_shape(
                 base, faces, simulated, index, softness, variant, surface, index + 1, depths[instance],
@@ -235,12 +236,15 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
             obstacle_inside += quality["inside_contacts"]
             companion_inside += quality["companion_inside_contacts"]
             companion_depth = max(companion_depth, quality["maximum_companion_inside_depth"])
-        # Run production contact clipping for its telemetry, but judge peer
-        # overlap on the raw visible cages above. Clipping can make two
-        # identical invalid bodies look disjoint after the fact.
+            bodies.append(renderer.specimen_geometry(
+                [renderer.Vector((x, y + depths[instance], z)) for x, y, z in shape], faces))
+        penetration = max(spine_penetration, renderer.specimen_geometry_penetration(bodies))
+        if penetration > maximum:
+            maximum, peak = penetration, index + 1
     return {
         "frames_checked": frame_count, "frames_with_overlapping_bounds": overlap_frames,
         "maximum_penetration": round(maximum, 6), "peak_frame": peak,
+        "maximum_spine_penetration": round(maximum_spine, 6),
         "spine_inside_contacts": obstacle_inside,
         "companion_spine_inside_contacts": companion_inside,
         "maximum_companion_spine_depth": round(companion_depth, 6),
