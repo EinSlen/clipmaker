@@ -211,6 +211,7 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
     depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
     maximum, peak, overlap_frames = 0.0, None, 0
     obstacle_inside, companion_inside = 0, 0
+    companion_depth = 0.0
     for index in range(frame_count):
         bounds = []
         for instance, simulated in enumerate(simulations):
@@ -231,6 +232,7 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
             )
             obstacle_inside += quality["inside_contacts"]
             companion_inside += quality["companion_inside_contacts"]
+            companion_depth = max(companion_depth, quality["maximum_companion_inside_depth"])
             bodies.append(renderer.specimen_geometry(
                 [renderer.Vector((x, y + depths[instance], z)) for x, y, z in shape], faces))
         penetration = renderer.specimen_geometry_penetration(bodies)
@@ -241,7 +243,8 @@ def audit_specimen_contacts(renderer, variant, simulations, softness, motion_ind
         "maximum_penetration": round(maximum, 6), "peak_frame": peak,
         "spine_inside_contacts": obstacle_inside,
         "companion_spine_inside_contacts": companion_inside,
-        "issues": (["specimens-interpenetrate"] if maximum > 0.008 else [])
+        "maximum_companion_spine_depth": round(companion_depth, 6),
+        "issues": (["specimens-interpenetrate"] if max(maximum, companion_depth) > 0.008 else [])
                   + (["spine-inside-visible-obstacle"] if obstacle_inside else []),
     }
 
