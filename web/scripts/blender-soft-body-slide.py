@@ -2097,11 +2097,22 @@ def capsule_frame_shape(base_vertices, faces, simulated, index, softness, varian
     """Shared production/audit cage deformation and visible contact skin."""
     points, impact, nodes, *_rest = simulated[index]
     shape = skin_capsule(base_vertices, points, softness / 100.0, impact, nodes, index, variant)
-    quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    quality = {
+        "corrected_vertices": 0,
+        "maximum_correction": 0.0,
+        "inside_contacts": 0,
+        "companion_inside_contacts": 0,
+    }
     if obstacle_surface is None:
         return shape, quality
     tree = obstacle_surface.at_frame(frame)
     shape, quality = constrain_visible_skin(shape, base_vertices, points, variant, tree, depth)
+    # Static obstacle penetration is a hard failure. A companion body is
+    # different: its final visible overlap is measured independently below
+    # with an explicit 0.008-unit numerical tolerance. Keep that telemetry
+    # separate so a sub-tolerance peer contact is not mislabeled as a spine
+    # hidden inside the authored obstacle.
+    quality["companion_inside_contacts"] = 0
     for companion, companion_depth in companions:
         other_points, other_impact, other_nodes, *_other = companion[index]
         other_shape = skin_capsule(base_vertices, other_points, softness / 100.0,
@@ -2112,7 +2123,7 @@ def capsule_frame_shape(base_vertices, faces, simulated, index, softness, varian
             [(x, y + companion_depth, z) for x, y, z in other_shape], faces, all_triangles=False)
         shape, contact = constrain_visible_skin(
             shape, base_vertices, points, variant, other_tree, depth, verify_closed_volume=True)
-        quality["inside_contacts"] += contact["inside_contacts"]
+        quality["companion_inside_contacts"] += contact["inside_contacts"]
         quality["maximum_correction"] = max(quality["maximum_correction"], contact["maximum_correction"])
         quality["corrected_vertices"] += contact["corrected_vertices"]
     return shape, quality
@@ -2238,7 +2249,12 @@ def add_capsule(
     # shape keys, otherwise Blender would compress N+1 states into N frames.
     visible_simulated = simulated[:-1]
     shapes = []
-    surface_quality = {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}
+    surface_quality = {
+        "corrected_vertices": 0,
+        "maximum_correction": 0.0,
+        "inside_contacts": 0,
+        "companion_inside_contacts": 0,
+    }
     for index in range(len(visible_simulated)):
         shape, surface_sample = capsule_frame_shape(
             base_vertices, faces, simulated, index, softness, variant,
@@ -2249,6 +2265,7 @@ def add_capsule(
             surface_quality["maximum_correction"], surface_sample["maximum_correction"],
         )
         surface_quality["inside_contacts"] += surface_sample["inside_contacts"]
+        surface_quality["companion_inside_contacts"] += surface_sample["companion_inside_contacts"]
         shapes.append(shape)
     quality["surface"] = surface_quality
     if surface_quality["inside_contacts"]:
