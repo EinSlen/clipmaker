@@ -7,6 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import bpy
 from mathutils import Vector
@@ -205,6 +207,29 @@ class SurfaceContactTests(unittest.TestCase):
                 [(0, -.04, .7)], [(0, 0, .2)], [Vector((0, 0))] * 2,
                 self.variant, tree, verify_closed_volume=True)
             self.assertEqual(report["inside_contacts"], 1, "real inside anchors still fail")
+
+    def test_peer_inside_telemetry_does_not_masquerade_as_obstacle_penetration(self):
+        # Run 33451667805 had a valid 0.001545-unit peer contact, below the
+        # dedicated 0.008 visible-overlap gate. Repeated vertices sharing the
+        # same inside anchor nevertheless populated the obstacle counter and
+        # failed the run as "spine-inside-visible-obstacle".
+        simulated = [([Vector((0.0, 0.0)), Vector((0.0, 0.0))], 0.0, (0.0, 0.0))]
+        base = [(0.0, 0.0, -0.2)]
+        reports = [
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}),
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}),
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 1}),
+        ]
+        with patch.object(renderer, "skin_capsule", return_value=[(0.0, -0.04, 0.0)]), \
+                patch.object(renderer, "constrain_visible_skin", side_effect=reports), \
+                patch.object(renderer, "BVHTree", SimpleNamespace(FromPolygons=lambda *_args, **_kwargs: object())):
+            surface = SimpleNamespace(at_frame=lambda _frame: object())
+            _shape, quality = renderer.capsule_frame_shape(
+                base, [(0, 0, 0)], simulated, 0, 10, self.variant,
+                surface, 1, companions=((simulated, 0.0),),
+            )
+        self.assertEqual(quality["inside_contacts"], 0)
+        self.assertEqual(quality["companion_inside_contacts"], 1)
 
     def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
         self.box_surface()
