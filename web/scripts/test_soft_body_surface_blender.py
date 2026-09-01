@@ -216,9 +216,12 @@ class SurfaceContactTests(unittest.TestCase):
         simulated = [([Vector((0.0, 0.0)), Vector((0.0, 0.0))], 0.0, (0.0, 0.0))]
         base = [(0.0, 0.0, -0.2)]
         reports = [
-            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}),
-            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 0}),
-            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0, "inside_contacts": 1}),
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0,
+                                      "inside_contacts": 0, "maximum_inside_depth": 0.0}),
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0,
+                                      "inside_contacts": 0, "maximum_inside_depth": 0.0}),
+            ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0,
+                                      "inside_contacts": 1, "maximum_inside_depth": 0.001545}),
         ]
         with patch.object(renderer, "skin_capsule", return_value=[(0.0, -0.04, 0.0)]), \
                 patch.object(renderer, "constrain_visible_skin", side_effect=reports), \
@@ -230,6 +233,7 @@ class SurfaceContactTests(unittest.TestCase):
             )
         self.assertEqual(quality["inside_contacts"], 0)
         self.assertEqual(quality["companion_inside_contacts"], 1)
+        self.assertAlmostEqual(quality["maximum_companion_inside_depth"], 0.001545)
 
     def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
         self.box_surface()
