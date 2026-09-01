@@ -209,10 +209,10 @@ class SurfaceContactTests(unittest.TestCase):
             self.assertEqual(report["inside_contacts"], 1, "real inside anchors still fail")
 
     def test_peer_inside_telemetry_does_not_masquerade_as_obstacle_penetration(self):
-        # Run 33451667805 had a valid 0.001545-unit peer contact, below the
-        # dedicated 0.008 visible-overlap gate. Repeated vertices sharing the
-        # same inside anchor nevertheless populated the obstacle counter and
-        # failed the run as "spine-inside-visible-obstacle".
+        # Runs 33451667805 and 33488245678 had a valid 0.001545-unit peer
+        # contact, below the dedicated 0.008 visible-overlap gate. The latter
+        # still exposed an internal anchor depth of 0.027656; that telemetry
+        # must not be treated as visible interpenetration.
         simulated = [([Vector((0.0, 0.0)), Vector((0.0, 0.0))], 0.0, (0.0, 0.0))]
         base = [(0.0, 0.0, -0.2)]
         reports = [
@@ -221,7 +221,7 @@ class SurfaceContactTests(unittest.TestCase):
             ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0,
                                       "inside_contacts": 0, "maximum_inside_depth": 0.0}),
             ([(0.0, -0.04, 0.0)], {"corrected_vertices": 0, "maximum_correction": 0.0,
-                                      "inside_contacts": 1, "maximum_inside_depth": 0.001545}),
+                                      "inside_contacts": 1, "maximum_inside_depth": 0.027656}),
         ]
         with patch.object(renderer, "skin_capsule", return_value=[(0.0, -0.04, 0.0)]), \
                 patch.object(renderer, "constrain_visible_skin", side_effect=reports), \
@@ -233,7 +233,9 @@ class SurfaceContactTests(unittest.TestCase):
             )
         self.assertEqual(quality["inside_contacts"], 0)
         self.assertEqual(quality["companion_inside_contacts"], 1)
-        self.assertAlmostEqual(quality["maximum_companion_inside_depth"], 0.001545)
+        self.assertAlmostEqual(quality["maximum_companion_inside_depth"], 0.027656)
+        self.assertEqual(renderer.visible_specimen_contact_issues(0.001545), [])
+        self.assertEqual(renderer.visible_specimen_contact_issues(0.008001), ["specimens-interpenetrate"])
 
     def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
         self.box_surface()
