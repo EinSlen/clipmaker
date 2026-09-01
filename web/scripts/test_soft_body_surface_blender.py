@@ -237,6 +237,16 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertEqual(renderer.visible_specimen_contact_issues(0.001545), [])
         self.assertEqual(renderer.visible_specimen_contact_issues(0.008001), ["specimens-interpenetrate"])
 
+    def test_spine_overlap_uses_the_physics_radius_not_cosmetic_anchor_depth(self):
+        sample = ([Vector((0.0, 0.0))], 0.0, (0.0,))
+        separate = ([sample], [([Vector((1.0, 0.0))], 0.0, (0.0,))])
+        overlapping = ([sample], [sample])
+        depths = (0.0, 0.0)
+        self.assertEqual(renderer.specimen_spine_penetration(
+            separate, 0, 10, self.variant, depths), 0.0)
+        self.assertGreater(renderer.specimen_spine_penetration(
+            overlapping, 0, 10, self.variant, depths), 0.008)
+
     def test_final_subdivided_vertices_are_checked_and_kept_outside(self):
         self.box_surface()
         box = bpy.context.object
