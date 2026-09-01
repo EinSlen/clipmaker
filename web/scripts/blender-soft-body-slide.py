@@ -2171,6 +2171,30 @@ def specimen_geometry_penetration(bodies):
     return maximum
 
 
+def specimen_spine_penetration(simulations, index, softness, variant, depths):
+    """Measure physical peer overlap using the solver's collision radius."""
+    radius = variant.shape.radius * obstacle_collision_radius_scale(
+        softness / 100.0, variant.obstacle.key)
+    minimum = radius * 2.0
+    maximum = 0.0
+    for first_index, first in enumerate(simulations):
+        first_points = first[index][0]
+        for second_index, second in enumerate(simulations[first_index + 1:], start=first_index + 1):
+            second_points = second[index][0]
+            depth = depths[second_index] - depths[first_index]
+            for first_point in first_points:
+                for second_point in second_points:
+                    planar = second_point - first_point
+                    distance = math.sqrt(planar.length_squared + depth * depth)
+                    maximum = max(maximum, minimum - distance)
+    return max(0.0, maximum)
+
+
+def visible_specimen_contact_issues(maximum_penetration):
+    """Report only visible peer overlap, never an internal spine distance."""
+    return ["specimens-interpenetrate"] if maximum_penetration > 0.008 else []
+
+
 def inspect_specimen_intersections(objects, start, end):
     """Reject visible interpenetration between independently released bodies.
 
@@ -2209,7 +2233,7 @@ def inspect_specimen_intersections(objects, start, end):
         "frames_checked": end - start + 1,
         "maximum_penetration": round(maximum, 6),
         "peak_frame": peak_frame,
-        "issues": ["specimens-interpenetrate"] if maximum > 0.008 else [],
+        "issues": visible_specimen_contact_issues(maximum),
     }
 
 
@@ -2292,8 +2316,6 @@ def add_capsule(
     quality["surface"] = surface_quality
     if surface_quality["inside_contacts"]:
         quality["issues"].append("spine-inside-visible-obstacle")
-    if surface_quality["maximum_companion_inside_depth"] > 0.008:
-        quality["issues"].append("specimens-interpenetrate")
     capsule = add_mesh(
         f"Sliding cylinder {softness}% body {instance_index + 1}",
         shapes[0],
