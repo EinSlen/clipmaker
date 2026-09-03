@@ -39,6 +39,7 @@
     { id: 'laser-dodge', name: 'Laser Dodge', description: 'Esquive de lasers', preview: 'assets/games/laser-dodge.webp', difficulty: 24, duration: 15, title: 'CAN IT DODGE THEM ALL?', musicMode: 'hit-reveal' },
     { id: 'boss-battle', name: 'Boss Battle', description: 'Combat physique', preview: 'assets/games/boss-battle.webp', difficulty: 300, duration: 15, title: 'WHO WILL WIN?', musicMode: 'hit-reveal' },
     { id: 'soft-body-slide', name: 'Souplesse 3D', description: 'Simulation Blender', preview: 'assets/games/soft-body-slide.webp', difficulty: 100, duration: 30, title: 'HOW SOFT CAN IT GET?', musicMode: 'continuous' },
+    { id: 'story-comments', name: 'Histoire pilotée', description: 'Short drama, la suite vient des commentaires', preview: 'assets/games/story-comments.webp', difficulty: 60, duration: 60, title: 'TU CHOISIS LA SUITE', musicMode: 'continuous' },
   ];
   const OBSTACLES = [
     ['auto', 'Automatique — sélection principale'], ['moving-slide', 'Rampe mobile'],
@@ -256,6 +257,10 @@
     };
     if (definition.id === 'soft-body-slide') channel.game.obstacle = 'auto';
     else { delete channel.game.obstacle; delete channel.game.musicProfile; }
+    if (definition.id === 'story-comments') {
+      channel.game.series = channel.game.series || channel.id;
+      if (channel.tiktok?.username) channel.game.tiktokUser = channel.tiktok.username;
+    } else { delete channel.game.series; delete channel.game.tiktokUser; delete channel.game.storyTheme; }
     renderChannels();
   }
 
@@ -353,6 +358,13 @@
     const captionNote = document.createElement('p'); captionNote.className = 'field-span-2';
     captionNote.textContent = 'Une description différente chaque jour, conservée lors des relances. Les crédits audio restent inclus. Exemple : “some feelings outlive the goodbye.”';
     fields.append(captionNote);
+    if (channel.game.id === 'story-comments') {
+      fields.append(field('Identifiant de la série', inputNode(channel.game.series || channel.id, 'text', (value) => { channel.game.series = value.trim() || channel.id; }), 'field-span-2'));
+      fields.append(field('Thème de départ (utilisé une seule fois, au premier épisode)', inputNode(channel.game.storyTheme || '', 'text', (value) => { channel.game.storyTheme = value.trim(); }), 'field-span-2'));
+      const storyNote = document.createElement('p'); storyNote.className = 'field-span-2';
+      storyNote.textContent = 'Un épisode par jour en français, casting fixe, cliffhanger final. Chaque épisode reprend le commentaire le plus pertinent de la veille et crédite son auteur à l’écran. Sans commentaire exploitable, l’histoire continue seule.';
+      fields.append(storyNote);
+    }
     if (channel.game.id === 'soft-body-slide') {
       fields.append(field('Obstacle 3D', selectNode(OBSTACLES, channel.game.obstacle || 'auto', (value) => { channel.game.obstacle = value; }), 'field-span-2'));
       fields.append(field('Voix et ambiance', selectNode([
@@ -416,7 +428,7 @@
       id: `canal-${Date.now().toString(36).slice(-6)}`,
       enabled: false,
       generateTime: '00:30', publishTime: '18:00',
-      game: { id: game.id, difficulty: game.difficulty, duration: game.duration, theme: 'neon', soundPack: 'auto', musicMode: game.musicMode, musicVolume: 0.55, title: game.title, ...(game.id === 'soft-body-slide' ? { obstacle: 'auto' } : {}) },
+      game: { id: game.id, difficulty: game.difficulty, duration: game.duration, theme: 'neon', soundPack: 'auto', musicMode: game.musicMode, musicVolume: 0.55, title: game.title, ...(game.id === 'soft-body-slide' ? { obstacle: 'auto' } : {}), ...(game.id === 'story-comments' ? { series: `serie-${Date.now().toString(36).slice(-6)}` } : {}) },
       tiktok: { enabled: false, username: null, musicId: null, visibility: 'private', confirmPublic: false },
       youtube: { enabled: false, account: 'default', privacy: 'private', confirmPublic: false },
     };

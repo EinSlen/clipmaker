@@ -724,3 +724,39 @@ test('a partial platform failure retries only the missing upload', async (t) => 
     /Cannot force disabled platform youtube/u,
   );
 });
+
+test('the daily summary calls out a story episode that fell back to still images', () => {
+  const channel = sampleChannel();
+  channel.id = 'story-dvlad';
+  channel.game = { game: 'story-comments' };
+  const storyJob = (story) => ({ jobs: [{
+    channelId: channel.id,
+    date: '2026-09-03',
+    status: 'ready',
+    renderRequest: { game: 'story-comments' },
+    render: { story },
+    platforms: {},
+  }] });
+  const summaryFor = (story) => buildPublisherSummary({
+    operation: 'generate',
+    config: { channels: [channel] },
+    status: storyJob(story),
+  });
+
+  const fallback = summaryFor({
+    series: 'Fruit Villa', episode: 4, source: 'images', clipsFailed: 0,
+    clipError: 'Aucun clip recupere apres 10 min.',
+  });
+  assert.match(fallback, /repli sur les images fixes/u);
+  assert.match(fallback, /Aucun clip recupere apres 10 min\./u);
+
+  const partial = summaryFor({
+    series: 'Fruit Villa', episode: 5, source: 'clips', clipsRequested: 4, clipsFailed: 1,
+  });
+  assert.match(partial, /clips générés/u);
+  assert.match(partial, /1 clip\(s\) manquant\(s\) sur 4/u);
+  assert.doesNotMatch(partial, /repli/u);
+
+  // A channel running a game engine must not gain a story line at all.
+  assert.doesNotMatch(summaryFor(null), /épisode/u);
+});

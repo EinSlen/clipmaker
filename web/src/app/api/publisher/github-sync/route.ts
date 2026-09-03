@@ -7,6 +7,7 @@ import {
   readPublisherDocument,
 } from "@/lib/server-publisher-config";
 import {
+  MINIMAX_SESSION_FILE,
   REPO_ROOT,
   TIKTOK_COOKIES_DIR,
 } from "@/lib/server-paths";
@@ -87,6 +88,11 @@ export async function POST(request: Request) {
         }
       }
     }
+
+    // The comment driven channel generates its clips through the Minimax
+    // browser agent, which needs its own session on the runner.
+    const needsMinimax = config.channels.some((item) => item.enabled && item.game.id === "story-comments");
+    if (needsMinimax) await addSessionFile(sessionFiles, MINIMAX_SESSION_FILE, warnings);
 
     const sessionsSecret = compressedSecret({ version: 1, files: sessionFiles });
     if (sessionsSecret.length > 60_000) {
