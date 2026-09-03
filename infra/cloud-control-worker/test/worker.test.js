@@ -228,3 +228,37 @@ test('scheduler dispatches once when GitHub missed the publication window', asyn
   assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
   assert.equal(calls.filter(([method]) => method === 'put').length, 1);
 });
+
+test('a story channel keeps its series and reaches the episode length range', () => {
+  const base = {
+    dryRun: false,
+    timeZone: 'Europe/Paris',
+    channels: [{
+      id: 'story-dvlad',
+      enabled: true,
+      generateTime: '00:37',
+      publishTime: '18:15',
+      game: { id: 'story-comments', difficulty: 60, duration: 30, series: 'tentafruit', tiktokUser: 'dvlad' },
+      tiktok: { enabled: true, username: 'dvlad2', visibility: 'private' },
+      youtube: { enabled: false, account: 'story-channel', privacy: 'private' },
+    }],
+  };
+  const config = normalizePublisherConfig(base);
+  const [channel] = config.channels;
+  assert.equal(channel.game.id, 'story-comments');
+  assert.equal(channel.game.series, 'tentafruit');
+  assert.equal(channel.game.tiktokUser, 'dvlad');
+  assert.equal(channel.game.duration, 30);
+  // A minute long episode is inside the range, a fifteen second one is not.
+  const long = structuredClone(base);
+  long.channels[0].game.duration = 120;
+  assert.equal(normalizePublisherConfig(long).channels[0].game.duration, 120);
+  const short = structuredClone(base);
+  short.channels[0].game.duration = 15;
+  assert.throws(() => normalizePublisherConfig(short), /Durée/u);
+
+  // The series falls back to the channel id so an older plan stays valid.
+  const bare = structuredClone(base);
+  delete bare.channels[0].game.series;
+  assert.equal(normalizePublisherConfig(bare).channels[0].game.series, 'story-dvlad');
+});

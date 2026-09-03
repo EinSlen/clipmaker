@@ -9,6 +9,7 @@ export const GAME_IDS = Object.freeze([
   'laser-dodge',
   'boss-battle',
   'soft-body-slide',
+  'story-comments',
 ]);
 
 const GAME_LIMITS = Object.freeze({
@@ -17,6 +18,7 @@ const GAME_LIMITS = Object.freeze({
   'laser-dodge': { difficulty: [16, 38], duration: [15, 60] },
   'boss-battle': { difficulty: [100, 500], duration: [15, 60] },
   'soft-body-slide': { difficulty: [40, 100], duration: [30, 30] },
+  'story-comments': { difficulty: [30, 120], duration: [30, 120] },
 });
 
 const THEMES = new Set(['neon', 'sunset', 'ice']);
@@ -106,6 +108,18 @@ function normalizeGameEntry(entry, channelId, source = 'game') {
     normalized.musicProfile = entry.musicProfile;
   }
   if (entry.title !== undefined) normalized.title = requiredString(entry.title, 'title').slice(0, 52);
+  if (game === 'story-comments') {
+    // The episode builder needs to know which series it continues and which
+    // publisher job carried the previous episode.
+    normalized.channelId = channelId;
+    normalized.series = requiredString(entry.series ?? channelId, `channels.${channelId}.${source}.series`).slice(0, 60);
+    if (entry.tiktokUser !== undefined) {
+      normalized.tiktokUser = requiredString(entry.tiktokUser, `channels.${channelId}.${source}.tiktokUser`).slice(0, 32);
+    }
+    if (entry.storyTheme !== undefined) {
+      normalized.storyTheme = requiredString(entry.storyTheme, `channels.${channelId}.${source}.storyTheme`).slice(0, 240);
+    }
+  }
   if (entry.obstacle !== undefined) {
     if (!OBSTACLES.has(entry.obstacle)) throw new Error(`Invalid obstacle: ${entry.obstacle}`);
     normalized.obstacle = entry.obstacle;

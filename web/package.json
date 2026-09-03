@@ -15,7 +15,12 @@
     "publisher:doctor": "node scripts/publisher.mjs doctor",
     "publisher:status": "node scripts/publisher.mjs status",
     "youtube:doctor": "node scripts/youtube-data-api-agent.mjs doctor",
-    "youtube:oauth:setup": "node scripts/youtube-oauth-setup.mjs"
+    "youtube:oauth:setup": "node scripts/youtube-oauth-setup.mjs",
+    "story:make": "node scripts/story/make-episode.mjs",
+    "minimax:login": "node scripts/story/minimax-agent.cjs login",
+    "minimax:session": "node scripts/story/minimax-agent.cjs session",
+    "minimax:doctor": "node scripts/story/minimax-agent.cjs doctor",
+    "minimax:probe": "node scripts/story/minimax-agent.cjs probe"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

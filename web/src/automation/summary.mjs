@@ -35,6 +35,21 @@ function platformPublication(platform, target) {
   return `  - ${platform}: \`${target.status || 'unknown'}\` · ${proof}${releaseUrl ? ` · [ouvrir la vidéo](${releaseUrl})` : ''}`;
 }
 
+// The comment driven channel can publish in two formats, and a silent switch
+// from generated clips to still images is exactly what the daily ticket has to
+// say out loud.
+function storyLine(render) {
+  const story = render?.story;
+  if (!story || !story.source) return null;
+  const label = `\`${story.series || 'histoire'}\` épisode ${story.episode ?? '?'}`;
+  if (story.source !== 'clips') {
+    const reason = story.clipError ? ` : ${String(story.clipError).slice(0, 300)}` : '';
+    return `  - ⚠️ ${label} : repli sur les images fixes, la génération de clips a échoué${reason}`;
+  }
+  const failed = story.clipsFailed ? ` · ${story.clipsFailed} clip(s) manquant(s) sur ${story.clipsRequested ?? '?'}` : '';
+  return `  - ${label} : monté sur des clips générés${failed}`;
+}
+
 export function buildPublisherSummary({ operation, config, doctor = null, status = null, configurationError = null }) {
   const activeChannels = (config?.channels || []).filter((channel) => channel.enabled !== false);
   const doctorChannels = new Map((doctor?.channels || []).map((channel) => [channel.id, channel]));
@@ -65,6 +80,8 @@ export function buildPublisherSummary({ operation, config, doctor = null, status
     lines.push(
       `- Latest stored job: \`${latest.status || 'unknown'}\` · \`${latest.date || '-'}\` · \`${latest.channelId || '-'}\` · \`${jobGameId(latest)}\``,
     );
+    const story = storyLine(latest.render);
+    if (story) lines.push(story);
     for (const platform of ['youtube', 'tiktok']) {
       const publication = platformPublication(platform, latest.platforms?.[platform]);
       if (publication) lines.push(publication);

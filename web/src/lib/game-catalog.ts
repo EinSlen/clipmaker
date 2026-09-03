@@ -4,6 +4,7 @@ export const GAME_IDS = [
   "laser-dodge",
   "boss-battle",
   "soft-body-slide",
+  "story-comments",
 ] as const;
 
 export type GameId = (typeof GAME_IDS)[number];
@@ -128,6 +129,26 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     accent: "from-amber-300 via-yellow-500 to-orange-600",
     preview: "/game-previews/soft-body-slide.webp",
     engineLabel: "BLENDER CINÉMA",
+  },
+  {
+    id: "story-comments",
+    name: "Comment-Driven Story",
+    uiName: "Histoire pilotée par les commentaires",
+    shortName: "Histoire",
+    description:
+      "Chaque épisode reprend l'histoire là où le commentaire le plus pertinent la laisse, ou la continue seul.",
+    objective: "Publier un épisode d'une minute par jour et laisser l'audience choisir la suite.",
+    defaultHook: "You decide what happens next.",
+    metricLabel: "Episode length",
+    uiMetricLabel: "Durée de l'épisode",
+    metricMin: 30,
+    metricMax: 120,
+    metricStep: 15,
+    metricDefault: 60,
+    tags: ["#storytime", "#series", "#youdecide"],
+    accent: "from-indigo-400 via-purple-500 to-rose-500",
+    preview: "/game-previews/story-comments.webp",
+    engineLabel: "RÉCIT GÉNÉRATIF",
   },
 ] as const;
 

@@ -174,6 +174,16 @@ export async function generateChannel(config, channel, date, options = {}) {
         duration: result.duration,
         outcome: result.outcome,
         variantKey: result.variantKey,
+        // publicState drops `raw`, and the daily notification is built from the
+        // public status, so what the ticket has to report is promoted here.
+        story: result.story ? {
+          series: result.story.series ?? null,
+          episode: result.story.episode ?? null,
+          source: result.story.source ?? null,
+          clipsRequested: result.story.clipsRequested ?? null,
+          clipsFailed: (result.story.clipsFailed || []).length,
+          clipError: result.story.clipError ?? null,
+        } : null,
         raw: result,
       };
       job.status = 'ready';

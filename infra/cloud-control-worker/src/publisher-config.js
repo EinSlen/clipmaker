@@ -4,6 +4,9 @@ const GAME_LIMITS = Object.freeze({
   'laser-dodge': { difficulty: [16, 38], duration: [15, 60] },
   'boss-battle': { difficulty: [100, 500], duration: [15, 60] },
   'soft-body-slide': { difficulty: [40, 100], duration: [30, 30] },
+  // The comment driven story is assembled by the Node pipeline, so its metric
+  // is the episode length rather than a difficulty.
+  'story-comments': { difficulty: [30, 120], duration: [30, 120] },
 });
 
 const THEMES = new Set(['neon', 'sunset', 'ice']);
@@ -59,9 +62,20 @@ function normalizeGame(value, channelId) {
     soundPack: SOUND_PACKS.has(value.soundPack) ? value.soundPack : 'auto',
     musicMode: MUSIC_MODES.has(value.musicMode) ? value.musicMode : (id === 'shape-tunnel' || id === 'soft-body-slide' ? 'continuous' : 'hit-reveal'),
     musicVolume: number(value.musicVolume ?? 0.55, 'Volume', 0, 1),
-    title: text(value.title || 'CAN IT ESCAPE?', 'Accroche', 52),
+    title: text(
+      value.title || (id === 'story-comments' ? 'YOU DECIDE WHAT HAPPENS NEXT' : 'CAN IT ESCAPE?'),
+      'Accroche',
+      52,
+    ),
   };
   if (id === 'soft-body-slide') game.obstacle = OBSTACLES.has(value.obstacle) ? value.obstacle : 'auto';
+  if (id === 'story-comments') {
+    // The episode builder continues a named series and reads the comments left
+    // under the previous episode, so both identifiers travel with the channel.
+    game.series = text(value.series ?? channelId, `Série de ${channelId}`, 60);
+    if (value.tiktokUser !== undefined) game.tiktokUser = text(value.tiktokUser, `Compte TikTok de ${channelId}`, 32);
+    if (value.storyTheme !== undefined) game.storyTheme = text(value.storyTheme, `Thème de ${channelId}`, 240);
+  }
   // Keep legacy plans structurally unchanged until the user chooses a value.
   if (value.musicProfile !== undefined) {
     if (!MUSIC_PROFILES.has(value.musicProfile)) fail('Playlist vocale invalide.');

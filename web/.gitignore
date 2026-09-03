@@ -9,5 +9,6 @@ renders/*
 !renders/.gitkeep
 config/publisher.json
 data/publisher/
+data/story/
 public/music/*
 !public/music/README.txt

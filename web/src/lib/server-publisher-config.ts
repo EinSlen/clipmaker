@@ -13,6 +13,7 @@ const LIMITS: Record<GameId, { difficulty: [number, number]; duration: [number, 
   "laser-dodge": { difficulty: [16, 38], duration: [15, 60] },
   "boss-battle": { difficulty: [100, 500], duration: [15, 60] },
   "soft-body-slide": { difficulty: [40, 100], duration: [30, 30] },
+  "story-comments": { difficulty: [30, 120], duration: [30, 120] },
 };
 
 const THEMES = new Set(["neon", "sunset", "ice"]);

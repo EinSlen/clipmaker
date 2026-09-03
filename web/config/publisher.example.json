@@ -67,6 +67,32 @@
         "visibility": "private",
         "confirmPublic": false
       }
+    },
+    {
+      "id": "story-account",
+      "enabled": false,
+      "generateTime": "00:20",
+      "publishTime": "18:00",
+      "game": {
+        "id": "story-comments",
+        "duration": 60,
+        "series": "story-account",
+        "storyTheme": "une téléréalité détournée avec un casting de personnages non humains très reconnaissables",
+        "tiktokUser": "your-tiktok-handle"
+      },
+      "youtube": {
+        "enabled": false,
+        "account": "story-channel",
+        "privacy": "private",
+        "confirmPublic": false
+      },
+      "tiktok": {
+        "enabled": false,
+        "username": null,
+        "musicId": null,
+        "visibility": "private",
+        "confirmPublic": false
+      }
     }
   ]
 }

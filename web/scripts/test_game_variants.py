@@ -42,6 +42,9 @@ from soft_body_variants import (
 from soft_body_framing import inspect_simulation_framing, inspect_stair_outlet, validate_stair_outlet_evidence, project_point
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
+# The comment driven story is assembled by the Node pipeline, so it appears in
+# the catalogue without a Python engine behind it.
+STORY_IDS = ("story-comments",)
 ENGINE_IDS = ("ball-escape", *GAME_CLASSES)
 RENDERER_PATH = Path(__file__).with_name("render-ball-escape.py")
 RENDERER_SPEC = importlib.util.spec_from_file_location("render_ball_escape", RENDERER_PATH)
@@ -97,7 +100,7 @@ class GameCatalogTests(unittest.TestCase):
     def test_frontend_catalog_matches_python_engines(self):
         source = (ROOT / "src" / "lib" / "game-catalog.ts").read_text(encoding="utf-8")
         catalog_ids = tuple(re.findall(r"\bid:\s*['\"]([a-z-]+)['\"]", source))
-        self.assertEqual(catalog_ids, (*ENGINE_IDS, *PREMIUM_IDS))
+        self.assertEqual(catalog_ids, (*ENGINE_IDS, *PREMIUM_IDS, *STORY_IDS))
         self.assertEqual(len(catalog_ids), len(set(catalog_ids)))
 
 
