@@ -321,7 +321,7 @@ async function readAccount(page, { navigate = true } = {}) {
     const anchored = text.match(/(\d{1,4})\s*(?:credits?)?\s*create/i);
     return anchored ? Number(anchored[1]) : null;
   }).catch(() => null);
-  const computed = videoCost ? videoCost * Math.max(1, Math.round(CLIP_SECONDS / 5)) : null;
+  const computed = clipPrice(videoCost);
   return {
     balance: Number.isFinite(balance) ? balance : null,
     unitCost: badge || computed || Number(process.env.MINIMAX_CREDITS_PER_CLIP) || null,
@@ -614,6 +614,50 @@ async function commandSession(args) {
   }
 }
 
+// `videoCost` is half the price of a five second clip, measured twice against
+// the figure the interface displays: 30 announced for 60 charged at five
+// seconds, and 120 at ten. Guessing low would start a run that cannot be paid
+// for, so the price is derived with that factor rather than taken as is.
+function clipPrice(videoCost) {
+  return videoCost ? Math.round(videoCost * 2 * (CLIP_SECONDS / 5)) : null;
+}
+
+// The account endpoint answers to the session cookies alone, with no signature,
+// so the balance can be watched without opening a window.
+async function commandCredits(args) {
+  const cookies = storedSession();
+  if (!cookies) throw new Error(`Aucune session Minimax (${sessionSource()}). Lance login.`);
+  const url = new URL('https://hailuoai.video/v1/api/user/equity');
+  for (const [key, value] of Object.entries({
+    device_platform: 'web', app_id: '3001', version_code: '22203', biz_id: '0',
+    unix: `${Date.now()}`, lang: 'en',
+  })) url.searchParams.set(key, value);
+  const response = await fetch(url, {
+    headers: {
+      cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; '),
+      referer: CREATE_URL,
+      'user-agent': process.env.MINIMAX_USER_AGENT
+        || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+    },
+  });
+  if (!response.ok) throw new Error(`Solde illisible (HTTP ${response.status}).`);
+  const data = (await response.json())?.data || {};
+  const balance = Number(data.totalCredits);
+  const videoCost = Number(data.videoCost) || 0;
+  const unitCost = clipPrice(videoCost);
+  const clips = Math.max(1, Number(args.clips) || 1);
+  receipt({
+    ok: Number.isFinite(balance),
+    balance: Number.isFinite(balance) ? balance : null,
+    unitCost,
+    clipSeconds: CLIP_SECONDS,
+    plan: String(data.memberName || '') || null,
+    affordableClips: unitCost ? Math.floor(balance / unitCost) : null,
+    needed: unitCost ? clips * unitCost : null,
+    enough: Boolean(unitCost && balance >= clips * unitCost),
+  });
+}
+
 async function commandDoctor() {
   const context = await openContext();
   try {
@@ -806,6 +850,7 @@ async function commandPlan(args) {
 const COMMANDS = {
   login: commandLogin,
   session: commandSession,
+  credits: commandCredits,
   doctor: commandDoctor,
   probe: commandProbe,
   generate: commandGenerate,

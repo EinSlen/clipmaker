@@ -754,3 +754,34 @@ test('the daily summary names the clips that carried a story episode', () => {
   // A channel running a game engine must not gain a story line at all.
   assert.doesNotMatch(summaryFor(null), /épisode/u);
 });
+
+test('a channel that fails alone still names its reason in the daily summary', () => {
+  const channel = sampleChannel();
+  channel.id = 'story-dvlad';
+  channel.game = { game: 'story-comments' };
+  const summary = buildPublisherSummary({
+    operation: 'due',
+    config: { channels: [channel] },
+    status: { jobs: [
+      {
+        channelId: 'softbody-dvlad',
+        date: '2026-09-04',
+        status: 'published',
+        renderRequest: { game: 'soft-body-slide' },
+        platforms: {},
+      },
+      {
+        channelId: 'story-dvlad',
+        date: '2026-09-04',
+        status: 'failed',
+        renderRequest: { game: 'story-comments' },
+        render: { error: 'Credits insuffisants : 20 disponibles, 120 par clip de 10 s.' },
+        platforms: {},
+      },
+    ] },
+  });
+  // Channels are isolated from each other, so the run itself stays green and
+  // the reason would never surface without this line.
+  assert.match(summary, /❌ `story-dvlad` 2026-09-04 : Credits insuffisants/u);
+  assert.doesNotMatch(summary, /❌ `softbody-dvlad`/u);
+});

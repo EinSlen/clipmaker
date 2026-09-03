@@ -87,5 +87,13 @@ export function buildPublisherSummary({ operation, config, doctor = null, status
   } else {
     lines.push('- Latest stored job: `none`');
   }
+
+  // A channel that fails is isolated from the others, so its reason never
+  // reaches the run status and would otherwise be invisible in the ticket. The
+  // most recent failures are named with what actually went wrong.
+  const failures = jobs.filter((job) => job.status === 'failed' && job.render?.error).slice(-3);
+  for (const job of failures) {
+    lines.push(`- ❌ \`${job.channelId || '-'}\` ${job.date || ''} : ${String(job.render.error).replace(/\s+/g, ' ').slice(0, 300)}`);
+  }
   return `${lines.join('\n')}\n`;
 }
