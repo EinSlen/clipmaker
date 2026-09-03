@@ -305,16 +305,23 @@ jobs:
 
           report = json.loads(Path("artifacts/doctor.json").read_text(encoding="utf-8"))
           if not report.get("ok"):
+              enabled = [c for c in report.get("channels", []) if c.get("enabled")]
               broken = []
-              for channel in report.get("channels", []):
-                  if not channel.get("enabled"):
-                      continue
+              for channel in enabled:
                   endpoints = channel.get("endpoints", {})
                   failed = [name for name, status in endpoints.items()
                             if isinstance(status, dict) and status.get("ok") is False]
                   if failed:
                       broken.append(f"{channel.get('id', '?')}: {', '.join(failed)}")
-              raise SystemExit("Compte(s) non prêt(s) : " + (" · ".join(broken) or "diagnostic invalide"))
+              # One unusable account must not cancel the work of every other
+              # channel: the publisher already isolates a channel that fails.
+              # The run only stops when nothing at all can be published, or when
+              # the diagnosis names no channel and cannot be acted upon.
+              if not broken:
+                  raise SystemExit("Diagnostic invalide.")
+              print("::warning::Compte(s) non prêt(s) : " + " · ".join(broken))
+              if len(broken) == len(enabled):
+                  raise SystemExit("Aucun compte prêt : " + " · ".join(broken))
           PY
 
       - name: Execute the publisher operation
