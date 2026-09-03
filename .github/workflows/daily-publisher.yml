@@ -73,7 +73,6 @@ jobs:
       YOUTUBE_OAUTH_ACCOUNTS_B64: ${{ secrets.YOUTUBE_OAUTH_ACCOUNTS_B64 }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       MINIMAX_COOKIES_B64: ${{ secrets.MINIMAX_COOKIES_B64 }}
-      STORY_CLIP_MODE: ${{ vars.STORY_CLIP_MODE }}
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
       MANUAL_DRY_RUN: ${{ inputs.dry_run }}

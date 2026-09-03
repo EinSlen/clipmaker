@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { harvestComments } from './comments.mjs';
-import { imagePrompt, inventSeries, writeEpisode } from './writer.mjs';
+import { clipPrompt, inventSeries, writeEpisode } from './writer.mjs';
 import { loadStory, saveStory, lastEpisode, nextEpisodeNumber, syncPublications } from './state.mjs';
 
 const RECEIPT_PREFIX = 'CLIPMAKER_PLAN:';
@@ -35,24 +35,6 @@ function groupShotsIntoClips(shots, targetSeconds, clipSeconds) {
   return clips;
 }
 
-function clipPrompt(series, group, index, total) {
-  const cast = new Map();
-  for (const shot of group) {
-    for (const member of shot.cast || []) cast.set(member.name, member);
-  }
-  const present = cast.size ? [...cast.values()] : series.characters.slice(0, 1);
-  const looks = present.map((entry) => `${entry.name} : ${entry.look}`).join('. ');
-  const action = group.map((shot) => shot.image).join(' Puis, ');
-  const dialogue = group.map((shot) => `"${shot.narration}"`).join(' ');
-  return [
-    `PLAN ${index + 1}/${total}`,
-    `${looks}.`,
-    `${action}.`,
-    `Dialogue parlé en français : ${dialogue}`,
-    `${series.visualStyle}. Format vertical 9:16, ${CLIP_SECONDS} secondes, aucun texte incrusté.`,
-  ].join('\n');
-}
-
 async function run() {
   const args = parseArgs(process.argv.slice(2));
   const seriesId = String(args.series || 'story-dvlad');
@@ -81,7 +63,7 @@ async function run() {
   });
 
   const groups = groupShotsIntoClips(draft.shots, targetSeconds, CLIP_SECONDS);
-  const prompts = groups.map((group, index) => clipPrompt(state.series, group, index, groups.length));
+  const prompts = groups.map((group, index) => clipPrompt(state.series, group, index, groups.length, CLIP_SECONDS));
 
   const planDir = path.join(outputDir, `story-${seriesId}-${jobDate}-plan`);
   await fs.mkdir(path.join(planDir, 'clips'), { recursive: true });
@@ -95,7 +77,6 @@ async function run() {
     series: state.series,
     draft,
     groups: groups.map((group) => group.map((shot) => shot.narration)),
-    imagePrompts: draft.shots.map((shot) => imagePrompt(state.series, shot)),
     comments: harvest.comments.slice(0, 20),
     commentSources: harvest.sources,
   }, null, 2)}\n`, 'utf8');

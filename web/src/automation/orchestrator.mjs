@@ -179,10 +179,8 @@ export async function generateChannel(config, channel, date, options = {}) {
         story: result.story ? {
           series: result.story.series ?? null,
           episode: result.story.episode ?? null,
-          source: result.story.source ?? null,
           clipsRequested: result.story.clipsRequested ?? null,
           clipsFailed: (result.story.clipsFailed || []).length,
-          clipError: result.story.clipError ?? null,
         } : null,
         raw: result,
       };

@@ -5,8 +5,6 @@ import { spawn } from 'node:child_process';
 const WIDTH = 1080;
 const HEIGHT = 1920;
 const FPS = 30;
-const WORK_WIDTH = 1620;
-const WORK_HEIGHT = 2880;
 
 function binary(name) {
   const override = name === 'ffmpeg' ? process.env.FFMPEG_PATH : process.env.FFPROBE_PATH;
@@ -182,48 +180,6 @@ function karaokeFilters(cue, group) {
   return [...plain, ...spoken];
 }
 
-function kenBurns(index, duration) {
-  const frames = Math.max(2, Math.round(duration * FPS));
-  const span = 0.16;
-  const step = (span / frames).toFixed(8);
-  const zoom = index % 2 === 0
-    ? `min(1+${step}*on,${(1 + span).toFixed(3)})`
-    : `max(${(1 + span).toFixed(3)}-${step}*on,1)`;
-  const drift = index % 4 < 2 ? '+' : '-';
-  return [
-    `scale=${WORK_HEIGHT}:${WORK_HEIGHT}:flags=lanczos`,
-    `crop=${WORK_WIDTH}:${WORK_HEIGHT}`,
-    `zoompan=z='${zoom}':x='iw/2-(iw/zoom/2)${drift}(iw*0.02*on/${frames})':y='ih/2-(ih/zoom/2)':d=${frames}:s=${WORK_WIDTH}x${WORK_HEIGHT}:fps=${FPS}`,
-    `scale=${WIDTH}:${HEIGHT}:flags=lanczos`,
-    'setsar=1',
-  ].join(',');
-}
-
-async function renderShot({ index, imageFile, audioFile, narration, cues = null, outputFile, overlays = [] }) {
-  const spoken = await probeDuration(audioFile);
-  const total = spoken + 0.35;
-  const captions = await clipCaptions(narration, spoken, cues);
-  const filters = [
-    kenBurns(index, total),
-    'eq=saturation=1.06:contrast=1.04',
-    ...captions,
-    ...overlays,
-    'format=yuv420p',
-  ].join(',');
-  await execute(binary('ffmpeg'), [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-loop', '1', '-t', total.toFixed(3), '-i', imageFile,
-    '-i', audioFile,
-    '-filter_complex', `[0:v]${filters}[v];[1:a]apad=pad_dur=0.4,aresample=48000[a]`,
-    '-map', '[v]', '-map', '[a]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', String(FPS),
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2',
-    '-t', total.toFixed(3),
-    outputFile,
-  ]);
-  return { duration: total, file: outputFile };
-}
-
 function titleOverlay(title, seconds = 2.6) {
   return [
     'drawtext=',
@@ -259,18 +215,6 @@ async function concatShots(files, workDir, outputFile) {
     '-y', '-hide_banner', '-loglevel', 'error',
     '-f', 'concat', '-safe', '0', '-i', listFile,
     '-c', 'copy', outputFile,
-  ]);
-}
-
-async function addMusic(inputFile, musicFile, outputFile, volume = 0.12) {
-  await execute(binary('ffmpeg'), [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-i', inputFile,
-    '-stream_loop', '-1', '-i', musicFile,
-    '-filter_complex', `[1:a]volume=${volume}[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`,
-    '-map', '0:v', '-map', '[a]',
-    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest',
-    outputFile,
   ]);
 }
 
@@ -346,34 +290,5 @@ export async function renderClipEpisode({ clips, title, credit, workDir, outputF
   return {
     duration: Number(rendered.reduce((total, entry) => total + entry.duration, 0).toFixed(2)),
     clips: rendered.length,
-  };
-}
-
-export async function renderEpisode({ shots, title, credit, musicFile, workDir, outputFile }) {
-  await fs.mkdir(workDir, { recursive: true });
-  const clips = [];
-  for (const [index, shot] of shots.entries()) {
-    const overlays = [];
-    if (index === 0) {
-      overlays.push(titleOverlay(title));
-      if (credit) overlays.push(creditOverlay(credit));
-    }
-    clips.push(await renderShot({
-      index,
-      imageFile: shot.imageFile,
-      audioFile: shot.audioFile,
-      narration: shot.narration,
-      cues: shot.cues || null,
-      outputFile: path.join(workDir, `shot-${String(index).padStart(2, '0')}.mp4`),
-      overlays,
-    }));
-  }
-  const assembled = path.join(workDir, 'assembled.mp4');
-  await concatShots(clips.map((clip) => clip.file), workDir, assembled);
-  if (musicFile) await addMusic(assembled, musicFile, outputFile);
-  else await fs.copyFile(assembled, outputFile);
-  return {
-    duration: Number(clips.reduce((total, clip) => total + clip.duration, 0).toFixed(2)),
-    shots: clips.length,
   };
 }

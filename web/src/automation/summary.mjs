@@ -35,19 +35,17 @@ function platformPublication(platform, target) {
   return `  - ${platform}: \`${target.status || 'unknown'}\` · ${proof}${releaseUrl ? ` · [ouvrir la vidéo](${releaseUrl})` : ''}`;
 }
 
-// The comment driven channel can publish in two formats, and a silent switch
-// from generated clips to still images is exactly what the daily ticket has to
-// say out loud.
+// The comment driven channel publishes generated clips or nothing, so the daily
+// ticket says how many clips carried the episode and names any that are missing.
 function storyLine(render) {
   const story = render?.story;
-  if (!story || !story.source) return null;
-  const label = `\`${story.series || 'histoire'}\` épisode ${story.episode ?? '?'}`;
-  if (story.source !== 'clips') {
-    const reason = story.clipError ? ` : ${String(story.clipError).slice(0, 300)}` : '';
-    return `  - ⚠️ ${label} : repli sur les images fixes, la génération de clips a échoué${reason}`;
+  if (!story || !story.episode) return null;
+  const label = `\`${story.series || 'histoire'}\` épisode ${story.episode}`;
+  const clips = story.clipsRequested ?? '?';
+  if (story.clipsFailed) {
+    return `  - ⚠️ ${label} : ${story.clipsFailed} clip(s) manquant(s) sur ${clips}`;
   }
-  const failed = story.clipsFailed ? ` · ${story.clipsFailed} clip(s) manquant(s) sur ${story.clipsRequested ?? '?'}` : '';
-  return `  - ${label} : monté sur des clips générés${failed}`;
+  return `  - ${label} : monté sur ${clips} clip(s) généré(s)`;
 }
 
 export function buildPublisherSummary({ operation, config, doctor = null, status = null, configurationError = null }) {

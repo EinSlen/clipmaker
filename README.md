@@ -137,14 +137,13 @@ Toute la chaîne tient dans des offres gratuites :
 | Commentaires YouTube | YouTube Data API v3 | 1 unité sur 10 000 par jour |
 | Commentaires TikTok | session Chromium existante du dossier `vendor/` | aucune |
 | Scénario et choix du commentaire | Groq | aucune sur l'offre gratuite |
-| Images des plans | Workers AI `flux-1-schnell` | environ 700 neurones |
-| Voix off française | Workers AI `melotts` en `fr` | environ 20 neurones |
+| Plans animés | Hailuo, pilotage navigateur | crédits du compte, voir plus bas |
+| Sous-titres calés sur la voix | edge-tts, ou Workers AI pour un clip | aucune, ou environ 10 neurones |
 | Montage | ffmpeg | aucune |
 
-Workers AI offre 10 000 neurones par jour : un épisode quotidien en consomme moins de 8 %.
-`aura-2-en` sonne mieux mais ne parle pas français et coûte 2 727 neurones pour mille caractères,
-contre 18,63 par minute audio pour MeloTTS ; il n'est utilisé que si une série est passée en
-anglais.
+Le seul poste réellement payant est la génération des clips : tout le reste tient dans des offres
+gratuites. Un épisode de trente secondes demande trois clips de dix secondes, soit trois cent
+soixante crédits Hailuo, et un run sans ce budget échoue au lieu de publier autre chose.
 
 ### Mise en service
 
@@ -176,8 +175,8 @@ GitHub Actions au suivant. Le thème de départ n'est lu qu'au tout premier épi
 
 ### Générer les clips automatiquement
 
-Le canal peut monter l'épisode sur de vrais clips vidéo au lieu des images fixes. Les trois étages
-s'enchaînent avec une seule commande :
+L'épisode est monté sur de vrais clips vidéo, et sur rien d'autre. Les trois étages s'enchaînent
+avec une seule commande :
 
 ```bash
 cd web
@@ -226,14 +225,10 @@ délai d'attente complet de chaque clip avant d'échouer.
 Sur un runner Linux le navigateur reste fenêtré sous Xvfb, déjà présent dans l'image, comme pour la
 lecture des commentaires TikTok.
 
-La variable de dépôt `STORY_CLIP_MODE` arbitre le format : `auto` par défaut tente les clips puis
-retombe sur les images fixes si la génération échoue, ce qui évite de sauter une publication
-quotidienne à cause d'une interface tierce ; `only` interdit ce repli et `off` reste sur les images.
-Le reçu de rendu indique toujours lequel des deux a produit l'épisode.
-
-Un repli n'est jamais silencieux : le compte rendu quotidien publié dans le
-[ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36) porte une ligne d'alerte avec la
-raison exacte de l'échec, et signale aussi un épisode monté avec moins de clips que prévu.
+Il n'existe aucun repli : un run qui ne peut pas produire ses clips échoue et dit pourquoi, plutôt
+que de publier quelque chose qui ne ressemble pas à la série. Le compte rendu quotidien publié dans
+le [ticket de suivi](https://github.com/EinSlen/clipmaker/issues/36) porte alors une ligne d'alerte
+avec la raison exacte, et signale aussi un épisode monté avec moins de clips que prévu.
 
 Trois pièges découverts en pilotant réellement le site, tous gérés par l'agent :
 
@@ -265,12 +260,7 @@ sous-titres sont donc construits à partir de ce qui est réellement entendu : l
 est transcrite avec des horodatages par mot, puis regroupée en trois ou quatre mots par carton. Un
 sous-titre apparaît ainsi pendant que ses mots sont prononcés, et rien ne s'affiche dans un silence.
 
-Sur un épisode en images fixes rien n'est transcrit : c'est la voix qui dit elle-même où chaque mot
-tombe. edge-tts n'écrit que des sous-titres à la phrase en ligne de commande, mais le service émet
-un événement par mot, et `speak_words.py` lit ce flux directement. Les timings sont donc exacts,
-gratuits, et sans aucune clé.
-
-Un clip généré parle en revanche de son propre chef, donc son audio est transcrit : par Groq Whisper
+Un clip parle de son propre chef, donc son audio est transcrit : par Groq Whisper
 si `GROQ_API_KEY` est présente, sinon par Workers AI via le Worker, qui expose une tâche
 `transcribe` bornée à un audio de 16 kHz mono. Sans transcripteur disponible, le montage retombe sur
 une répartition uniforme du texte écrit et le signale dans son reçu : l'épisode reste sous-titré,
@@ -287,9 +277,8 @@ actif, dans cet ordre puisque les filtres `drawtext` s'appliquent en séquence.
 
 Un clip coûte des crédits, et l'agent refuse de commencer s'il ne peut pas payer la totalité des
 clips manquants. Le refus est volontairement tout ou rien : la moitié d'un épisode signifie toute la
-narration entassée sur un tiers de la durée, ce qui se lit plus mal que le repli sur images fixes,
-lequel produit au moins un épisode complet. Le solde, le prix unitaire et le nombre de clips
-manquants partent dans le compte rendu du ticket.
+narration entassée sur un tiers de la durée, ce qui ne ressemble à rien. Le solde, le prix unitaire
+et le nombre de clips manquants partent dans le compte rendu du ticket.
 
 Prix relevés sur l'offre gratuite : soixante crédits pour un clip de cinq secondes, cent vingt pour
 dix secondes, la résolution ne changeant rien. `MINIMAX_CREDITS_PER_CLIP` sert de repli si le prix
@@ -299,18 +288,6 @@ Deux limites à connaître. L'offre gratuite tourne autour de cent crédits par 
 soit deux à trois clips, alors qu'un épisode de soixante secondes en demande quatre de quinze
 secondes : baisser `--seconds` réduit le nombre de clips demandés. Et le site est protégé par Akamai
 Bot Manager, donc un pilotage répété peut déclencher un contrôle.
-
-### Vérifier sans aucune clé
-
-```bash
-cd web
-node scripts/story/build-episode.mjs --offline --series smoke-test --seconds 45 \
-  --output-dir renders/story-smoke --no-music
-```
-
-Le mode hors ligne remplace les images et la voix par des marqueurs déterministes et n'appelle
-aucune API. Il produit un vrai MP4 1080×1920 et sert à valider le montage, la mémoire de série et
-les sous-titres. Rien n'est publié.
 
 ## Architecture
 

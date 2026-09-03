@@ -725,7 +725,7 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   );
 });
 
-test('the daily summary calls out a story episode that fell back to still images', () => {
+test('the daily summary names the clips that carried a story episode', () => {
   const channel = sampleChannel();
   channel.id = 'story-dvlad';
   channel.game = { game: 'story-comments' };
@@ -743,19 +743,13 @@ test('the daily summary calls out a story episode that fell back to still images
     status: storyJob(story),
   });
 
-  const fallback = summaryFor({
-    series: 'Fruit Villa', episode: 4, source: 'images', clipsFailed: 0,
-    clipError: 'Aucun clip recupere apres 10 min.',
-  });
-  assert.match(fallback, /repli sur les images fixes/u);
-  assert.match(fallback, /Aucun clip recupere apres 10 min\./u);
+  const complete = summaryFor({ series: 'Fruit Villa', episode: 5, clipsRequested: 3, clipsFailed: 0 });
+  assert.match(complete, /monté sur 3 clip\(s\) généré\(s\)/u);
+  assert.doesNotMatch(complete, /⚠️/u);
 
-  const partial = summaryFor({
-    series: 'Fruit Villa', episode: 5, source: 'clips', clipsRequested: 4, clipsFailed: 1,
-  });
-  assert.match(partial, /clips générés/u);
-  assert.match(partial, /1 clip\(s\) manquant\(s\) sur 4/u);
-  assert.doesNotMatch(partial, /repli/u);
+  const partial = summaryFor({ series: 'Fruit Villa', episode: 6, clipsRequested: 3, clipsFailed: 1 });
+  assert.match(partial, /⚠️/u);
+  assert.match(partial, /1 clip\(s\) manquant\(s\) sur 3/u);
 
   // A channel running a game engine must not gain a story line at all.
   assert.doesNotMatch(summaryFor(null), /épisode/u);
