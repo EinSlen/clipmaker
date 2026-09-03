@@ -265,10 +265,16 @@ sous-titres sont donc construits à partir de ce qui est réellement entendu : l
 est transcrite avec des horodatages par mot, puis regroupée en trois ou quatre mots par carton. Un
 sous-titre apparaît ainsi pendant que ses mots sont prononcés, et rien ne s'affiche dans un silence.
 
-La transcription passe par Groq Whisper si `GROQ_API_KEY` est présente, sinon par Workers AI via le
-Worker, qui expose une tâche `transcribe` bornée à un audio de 16 kHz mono. Sans transcripteur
-disponible, le montage retombe sur une répartition uniforme du texte écrit et le signale dans son
-reçu : l'épisode reste sous-titré, simplement moins précisément.
+Sur un épisode en images fixes rien n'est transcrit : c'est la voix qui dit elle-même où chaque mot
+tombe. edge-tts n'écrit que des sous-titres à la phrase en ligne de commande, mais le service émet
+un événement par mot, et `speak_words.py` lit ce flux directement. Les timings sont donc exacts,
+gratuits, et sans aucune clé.
+
+Un clip généré parle en revanche de son propre chef, donc son audio est transcrit : par Groq Whisper
+si `GROQ_API_KEY` est présente, sinon par Workers AI via le Worker, qui expose une tâche
+`transcribe` bornée à un audio de 16 kHz mono. Sans transcripteur disponible, le montage retombe sur
+une répartition uniforme du texte écrit et le signale dans son reçu : l'épisode reste sous-titré,
+simplement moins précisément.
 
 Le mot en train d'être prononcé est repeint sur fond rouge, le reste du groupe restant en blanc.
 `drawtext` ne sait pas dire où un mot tombe dans une ligne, donc une position estimée ferait dériver

@@ -199,13 +199,14 @@ function kenBurns(index, duration) {
   ].join(',');
 }
 
-async function renderShot({ index, imageFile, audioFile, narration, outputFile, overlays = [] }) {
+async function renderShot({ index, imageFile, audioFile, narration, cues = null, outputFile, overlays = [] }) {
   const spoken = await probeDuration(audioFile);
   const total = spoken + 0.35;
+  const captions = await clipCaptions(narration, spoken, cues);
   const filters = [
     kenBurns(index, total),
     'eq=saturation=1.06:contrast=1.04',
-    ...captionFilters(narration, spoken),
+    ...captions,
     ...overlays,
     'format=yuv420p',
   ].join(',');
@@ -362,6 +363,7 @@ export async function renderEpisode({ shots, title, credit, musicFile, workDir, 
       imageFile: shot.imageFile,
       audioFile: shot.audioFile,
       narration: shot.narration,
+      cues: shot.cues || null,
       outputFile: path.join(workDir, `shot-${String(index).padStart(2, '0')}.mp4`),
       overlays,
     }));

@@ -7,6 +7,7 @@ import { frenchVoice, speak } from './voice.mjs';
 import { harvestComments } from './comments.mjs';
 import { imagePrompt, inventSeries, writeEpisode } from './writer.mjs';
 import { renderEpisode } from './render.mjs';
+import { cuesFromWords, transcribeClip } from './transcribe.mjs';
 import { offlineDraft, offlineImage, offlineSeries, offlineSpeech } from './offline.mjs';
 import { loadStory, saveStory, lastEpisode, nextEpisodeNumber, syncPublications, upsertEpisode } from './state.mjs';
 
@@ -93,12 +94,19 @@ async function run() {
       return { ...shot, imageFile, audioFile };
     }
     await fs.writeFile(imageFile, await generateImage(imagePrompt(state.series, shot)));
-    await speak(shot.narration, {
+    // The voice reports its own word timings, so the highlighted subtitles need
+    // no transcriber here. Transcribing the result is only the fallback.
+    const spoken = await speak(shot.narration, {
       lang: state.series.lang || 'fr',
       voice: state.series.voice,
       outputFile: audioFile,
     });
-    return { ...shot, imageFile, audioFile };
+    let words = spoken.words || [];
+    if (!words.length) {
+      const heard = await transcribeClip(audioFile, { lang: state.series.lang || 'fr', workDir: assetsDir });
+      words = heard.ok ? heard.words : [];
+    }
+    return { ...shot, imageFile, audioFile, cues: words.length ? cuesFromWords(words) : null };
   });
 
   const filename = `story-${seriesId}-${jobDate}-ep${episodeNumber}.mp4`;
