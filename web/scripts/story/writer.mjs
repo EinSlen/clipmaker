@@ -1,6 +1,5 @@
 import { askJson } from './llm.mjs';
 import { storySoFar } from './state.mjs';
-import { frenchVoice } from './voice.mjs';
 
 const WORDS_PER_SECOND = 2.6;
 
@@ -58,7 +57,6 @@ Donne exactement 4 personnages. Chaque "look" doit être si précis qu'un géné
         characters,
         visualStyle: String(payload.visualStyle || 'rendu 3D lisse, lumière de studio, couleurs saturées').slice(0, 220),
         lang: 'fr',
-        voice: frenchVoice(String(payload.title || '').length),
       };
     },
   });

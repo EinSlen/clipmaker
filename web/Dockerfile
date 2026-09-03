@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp edge-tts -r /tmp/tiktok-upload-requirements.txt \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp -r /tmp/tiktok-upload-requirements.txt \
     && rm -f /tmp/tiktok-upload-requirements.txt
 
 # Blender headless needs EGL even when it falls back to software rendering.
