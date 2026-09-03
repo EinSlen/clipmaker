@@ -6,7 +6,7 @@ import test from 'node:test';
 import { readPublisherConfig } from './config.mjs';
 import { fetchYoutubeComments } from '../../scripts/story/comments.mjs';
 import { lastEpisode, nextEpisodeNumber, storySoFar, upsertEpisode } from '../../scripts/story/state.mjs';
-import { imagePrompt } from '../../scripts/story/writer.mjs';
+import { clipPrompt } from '../../scripts/story/writer.mjs';
 import { cuesFromWords } from '../../scripts/story/transcribe.mjs';
 
 let counter = 0;
@@ -135,7 +135,7 @@ test('a missing key or video id never reaches the network', async (t) => {
   delete process.env.YOUTUBE_API_KEY;
 });
 
-test('every image prompt repeats the cast description so characters stay recognisable', () => {
+test('every clip prompt repeats the cast description so characters stay recognisable', () => {
   const series = {
     visualStyle: 'rendu 3D lisse, lumière de studio',
     characters: [
@@ -144,19 +144,25 @@ test('every image prompt repeats the cast description so characters stay recogni
     ],
   };
 
-  const prompt = imagePrompt(series, {
-    image: 'Fraisette surprend Kiwi près de la piscine, plan large',
-    cast: [series.characters[0], series.characters[1]],
-  });
+  const prompt = clipPrompt(series, [
+    {
+      narration: 'Fraisette surprend Kiwi pres de la piscine.',
+      image: 'Fraisette surprend Kiwi près de la piscine, plan large',
+      cast: [series.characters[0], series.characters[1]],
+    },
+  ], 0, 2, 10);
   assert.match(prompt, /Fraisette : une fraise géante, fines jambes humaines, survêtement rouge/);
   assert.match(prompt, /Kiwi : un kiwi trapu, moustache blanche, chemise hawaïenne/);
   assert.match(prompt, /rendu 3D lisse, lumière de studio/);
   assert.match(prompt, /9:16/);
   assert.match(prompt, /aucun texte/);
+  // The spoken line travels with the prompt, since the clip says it itself.
+  assert.match(prompt, /Fraisette surprend Kiwi pres de la piscine\./);
+  assert.match(prompt, /PLAN 1\/2/);
 
   // A shot the writer left without a cast still gets a described character
   // rather than an unanchored prompt.
-  const orphan = imagePrompt(series, { image: 'la villa vide au petit matin', cast: [] });
+  const orphan = clipPrompt(series, [{ narration: 'La villa dort.', image: 'la villa vide au petit matin', cast: [] }], 1, 2, 10);
   assert.match(orphan, /Fraisette : une fraise géante/);
 });
 

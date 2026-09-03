@@ -159,10 +159,22 @@ Renvoie du JSON :
   };
 }
 
-// The cast description is prepended verbatim so the same characters come back
-// looking the same, episode after episode.
-export function imagePrompt(series, shot) {
-  const cast = shot.cast?.length ? shot.cast : series.characters.slice(0, 1);
-  const looks = cast.map((entry) => `${entry.name} : ${entry.look}`).join('. ');
-  return `${looks}. ${shot.image}. ${series.visualStyle}. Cadrage vertical 9:16, sujet centré, aucun texte, aucune lettre, aucun filigrane.`;
+// The cast description is repeated verbatim in every clip so the same
+// characters come back looking the same, episode after episode.
+export function clipPrompt(series, group, index, total, seconds) {
+  const cast = new Map();
+  for (const shot of group) {
+    for (const member of shot.cast || []) cast.set(member.name, member);
+  }
+  const present = cast.size ? [...cast.values()] : series.characters.slice(0, 1);
+  const looks = present.map((entry) => `${entry.name} : ${entry.look}`).join('. ');
+  const action = group.map((shot) => shot.image).join(' Puis, ');
+  const dialogue = group.map((shot) => `"${shot.narration}"`).join(' ');
+  return [
+    `PLAN ${index + 1}/${total}`,
+    `${looks}.`,
+    `${action}.`,
+    `Dialogue parlé en français : ${dialogue}`,
+    `${series.visualStyle}. Format vertical 9:16, ${seconds} secondes, aucun texte incrusté.`,
+  ].join('\n');
 }

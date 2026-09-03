@@ -121,9 +121,9 @@ function runNode(args: string[], timeoutMs: number): Promise<{ stdout: string; s
   });
 }
 
-async function runStoryBuilder(script: string, prefix: string, body: RenderRequest, series: string, seconds: number) {
+async function runStoryBuilder(body: RenderRequest, series: string, seconds: number) {
   const args = [
-    path.join(process.cwd(), 'scripts', 'story', script),
+    path.join(process.cwd(), 'scripts', 'story', 'make-episode.mjs'),
     '--series', series,
     '--channel', String(body.channelId || series),
     '--seconds', String(seconds),
@@ -132,35 +132,20 @@ async function runStoryBuilder(script: string, prefix: string, body: RenderReque
   if (body.tiktokUser) args.push('--tiktok-user', String(body.tiktokUser));
   if (body.storyTheme) args.push('--theme', String(body.storyTheme));
   const { stdout } = await runNode(args, 60 * 60 * 1000);
-  const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith(prefix));
+  const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith('CLIPMAKER_MAKE:'));
   if (!line) throw new Error('The episode builder returned no receipt.');
-  const receipt = JSON.parse(line.slice(prefix.length)) as StoryReceipt;
+  const receipt = JSON.parse(line.slice('CLIPMAKER_MAKE:'.length)) as StoryReceipt;
   if (!receipt.ok || !receipt.filename) throw new Error(receipt.error || 'The episode builder failed.');
   return receipt;
 }
 
-// Generated clips are the intended format, but they depend on a third party UI
-// and on daily credits. A failed clip run therefore falls back to the still
-// image builder so the daily slot is never simply skipped, and the receipt says
-// which of the two produced the episode. STORY_CLIP_MODE pins the choice:
-// `off` never generates clips, `only` never falls back.
+// Generated clips are the only accepted format for this channel. A run that
+// cannot produce them fails and says why, rather than publishing something the
+// series is not meant to look like.
 async function renderStoryEpisode(body: RenderRequest, seconds: number) {
   const series = String(body.series || body.channelId || 'story').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 60);
   if (!series) throw new Error('A story channel needs a series id.');
-  const mode = String(process.env.STORY_CLIP_MODE || 'auto').toLowerCase();
-  let receipt: StoryReceipt | null = null;
-  let source = 'images';
-  let clipError: string | null = null;
-  if (mode === 'auto' || mode === 'only') {
-    try {
-      receipt = await runStoryBuilder('make-episode.mjs', 'CLIPMAKER_MAKE:', body, series, seconds);
-      source = 'clips';
-    } catch (error) {
-      clipError = error instanceof Error ? error.message : String(error);
-      if (mode === 'only') throw error;
-    }
-  }
-  if (!receipt) receipt = await runStoryBuilder('build-episode.mjs', 'CLIPMAKER_STORY:', body, series, seconds);
+  const receipt = await runStoryBuilder(body, series, seconds);
   const stat = await fs.stat(path.join(RENDERS_DIR, receipt.filename as string));
   return NextResponse.json({
     ok: true,
@@ -177,11 +162,9 @@ async function renderStoryEpisode(body: RenderRequest, seconds: number) {
     story: {
       series: receipt.seriesTitle,
       episode: receipt.episode,
-      shots: receipt.shots ?? receipt.clipsUsed,
-      source,
+      shots: receipt.clipsUsed ?? null,
       clipsRequested: receipt.clipsRequested ?? null,
       clipsFailed: receipt.clipsFailed ?? [],
-      clipError,
       steeredBy: receipt.steeredBy ?? null,
       commentsSeen: receipt.commentsSeen ?? 0,
       commentSources: receipt.commentSources ?? [],
