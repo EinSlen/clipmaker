@@ -9,3 +9,4 @@ export const RENDERS_DIR = path.resolve(/* turbopackIgnore: true */ process.cwd(
 export const PUBLIC_MUSIC_DIR = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'public', 'music');
 export const TIKTOK_UPLOADER_DIR = path.join(REPO_ROOT, 'vendor', 'TiktokAutoUploader');
 export const TIKTOK_COOKIES_DIR = path.join(TIKTOK_UPLOADER_DIR, 'CookiesDir');
+export const MINIMAX_SESSION_FILE = path.join(REPO_ROOT, 'web', 'data', 'auth', 'minimax-session.json');

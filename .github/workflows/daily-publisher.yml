@@ -71,6 +71,9 @@ jobs:
       PUBLISHER_STATE_KEY: ${{ secrets.PUBLISHER_STATE_KEY }}
       CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
       YOUTUBE_OAUTH_ACCOUNTS_B64: ${{ secrets.YOUTUBE_OAUTH_ACCOUNTS_B64 }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      MINIMAX_COOKIES_B64: ${{ secrets.MINIMAX_COOKIES_B64 }}
+      STORY_CLIP_MODE: ${{ vars.STORY_CLIP_MODE }}
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
       MANUAL_DRY_RUN: ${{ inputs.dry_run }}
@@ -128,7 +131,7 @@ jobs:
 
       - name: Restore the latest encrypted publisher state
         run: |
-          mkdir -p web/data/publisher web/renders artifacts/runtime
+          mkdir -p web/data/publisher web/data/story web/renders artifacts/runtime
           artifact_id="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts?name=daily-publisher-runtime&per_page=1" --jq '.artifacts[0].id // empty')"
           if [ -n "$artifact_id" ]; then
             gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/publisher-runtime.zip
@@ -155,9 +158,13 @@ jobs:
             --env YOUTUBE_UPLOAD_PROVIDER=youtube-data-api \
             --env YOUTUBE_API_DRY_RUN="$publisher_dry_run" \
             --env YOUTUBE_OAUTH_ACCOUNTS_B64="$YOUTUBE_OAUTH_ACCOUNTS_B64" \
+            --env MINIMAX_COOKIES_B64="$MINIMAX_COOKIES_B64" \
+            --env STORY_CLIP_MODE="${STORY_CLIP_MODE:-auto}" \
             --env YOUTUBE_ALLOW_PUBLIC_UPLOAD=true \
             --env PUBLISHER_DRY_RUN="$publisher_dry_run" \
             --env CLIPMAKER_UPLOAD_TOKEN="$CLIPMAKER_UPLOAD_TOKEN" \
+            --env YOUTUBE_API_KEY="$YOUTUBE_API_KEY" \
+            --env CLOUD_CONTROL_API="$CLOUD_CONTROL_API" \
             --volume "$PWD:/repo" \
             --volume "$PWD/web/renders:/app/renders" \
             --volume "$PWD/web/uploads:/app/uploads" \
@@ -420,13 +427,13 @@ jobs:
       - name: Encrypt state and pending videos for the next run
         if: always()
         run: |
-          mkdir -p artifacts/runtime web/data/publisher web/renders
+          mkdir -p artifacts/runtime web/data/publisher web/data/story web/renders
           # State files are intentionally mode 0600 inside the private API
           # container. The hosted runner uses a different UID, so grant its
           # ephemeral user read access immediately before local encryption.
-          sudo chmod -R a+rX web/data/publisher web/renders
+          sudo chmod -R a+rX web/data/publisher web/data/story web/renders
           sudo rm -f /tmp/publisher-runtime.tar.gz
-          tar -czf /tmp/publisher-runtime.tar.gz web/data/publisher web/renders
+          tar -czf /tmp/publisher-runtime.tar.gz web/data/publisher web/data/story web/renders
           openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 \
             -pass env:PUBLISHER_STATE_KEY \
             -in /tmp/publisher-runtime.tar.gz \

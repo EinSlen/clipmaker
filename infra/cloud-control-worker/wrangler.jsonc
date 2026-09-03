@@ -21,6 +21,9 @@
     "REPOSITORY_NAME": "clipmaker",
     "REPOSITORY_ID": "1105628006"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "kv_namespaces": [
     {
       "binding": "CONFIG",

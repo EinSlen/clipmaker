@@ -31,6 +31,14 @@ class HttpError extends Error {
   }
 }
 
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+  }
+  return btoa(binary);
+}
+
 function bytesToBase64Url(bytes) {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -580,6 +588,100 @@ async function apiEditAudio(request, env, runner = false) {
   throw new HttpError(405, 'Méthode audio non autorisée.');
 }
 
+// The story channel reaches Workers AI through this Worker so no Cloudflare
+// API token ever has to exist outside the account. Only these three models are
+// reachable, and only with the runner token.
+const AI_MODELS = Object.freeze({
+  image: '@cf/black-forest-labs/flux-1-schnell',
+  speech: '@cf/deepgram/aura-2-en',
+  text: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  transcribe: '@cf/openai/whisper-large-v3-turbo',
+});
+const AI_MAX_PROMPT = 8000;
+
+export function validateAiRequest(body) {
+  const task = String(body?.task || '');
+  if (!Object.hasOwn(AI_MODELS, task)) throw new HttpError(400, 'Tâche IA inconnue.');
+  const input = body?.input && typeof body.input === 'object' ? body.input : null;
+  if (!input) throw new HttpError(400, 'Entrée IA manquante.');
+
+  if (task === 'image') {
+    const prompt = String(input.prompt || '').trim();
+    if (!prompt || prompt.length > AI_MAX_PROMPT) throw new HttpError(400, 'Prompt d’image invalide.');
+    // flux-1-schnell rejects any property beyond prompt and steps.
+    const steps = Number(input.steps);
+    return {
+      model: AI_MODELS.image,
+      input: {
+        prompt,
+        steps: Number.isFinite(steps) ? Math.max(1, Math.min(8, Math.round(steps))) : 4,
+      },
+    };
+  }
+
+  // English only. Workers AI has no French voice, so the story channel speaks
+  // French through edge-tts on the runner instead.
+  if (task === 'speech') {
+    const prompt = String(input.prompt || '').trim();
+    if (!prompt || prompt.length > 2000) throw new HttpError(400, 'Texte à dire invalide.');
+    const speaker = String(input.speaker || 'zeus');
+    if (!['theia', 'vesta', 'zeus'].includes(speaker)) throw new HttpError(400, 'Voix invalide.');
+    return { model: AI_MODELS.speech, input: { text: prompt, speaker, encoding: 'mp3', container: 'none' } };
+  }
+
+  // Subtitles have to match the spoken line, so the generated clip is
+  // transcribed with word timings. The audio arrives base64 encoded and stays
+  // well under the synchronous body limit at 16 kHz mono.
+  if (task === 'transcribe') {
+    const audio = String(input.audio || '');
+    if (!audio || audio.length > 90_000) throw new HttpError(400, 'Audio à transcrire invalide.');
+    if (!/^[A-Za-z0-9+/=]+$/u.test(audio)) throw new HttpError(400, 'Audio à transcrire mal encodé.');
+    const language = String(input.language || 'fr').slice(0, 5);
+    if (!/^[a-z]{2}(-[A-Za-z]{2})?$/u.test(language)) throw new HttpError(400, 'Langue invalide.');
+    return { model: AI_MODELS.transcribe, input: { audio, language, task: 'transcribe' } };
+  }
+
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+  if (!messages.length || messages.length > 8) throw new HttpError(400, 'Conversation invalide.');
+  const total = messages.reduce((sum, entry) => sum + String(entry?.content || '').length, 0);
+  if (total > 24_000) throw new HttpError(400, 'Conversation trop longue.');
+  for (const entry of messages) {
+    if (!['system', 'user', 'assistant'].includes(entry?.role)) throw new HttpError(400, 'Rôle invalide.');
+    if (!String(entry?.content || '').trim()) throw new HttpError(400, 'Message vide.');
+  }
+  const maxTokens = Number(input.max_tokens);
+  const temperature = Number(input.temperature);
+  return {
+    model: AI_MODELS.text,
+    input: {
+      messages: messages.map((entry) => ({ role: entry.role, content: String(entry.content) })),
+      max_tokens: Number.isFinite(maxTokens) ? Math.max(64, Math.min(4096, Math.round(maxTokens))) : 2048,
+      ...(Number.isFinite(temperature) ? { temperature: Math.max(0, Math.min(2, temperature)) } : {}),
+      ...(input.json === true ? { response_format: { type: 'json_object' } } : {}),
+    },
+  };
+}
+
+async function apiAiRun(request, env) {
+  await workflowRequest(request, env);
+  if (!env.AI) throw new HttpError(503, 'Le binding Workers AI est absent de ce déploiement.');
+  const body = await boundedJson(request, MAX_SYNC_BODY_BYTES);
+  const { model, input } = validateAiRequest(body);
+  let result;
+  try {
+    result = await env.AI.run(model, input);
+  } catch (error) {
+    throw new HttpError(502, `Workers AI a échoué : ${error instanceof Error ? error.message : 'erreur inconnue'}`);
+  }
+  // Speech models answer with raw audio rather than JSON, so the bytes are
+  // handed back base64 encoded under the same shape as the other tasks.
+  if (result instanceof ReadableStream || result instanceof Response) {
+    const buffer = await new Response(result instanceof Response ? result.body : result).arrayBuffer();
+    return json({ ok: true, model, result: { audio: bytesToBase64(new Uint8Array(buffer)) } }, 200, request, env);
+  }
+  return json({ ok: true, model, result }, 200, request, env);
+}
+
 async function apiWorkflowBootstrap(request, env) {
   await workflowRequest(request, env);
   if (request.method === 'POST') {
@@ -706,6 +808,7 @@ async function route(request, env) {
   if (url.pathname === '/api/edit-audio' || url.pathname.startsWith('/api/edit-audio/')) return apiEditAudio(request, env);
   if (url.pathname === '/api/workflow/edit-audio' || url.pathname.startsWith('/api/workflow/edit-audio/')) return apiEditAudio(request, env, true);
   if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/api/workflow/bootstrap') return apiWorkflowBootstrap(request, env);
+  if (request.method === 'POST' && url.pathname === '/api/ai/run') return apiAiRun(request, env);
   if (request.method === 'POST' && url.pathname === '/api/dispatch') return apiDispatch(request, env);
   if (request.method === 'POST' && url.pathname === '/api/logout') return apiLogout(request, env);
   if (request.method === 'POST' && url.pathname === '/webhook') return new Response(null, { status: 204 });

@@ -14,6 +14,10 @@ export const maxDuration = 604_800;
 
 type RenderRequest = {
   game?: GameId;
+  channelId?: string;
+  series?: string;
+  tiktokUser?: string;
+  storyTheme?: string;
   difficulty?: number;
   duration?: number;
   rings?: number;
@@ -26,6 +30,26 @@ type RenderRequest = {
   musicVolume?: number;
   title?: string;
   obstacle?: 'auto' | 'moving-slide' | 'stair-cascade' | 'v-stairs' | 'pipe-bend' | 'peg-grid' | 'twin-gears' | 'compression-ring';
+};
+
+type StoryReceipt = {
+  ok: boolean;
+  error?: string;
+  seriesTitle?: string;
+  episode?: number;
+  filename?: string;
+  duration?: number;
+  shots?: number;
+  title?: string;
+  youtubeTitle?: string;
+  caption?: string;
+  tags?: string[];
+  steeredBy?: { platform: string; author: string; text: string; likes: number } | null;
+  commentsSeen?: number;
+  commentSources?: { platform: string; ok: boolean; reason?: string; count?: number }[];
+  clipsRequested?: number;
+  clipsUsed?: number;
+  clipsFailed?: { clip: number; error: string }[];
 };
 
 type RenderOutcome =
@@ -74,6 +98,97 @@ function runRenderer(args: string[]): Promise<{ stdout: string; stderr: string }
   });
 }
 
+function runNode(args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { cwd: process.cwd(), windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('The episode builder exceeded its time limit.'));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => (stdout += chunk.toString()));
+    child.stderr.on('data', (chunk) => (stderr = (stderr + chunk.toString()).slice(-8000)));
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr.trim().slice(-1200) || `The episode builder stopped with exit code ${code}.`));
+    });
+  });
+}
+
+async function runStoryBuilder(script: string, prefix: string, body: RenderRequest, series: string, seconds: number) {
+  const args = [
+    path.join(process.cwd(), 'scripts', 'story', script),
+    '--series', series,
+    '--channel', String(body.channelId || series),
+    '--seconds', String(seconds),
+    '--output-dir', RENDERS_DIR,
+  ];
+  if (body.tiktokUser) args.push('--tiktok-user', String(body.tiktokUser));
+  if (body.storyTheme) args.push('--theme', String(body.storyTheme));
+  const { stdout } = await runNode(args, 60 * 60 * 1000);
+  const line = stdout.split(/\r?\n/).reverse().find((entry) => entry.startsWith(prefix));
+  if (!line) throw new Error('The episode builder returned no receipt.');
+  const receipt = JSON.parse(line.slice(prefix.length)) as StoryReceipt;
+  if (!receipt.ok || !receipt.filename) throw new Error(receipt.error || 'The episode builder failed.');
+  return receipt;
+}
+
+// Generated clips are the intended format, but they depend on a third party UI
+// and on daily credits. A failed clip run therefore falls back to the still
+// image builder so the daily slot is never simply skipped, and the receipt says
+// which of the two produced the episode. STORY_CLIP_MODE pins the choice:
+// `off` never generates clips, `only` never falls back.
+async function renderStoryEpisode(body: RenderRequest, seconds: number) {
+  const series = String(body.series || body.channelId || 'story').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 60);
+  if (!series) throw new Error('A story channel needs a series id.');
+  const mode = String(process.env.STORY_CLIP_MODE || 'auto').toLowerCase();
+  let receipt: StoryReceipt | null = null;
+  let source = 'images';
+  let clipError: string | null = null;
+  if (mode === 'auto' || mode === 'only') {
+    try {
+      receipt = await runStoryBuilder('make-episode.mjs', 'CLIPMAKER_MAKE:', body, series, seconds);
+      source = 'clips';
+    } catch (error) {
+      clipError = error instanceof Error ? error.message : String(error);
+      if (mode === 'only') throw error;
+    }
+  }
+  if (!receipt) receipt = await runStoryBuilder('build-episode.mjs', 'CLIPMAKER_STORY:', body, series, seconds);
+  const stat = await fs.stat(path.join(RENDERS_DIR, receipt.filename as string));
+  return NextResponse.json({
+    ok: true,
+    game: 'story-comments',
+    gameName: 'Comment-Driven Story',
+    filename: receipt.filename,
+    size: stat.size,
+    duration: receipt.duration,
+    title: receipt.title,
+    youtubeTitle: receipt.youtubeTitle,
+    caption: receipt.caption,
+    tags: receipt.tags,
+    outcome: null,
+    story: {
+      series: receipt.seriesTitle,
+      episode: receipt.episode,
+      shots: receipt.shots ?? receipt.clipsUsed,
+      source,
+      clipsRequested: receipt.clipsRequested ?? null,
+      clipsFailed: receipt.clipsFailed ?? [],
+      clipError,
+      steeredBy: receipt.steeredBy ?? null,
+      commentsSeen: receipt.commentsSeen ?? 0,
+      commentSources: receipt.commentSources ?? [],
+    },
+  });
+}
+
 async function listMusicFiles(directory = PUBLIC_MUSIC_DIR): Promise<string[]> {
   const files: string[] = [];
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
@@ -104,6 +219,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Unknown game format.' }, { status: 400 });
     }
     const game = isGameId(body.game) ? body.game : 'ball-escape';
+    if (game === 'story-comments') {
+      await fs.mkdir(RENDERS_DIR, { recursive: true });
+      return await renderStoryEpisode(body, numberInRange(body.duration, 60, 30, 120));
+    }
     const definition = getGameDefinition(game);
     const requestedDuration = numberInRange(body.duration, 15, 15, 60);
     const duration = game === 'soft-body-slide' ? 30 : requestedDuration;
