@@ -241,6 +241,11 @@ def collect(output: Path, *, publish=False, max_imports=2, scan_limit=12) -> dic
                 if error.code == 429:
                     break
                 continue
+            except (URLError, TimeoutError, OSError):
+                # Public search is best effort. Try the other bounded queries
+                # and leave the private library untouched when it is offline.
+                report["errors"].append("search-unavailable")
+                continue
             for item in result.get("results", []):
                 if report["imported"] >= max_imports or report["examined"] >= scan_limit:
                     break
@@ -331,8 +336,6 @@ if __name__ == "__main__":
     try:
         summary = collect(args.output.resolve(), publish=args.publish, max_imports=args.max_imports, scan_limit=args.scan_limit)
         print(json.dumps({k: summary[k] for k in ("status", "imported", "searched", "examined", "rejected", "errors") if k in summary}))
-        if summary["status"] == "degraded":
-            raise SystemExit(1)
     except (ValueError, HTTPError, URLError, OSError) as error:
         print(json.dumps({"status": "error", "error": f"http-{error.code}" if isinstance(error, HTTPError) else type(error).__name__}))
         raise SystemExit(1) from None
