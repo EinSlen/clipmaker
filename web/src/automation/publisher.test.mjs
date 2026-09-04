@@ -4,10 +4,10 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readPublisherConfig } from './config.mjs';
-import { generateChannel, importRenderedJob, planForDate, publishChannel, runDue } from './orchestrator.mjs';
+import { generateChannel, importRenderedJob, planForDate, publish, publishChannel, runDue } from './orchestrator.mjs';
 import { loadState, saveState, withStateLock } from './state.mjs';
 import { buildPublisherSummary } from './summary.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
@@ -58,6 +58,44 @@ function native3dEvidence(seed) {
       inter_body_contact: { frames_checked: 180, maximum_penetration: 0, issues: [] },
     }))),
   };
+}
+
+async function fakeClipmakerApi(t, calls) {
+  const server = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    response.setHeader('content-type', 'application/json');
+    if (request.url === '/api/game/render') {
+      calls.render += 1;
+      response.end(JSON.stringify({
+        ok: true,
+        filename: `daily-${calls.render}.mp4`,
+        title: 'Can It Escape?',
+        youtubeTitle: 'Can It Escape? #shorts',
+        caption: 'Can it escape? #satisfying',
+        tags: ['#satisfying'],
+        game: JSON.parse(body).game,
+        duration: 15,
+        outcome: 'escaped',
+      }));
+      return;
+    }
+    if (request.url === '/api/tiktok/upload') {
+      calls.tiktok += 1;
+      response.end(JSON.stringify({
+        ok: true,
+        upload: { provider: 'tiktok-web-upload', platformPostId: `tiktok-${calls.tiktok}`, raw: { privacy: 'private' } },
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ ok: false, error: 'not found' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  return `http://127.0.0.1:${address.port}`;
 }
 
 test('3D upload evidence rejects missing bodies, overlaps, defects and old low-fps renders', () => {
@@ -784,4 +822,129 @@ test('a channel that fails alone still names its reason in the daily summary', (
   // the reason would never surface without this line.
   assert.match(summary, /❌ `story-dvlad` 2026-09-04 : Credits insuffisants/u);
   assert.doesNotMatch(summary, /❌ `softbody-dvlad`/u);
+
+  // An upload refused by a platform is isolated the very same way, so the
+  // ticket has to name it instead of reporting a silent success.
+  const refused = buildPublisherSummary({
+    operation: 'publish',
+    config: { channels: [channel] },
+    status: { jobs: [{
+      channelId: 'story-dvlad',
+      date: '2026-09-04',
+      status: 'partial',
+      renderRequest: { game: 'story-comments' },
+      render: { error: null },
+      platforms: { tiktok: { enabled: true, status: 'failed', error: 'TikTok Studio refused the upload.' } },
+    }] },
+  });
+  assert.match(refused, /❌ `story-dvlad` 2026-09-04 : tiktok: TikTok Studio refused the upload\./u);
+});
+
+test('a publication renders the account that missed its generation slot and isolates the others', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const calls = { render: 0, tiktok: 0 };
+  const baseUrl = await fakeClipmakerApi(t, calls);
+  const late = { ...sampleChannel(), id: 'late-account', publishTime: '18:15' };
+  late.tiktok = { enabled: true, username: 'clipmaker.late', musicId: null, visibility: 'private', confirmPublic: false };
+  const imported = { ...sampleChannel(), id: 'imported-3d' };
+  imported.game = { game: 'soft-body-slide', difficulty: 100, duration: 30, obstacle: 'auto' };
+  imported.tiktok = { enabled: true, username: 'clipmaker.3d', musicId: null, visibility: 'private', confirmPublic: false };
+  const config = {
+    dryRun: false,
+    baseUrl,
+    requestTimeoutMinutes: 1,
+    timeZone: 'Europe/Paris',
+    seedNamespace: 'test',
+    stateDir: directory,
+    catchupDays: 2,
+    retentionDays: 120,
+    channels: [late, imported],
+  };
+  const date = '2026-09-04';
+
+  const results = await publish(config, { date, skipGames: ['soft-body-slide'] });
+
+  // The account enabled after its generation time still publishes its day.
+  assert.equal(calls.render, 1);
+  assert.equal(calls.tiktok, 1);
+  const job = (await loadState(directory)).jobs.find((candidate) => candidate.channelId === 'late-account');
+  assert.equal(job.status, 'published');
+  assert.equal(job.platforms.tiktok.receipt.id, 'tiktok-1');
+  // The 3D account is imported by its own workflow, never rendered here.
+  const refused = results.filter((result) => result.ok === false);
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].channel, 'imported-3d');
+  assert.match(refused[0].error, /No generated job exists for 2026-09-04:imported-3d/u);
+  assert.equal((await loadState(directory)).jobs.some((candidate) => candidate.channelId === 'imported-3d'), false);
+
+  // A video already published is never rendered or uploaded a second time.
+  await publish(config, { date, skipGames: ['soft-body-slide'] });
+  assert.equal(calls.render, 1);
+  assert.equal(calls.tiktok, 1);
+
+  const dry = await publish(config, { date, dryRun: true, skipGames: [] });
+  assert.equal(dry.every((result) => result.dryRun === true), true);
+  assert.equal(calls.render, 1);
+});
+
+test('the daily publisher reports every account and only fails when nothing could publish', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configDirectory = path.join(directory, 'config');
+  await fs.mkdir(configDirectory);
+  const configPath = path.join(configDirectory, 'publisher.json');
+  const calls = { render: 0, tiktok: 0 };
+  const baseUrl = await fakeClipmakerApi(t, calls);
+  await fs.writeFile(configPath, JSON.stringify({
+    dryRun: false,
+    baseUrl,
+    seedNamespace: 'test',
+    channels: [
+      {
+        id: 'late-account',
+        game: { id: 'ball-escape' },
+        publishTime: '18:15',
+        youtube: { enabled: false, account: 'default', privacy: 'private' },
+        tiktok: { enabled: true, username: 'clipmaker.late', visibility: 'private' },
+      },
+      {
+        id: 'imported-3d',
+        game: { id: 'soft-body-slide' },
+        youtube: { enabled: false, account: 'main', privacy: 'private' },
+        tiktok: { enabled: true, username: 'clipmaker.3d', visibility: 'private' },
+      },
+    ],
+  }));
+  const cli = await repositoryFile('web/scripts/publisher.mjs');
+  // The publisher talks to the fake API above, so the command has to run
+  // without blocking this process: a synchronous child would deadlock.
+  const run = (extra) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [cli, 'publish', '--config', configPath,
+      '--date', '2026-09-04', '--skip-game', 'soft-body-slide', ...extra], { encoding: 'utf8' });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+
+  const isolated = await run([]);
+  assert.equal(isolated.status, 0, isolated.stderr);
+  const report = JSON.parse(isolated.stdout);
+  assert.equal(report.filter((entry) => entry.ok === false).length, 1);
+  assert.equal(report.some((entry) => entry.ok === true && entry.job?.channelId === 'late-account'), true);
+  assert.equal(calls.tiktok, 1);
+
+  // Nothing at all could be published, so the scheduled run has to turn red.
+  const alone = await run(['--channel', 'imported-3d']);
+  assert.equal(alone.status, 1);
+  assert.equal(JSON.parse(alone.stdout).every((entry) => entry.ok === false), true);
+});
+
+test('a publication catch-up can never render the 3D account inside the daily job', async () => {
+  const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
+  const source = await fs.readFile(workflow, 'utf8');
+  const step = source.split('- name: Execute the publisher operation')[1]
+    .split('- name: Save a safe status summary')[0];
+  assert.match(step, /^ +extra\+=\(--skip-game soft-body-slide\)$/mu);
+  assert.doesNotMatch(step, /COMMAND" = "generate"/u);
 });

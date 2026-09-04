@@ -341,9 +341,10 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$MANUAL_FORCE_TIKTOK" = "true" ]; then
             extra+=(--force-platform tiktok)
           fi
-          if [ "$COMMAND" = "generate" ] || [ "$COMMAND" = "run" ]; then
-            extra+=(--skip-game soft-body-slide)
-          fi
+          # The 3D account is rendered by its own workflow and imported above,
+          # so no operation may ever render it inside this job: not a nightly
+          # generation, and not a publication catching up a missing video.
+          extra+=(--skip-game soft-body-slide)
           docker exec clipmaker-daily node /repo/web/scripts/publisher.mjs "$COMMAND" \
             --config /repo/web/config/publisher.json "${extra[@]}" > artifacts/result.json
 

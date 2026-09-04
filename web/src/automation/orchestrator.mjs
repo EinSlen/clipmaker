@@ -416,10 +416,24 @@ function selectedChannels(config, channelId, skipGames = []) {
   return channels;
 }
 
+function channelFailure(action, channel, date, error) {
+  return { ok: false, action, channel: channel.id, date, error: errorMessage(error) };
+}
+
+async function readyToPublish(config, jobId) {
+  const job = (await loadState(config.stateDir)).jobs.find((candidate) => candidate.id === jobId);
+  return job?.render?.status === 'ready' && Boolean(job.render.filename);
+}
+
 export async function generate(config, { date = dateInTimeZone(new Date(), config.timeZone), channelId, dryRun, skipGames = [] } = {}) {
   const results = [];
   for (const channel of selectedChannels(config, channelId, skipGames)) {
-    results.push(await generateChannel(config, channel, date, { dryRun }));
+    // One account that cannot render never cancels the accounts after it.
+    try {
+      results.push(await generateChannel(config, channel, date, { dryRun }));
+    } catch (error) {
+      results.push(channelFailure('generate', channel, date, error));
+    }
   }
   return results;
 }
@@ -429,10 +443,24 @@ export async function publish(config, {
   channelId,
   dryRun,
   forcePlatforms = [],
+  skipGames = [],
 } = {}) {
   const results = [];
+  const imported = new Set(skipGames);
   for (const channel of selectedChannels(config, channelId)) {
-    results.push(await publishChannel(config, channel, date, { dryRun, forcePlatforms }));
+    try {
+      // An account enabled after its generation time, or a generation that
+      // failed that night, reaches its publication slot with no video at all.
+      // Rendering it here is the only way that slot can still publish. A game
+      // rendered by its own workflow is imported, never rendered inline.
+      if (!(dryRun ?? config.dryRun) && !imported.has(channel.game.game)
+        && !(await readyToPublish(config, planForDate(config, channel, date).id))) {
+        results.push(await generateChannel(config, channel, date, { dryRun }));
+      }
+      results.push(await publishChannel(config, channel, date, { dryRun, forcePlatforms }));
+    } catch (error) {
+      results.push(channelFailure('publish', channel, date, error));
+    }
   }
   return results;
 }
@@ -455,7 +483,7 @@ export async function runDue(config, { now = new Date(), channelId, dryRun } = {
       try {
         report.push(await generateChannel(config, channel, today, { dryRun }));
       } catch (error) {
-        report.push({ ok: false, action: 'generate', channel: channel.id, error: errorMessage(error) });
+        report.push(channelFailure('generate', channel, today, error));
       }
     }
     if (isTimeDue(channel.publishTime, now, config.timeZone)) {
@@ -464,7 +492,7 @@ export async function runDue(config, { now = new Date(), channelId, dryRun } = {
         try {
           report.push(await publishChannel(config, channel, date, { dryRun }));
         } catch (error) {
-          report.push({ ok: false, action: 'publish', channel: channel.id, date, error: errorMessage(error) });
+          report.push(channelFailure('publish', channel, date, error));
         }
       }
     }
