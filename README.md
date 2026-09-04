@@ -138,7 +138,7 @@ Toute la chaîne tient dans des offres gratuites :
 | Commentaires TikTok | session Chromium existante du dossier `vendor/` | aucune |
 | Scénario et choix du commentaire | Groq | aucune sur l'offre gratuite |
 | Plans animés | Hailuo, pilotage navigateur | crédits du compte, voir plus bas |
-| Sous-titres calés sur la voix | edge-tts, ou Workers AI pour un clip | aucune, ou environ 10 neurones |
+| Sous-titres calés sur la voix | Groq Whisper, ou Workers AI | aucune, ou environ 10 neurones |
 | Montage | ffmpeg | aucune |
 
 Le seul poste réellement payant est la génération des clips : tout le reste tient dans des offres

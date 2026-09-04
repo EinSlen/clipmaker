@@ -44,16 +44,6 @@ export async function generateImage(prompt, seed) {
   return Buffer.from(encoded, 'base64');
 }
 
-// English only: see voice.mjs for why French never goes through Workers AI.
-export async function synthesizeEnglishSpeech(text, speaker = 'zeus') {
-  const clean = String(text || '').trim();
-  if (!clean) throw new Error('Empty narration line.');
-  const result = await runTask('speech', { prompt: clean.slice(0, 2000), speaker });
-  const encoded = result?.audio;
-  if (typeof encoded !== 'string' || encoded.length < 256) throw new Error('Workers AI returned no audio.');
-  return Buffer.from(encoded, 'base64');
-}
-
 export async function generateText({ messages, maxTokens = 2048, temperature, json = true }) {
   const result = await runTask('text', { messages, max_tokens: maxTokens, temperature, json });
   // In JSON mode Workers AI hands back an already parsed object rather than a
