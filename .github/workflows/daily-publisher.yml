@@ -158,7 +158,6 @@ jobs:
             --env YOUTUBE_API_DRY_RUN="$publisher_dry_run" \
             --env YOUTUBE_OAUTH_ACCOUNTS_B64="$YOUTUBE_OAUTH_ACCOUNTS_B64" \
             --env MINIMAX_COOKIES_B64="$MINIMAX_COOKIES_B64" \
-            --env STORY_CLIP_MODE="${STORY_CLIP_MODE:-auto}" \
             --env YOUTUBE_ALLOW_PUBLIC_UPLOAD=true \
             --env PUBLISHER_DRY_RUN="$publisher_dry_run" \
             --env CLIPMAKER_UPLOAD_TOKEN="$CLIPMAKER_UPLOAD_TOKEN" \
