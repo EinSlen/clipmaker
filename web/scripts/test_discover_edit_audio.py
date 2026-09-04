@@ -1,6 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from discover_edit_audio import assess_speech, candidate, safe_url, transcript_hash, verify_page
+from discover_edit_audio import assess_speech, candidate, collect, safe_url, transcript_hash, verify_page
 
 
 def segments(text="I really miss him, and I know that my heart will never forget him."):
@@ -10,6 +13,15 @@ def segments(text="I really miss him, and I know that my heart will never forget
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_search_timeout_is_reported_without_failing_the_optional_refresh(self):
+        with tempfile.TemporaryDirectory() as root, \
+                patch("discover_edit_audio.download", side_effect=TimeoutError), \
+                patch("discover_edit_audio.time.sleep"):
+            report = collect(Path(root), publish=False)
+        self.assertEqual(report["status"], "degraded")
+        self.assertEqual(report["searched"], 0)
+        self.assertEqual(report["errors"], ["search-unavailable"] * 3)
+
     def test_source_urls_are_strictly_allowlisted(self):
         good = "https://cdn.freesound.org/previews/123/123456_1-hq.mp3"
         self.assertEqual(safe_url(good, "audio"), good)
