@@ -23,13 +23,16 @@ ENV PORT=3000
 COPY web/tiktok-upload-requirements.txt /tmp/tiktok-upload-requirements.txt
 
 # ffmpeg + Python + Blender for rendering, Chromium for the uploaders.
+# The story clips and the comment scraper open a real window through
+# xvfb-run, which refuses to start without xauth: a recommendation the
+# xvfb package alone does not pull in here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 python3-pip python3-venv python3-pil python3-numpy \
       blender \
       gh \
       chromium chromium-driver \
-      xvfb \
+      xvfb xauth \
       curl ca-certificates fonts-dejavu fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --no-cache-dir --break-system-packages yt-dlp -r /tmp/tiktok-upload-requirements.txt \

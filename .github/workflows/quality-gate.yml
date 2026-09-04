@@ -105,6 +105,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Build the production Blender environment
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:surface .
+      - name: Start the virtual display the story clips are recorded in
+        run: docker run --rm --init clipmaker-ci:surface xvfb-run -a true
       - name: Test contact skinning, every spawn and the animated reset
         run: |
           docker run --rm --init clipmaker-ci:surface \
