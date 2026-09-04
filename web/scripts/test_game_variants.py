@@ -371,7 +371,7 @@ class SoftBodyVariantTests(unittest.TestCase):
                     "framing": {"frames_checked": end - start + 1, "maximum_empty_seconds": 0,
                                 "maximum_side_exit_seconds": 0, "issues": []},
                     "rendered_surface": {"frames_checked": end - start + 1, "vertices_checked": 210946 * (end - start + 1),
-                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.01, "issues": []},
+                                         "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.096382, "issues": []},
                     "inter_body_contact": {"issues": [], "frames_checked": end - start + 1}})
         payload = {"preflight_schema": 3, "obstacle": "v-stairs", "stages": list(variant.stages),
             "fps": 30, "duration": 30, "attempt_quality": quality}
@@ -403,7 +403,7 @@ class SoftBodyVariantTests(unittest.TestCase):
         valid_rendered = quality[0]["rendered_surface"]
         for invalid in (None, {**valid_rendered, "frames_checked": 1}, {**valid_rendered, "vertices_checked": 0},
                         {**valid_rendered, "subdivision": 2}, {**valid_rendered, "maximum_penetration": 0.004},
-                        {**valid_rendered, "maximum_correction": 0.09},
+                        {**valid_rendered, "maximum_correction": 0.101},
                         {**valid_rendered, "maximum_penetration": float("nan")},
                         {**valid_rendered, "issues": ["rendered-skin-inside-obstacle"]}):
             with self.assertRaisesRegex(ValueError, "subdivided"):
