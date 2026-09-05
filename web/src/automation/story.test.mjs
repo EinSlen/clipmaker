@@ -233,7 +233,11 @@ test('a day without clip credits falls back to the free still renderer', async (
   // visibly a still. An exhausted allocation costs the episode its motion, not
   // its publication, so the still renderer stays underneath.
   assert.ok(still.indexOf('generateVideo(') < still.indexOf('generateImage('));
-  assert.match(still, /STORY_FREE_MODE/u);
+
+  // The account's Workers AI catalogue exposes no video category yet, so the
+  // video attempt is opt-in: leaving it on by default would spend a failing
+  // request per clip on every run.
+  assert.match(still, /process\.env\.STORY_FREE_MODE \|\| 'still'/u);
   assert.match(still, /normaliseVideo\(rawFile, outputFile, duration\)/u);
 
   // The report has to distinguish a moving episode from a slideshow.

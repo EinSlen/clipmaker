@@ -152,9 +152,11 @@ async function run() {
   await fs.mkdir(clipsDir, { recursive: true });
   await fs.mkdir(stillsDir, { recursive: true });
 
-  // STORY_FREE_MODE pins one renderer when a run must not silently degrade to
-  // stills, or when only the cheap path may be spent.
-  const mode = String(process.env.STORY_FREE_MODE || 'auto').toLowerCase();
+  // Generated video is opt-in, not the default: the account's Workers AI
+  // catalogue exposes no video category today, so trying it first would spend a
+  // failing request per clip on every run. Set STORY_FREE_MODE=auto once the
+  // model answers, or =video to make its absence a hard failure.
+  const mode = String(process.env.STORY_FREE_MODE || 'still').toLowerCase();
   const planned = Math.min(Number(args.limit) || prompts.length, prompts.length);
   const failed = [];
   const sources = [];
