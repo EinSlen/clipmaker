@@ -402,6 +402,11 @@ test('production 3D assembly rejects a video without the generated audio mix', a
   assert.match(workflow, /29\.9 <= duration <= 30\.1/u);
   assert.match(workflow, /metadata\.get\("music_generated"\) is not True/u);
   assert.match(workflow, /metadata\.get\("sound_pack"\) != "premium-foley"/u);
+  // The spoken edit clearance is decided once, by the gate run at the top of
+  // the same step. A second copy of those rules here went out of date and
+  // refused a finished video whose audio had been reviewed automatically.
+  assert.match(workflow, /assertEditAudioQuality\(JSON\.parse/u);
+  assert.doesNotMatch(workflow, /user-attested-cross-platform/u);
 });
 
 test('TikTok upload restores the API provider with a verified Studio fallback and an admin token', async () => {
