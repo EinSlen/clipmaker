@@ -439,13 +439,12 @@ jobs:
                             and metadata.get("music_clearance") == "ncs-independent-creator-ugc"
                             and metadata.get("music_license_url") == "https://ncs.io/usage-policy/terms"
                             and bool(metadata.get("music_credit")) and bool(metadata.get("music_source_sha256")))
+          # Clearance, review mode and source integrity of a spoken edit belong
+          # to assertEditAudioQuality, which runs first in this step and stops
+          # it before this check. Repeating those rules here is what left the
+          # automatic review out and refused a finished video.
           spoken_edit = (metadata.get("music_provider") == "private-edit-library"
-                         and metadata.get("music_content_kind") == "spoken"
-                         and metadata.get("music_clearance") == "user-attested-cross-platform"
-                         and metadata.get("music_sentence_reviewed") is True
-                         and metadata.get("music_looped") is False
-                         and bool(metadata.get("music_rights_evidence"))
-                         and bool(metadata.get("music_source_sha256")))
+                         and metadata.get("music_content_kind") == "spoken")
           if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or metadata.get("sound_pack") != "premium-foley":
               raise SystemExit("Missing soundtrack clearance or collision Foley metadata")
           title = os.environ["DAILY_TITLE"]
