@@ -44,6 +44,27 @@ export async function generateImage(prompt, seed) {
   return Buffer.from(encoded, 'base64');
 }
 
+// The proxy pins the vertical frame and bounds the length, so the caller only
+// chooses what the shot shows and which seed makes it reproducible. The model
+// answers with a URL rather than bytes, and the caller downloads it.
+export async function generateVideo(prompt, { duration, seed, resolution } = {}) {
+  const outcome = await runTask('video', {
+    prompt: String(prompt).slice(0, 2500),
+    ...(Number.isFinite(duration) ? { duration } : {}),
+    ...(Number.isFinite(seed) ? { seed } : {}),
+    ...(resolution ? { resolution } : {}),
+  });
+  const state = String(outcome?.state || '');
+  if (state && state.toLowerCase() !== 'completed') throw new Error(`Workers AI video state: ${state}.`);
+  const url = String(outcome?.result?.video || '');
+  // The proxy is trusted, but a plaintext URL would still carry the clip in the
+  // clear, so only a loopback host may be http and only the local harness ever
+  // is one.
+  const safe = /^https:\/\//u.test(url) || /^http:\/\/127\.0\.0\.1(:\d+)?\//u.test(url);
+  if (!safe) throw new Error('Workers AI returned no video URL.');
+  return url;
+}
+
 export async function generateText({ messages, maxTokens = 2048, temperature, json = true }) {
   const result = await runTask('text', { messages, max_tokens: maxTokens, temperature, json });
   // In JSON mode Workers AI hands back an already parsed object rather than a

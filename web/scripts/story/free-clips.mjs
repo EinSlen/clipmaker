@@ -3,13 +3,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { generateImage } from './workers-ai.mjs';
+import { generateImage, generateVideo } from './workers-ai.mjs';
 
-// Free fallback for the days the clip provider has no credits left. It fulfils
-// the contract minimax-agent.cjs already fulfils, filling the plan's clips
-// directory with clip-NN.mp4, so assemble-episode.mjs never learns which source
-// produced them. Images come from the Workers AI binding the runner already
-// authenticates against, so the episode costs nothing beyond the daily quota.
+// Free replacement for the days the metered clip provider has no credits left.
+// It fulfils the contract minimax-agent.cjs already fulfils, filling the plan's
+// clips directory with clip-NN.mp4, so assemble-episode.mjs never learns which
+// source produced them. Everything goes through the Workers AI binding the
+// runner already authenticates against, inside the daily free allocation.
+//
+// Generated video is the first choice, because a still is visibly a still. The
+// Ken Burns path stays underneath it: an exhausted daily allocation should cost
+// the episode its motion, never its publication.
 const RECEIPT_PREFIX = 'CLIPMAKER_STILL:';
 const WIDTH = 1080;
 const HEIGHT = 1920;
@@ -26,11 +30,13 @@ function binary(name) {
 function execute(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { windowsHide: true });
+    let stdout = '';
     let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000); });
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve({ stdout });
       else reject(new Error(`${path.basename(command)} exited with ${code}: ${stderr.slice(-1200)}`));
     });
   });
@@ -81,6 +87,41 @@ async function renderStill(imageFile, outputFile, index, duration) {
   ]);
 }
 
+async function probeDuration(file) {
+  const { stdout } = await execute(binary('ffprobe'), [
+    '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file,
+  ]);
+  return Number(String(stdout).trim());
+}
+
+async function downloadTo(url, file) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Telechargement du clip : HTTP ${response.status}.`);
+  await fs.writeFile(file, Buffer.from(await response.arrayBuffer()));
+}
+
+// The model is asked for a vertical clip, but the container it returns carries
+// no guarantee about frame rate or exact length, and concat refuses segments
+// that disagree, so every clip is re-encoded to the one contract the pipeline
+// accepts.
+async function normaliseVideo(inputFile, outputFile, duration) {
+  const filters = [
+    `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase:flags=lanczos`,
+    `crop=${WIDTH}:${HEIGHT}`,
+    'setsar=1',
+    'format=yuv420p',
+  ].join(',');
+  await execute(binary('ffmpeg'), [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', inputFile,
+    '-filter_complex', `[0:v]${filters}[v]`,
+    '-map', '[v]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', String(FPS),
+    '-t', duration.toFixed(3),
+    outputFile,
+  ]);
+}
+
 // A regenerated episode has to look identical to the first attempt, so the seed
 // is derived from the episode rather than drawn at random.
 function seedFor(episode, index) {
@@ -111,22 +152,61 @@ async function run() {
   await fs.mkdir(clipsDir, { recursive: true });
   await fs.mkdir(stillsDir, { recursive: true });
 
+  // STORY_FREE_MODE pins one renderer when a run must not silently degrade to
+  // stills, or when only the cheap path may be spent.
+  const mode = String(process.env.STORY_FREE_MODE || 'auto').toLowerCase();
   const planned = Math.min(Number(args.limit) || prompts.length, prompts.length);
   const failed = [];
+  const sources = [];
   let produced = 0;
   for (let index = 0; index < planned; index += 1) {
     const outputFile = path.join(clipsDir, `clip-${label(index)}.mp4`);
-    try {
-      const image = await generateImage(prompts[index], seedFor(episode, index));
-      const imageFile = path.join(stillsDir, `still-${label(index)}.png`);
-      await fs.writeFile(imageFile, image);
-      await renderStill(imageFile, outputFile, index, duration);
-      produced += 1;
-      process.stderr.write(`Clip ${label(index)} rendu depuis une image fixe.\n`);
-    } catch (error) {
-      failed.push({ clip: index + 1, error: error.message });
-      process.stderr.write(`Clip ${label(index)} echoue : ${error.message}\n`);
+    const seed = seedFor(episode, index);
+    let done = false;
+
+    if (mode !== 'still') {
+      try {
+        const url = await generateVideo(prompts[index], { duration, seed });
+        const rawFile = path.join(stillsDir, `raw-${label(index)}.mp4`);
+        await downloadTo(url, rawFile);
+        await normaliseVideo(rawFile, outputFile, duration);
+        // A model that returns a shorter clip than it was asked for cannot be
+        // stretched, and a silently short shot would slide the whole montage,
+        // so it is treated as a miss and the still renderer covers the slot at
+        // exactly the planned length.
+        const actual = await probeDuration(outputFile);
+        if (!Number.isFinite(actual) || actual < duration - 0.5) {
+          throw new Error(`Clip trop court : ${Number.isFinite(actual) ? actual.toFixed(2) : '?'}s pour ${duration}s.`);
+        }
+        done = true;
+        sources.push('video');
+        process.stderr.write(`Clip ${label(index)} genere en video.\n`);
+      } catch (error) {
+        if (mode === 'video') {
+          failed.push({ clip: index + 1, error: error.message });
+          process.stderr.write(`Clip ${label(index)} echoue : ${error.message}\n`);
+          continue;
+        }
+        process.stderr.write(`Clip ${label(index)} repli sur image fixe : ${error.message}\n`);
+      }
     }
+
+    if (!done) {
+      try {
+        const image = await generateImage(prompts[index], seed);
+        const imageFile = path.join(stillsDir, `still-${label(index)}.png`);
+        await fs.writeFile(imageFile, image);
+        await renderStill(imageFile, outputFile, index, duration);
+        done = true;
+        sources.push('still');
+        process.stderr.write(`Clip ${label(index)} rendu depuis une image fixe.\n`);
+      } catch (error) {
+        failed.push({ clip: index + 1, error: error.message });
+        process.stderr.write(`Clip ${label(index)} echoue : ${error.message}\n`);
+      }
+    }
+
+    if (done) produced += 1;
   }
 
   // Fewer clips than planned is fine, the assembler merges the narration
@@ -135,7 +215,10 @@ async function run() {
 
   process.stdout.write(`${RECEIPT_PREFIX}${JSON.stringify({
     ok: true,
-    source: 'still',
+    // The daily report has to say whether the episode moved or was a slideshow,
+    // because that is the difference a viewer notices first.
+    source: sources.includes('video') ? (sources.includes('still') ? 'mixed' : 'video') : 'still',
+    sources,
     planDir,
     clipsDir,
     planned,

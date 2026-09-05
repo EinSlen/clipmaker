@@ -112,7 +112,7 @@ async function run() {
     }
   }
   if (!clips) {
-    clips = await stage('still-clips.mjs', [
+    clips = await stage('free-clips.mjs', [
       '--plan', plan.planDir,
       ...forward(args, [['limit', 'limit']]),
     ], 'CLIPMAKER_STILL:');

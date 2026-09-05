@@ -209,14 +209,14 @@ test('a day without clip credits falls back to the free still renderer', async (
   // The paid provider is attempted first, and its failure is caught rather than
   // ending the episode: an exhausted balance must not cost the channel its day.
   assert.match(maker, /try \{[\s\S]*minimax-agent\.cjs[\s\S]*\} catch \(error\) \{/u);
-  assert.match(maker, /stage\('still-clips\.mjs'/u);
+  assert.match(maker, /stage\('free-clips\.mjs'/u);
 
   // Pinning the source keeps a run honest when a fallback would hide a real
   // regression in the paid path.
   assert.match(maker, /STORY_CLIP_SOURCE/u);
   assert.match(maker, /if \(clipSource === 'minimax'\) throw error;/u);
 
-  const still = fs.readFileSync(new URL('../../scripts/story/still-clips.mjs', import.meta.url), 'utf8');
+  const still = fs.readFileSync(new URL('../../scripts/story/free-clips.mjs', import.meta.url), 'utf8');
 
   // The fallback is only a drop-in if it writes the very files the assembler
   // already looks for, in the vertical format every destination expects.
@@ -225,9 +225,25 @@ test('a day without clip credits falls back to the free still renderer', async (
   assert.match(still, /const HEIGHT = 1920;/u);
   assert.match(still, /const FPS = 30;/u);
 
-  // Images come from the Workers AI proxy the runner already authenticates
+  // Clips come from the Workers AI proxy the runner already authenticates
   // against, so the episode never reaches a metered provider.
-  assert.match(still, /import \{ generateImage \} from '\.\/workers-ai\.mjs'/u);
+  assert.match(still, /import \{ generateImage, generateVideo \} from '\.\/workers-ai\.mjs'/u);
+
+  // Generated video is attempted before the Ken Burns path, because a still is
+  // visibly a still. An exhausted allocation costs the episode its motion, not
+  // its publication, so the still renderer stays underneath.
+  assert.ok(still.indexOf('generateVideo(') < still.indexOf('generateImage('));
+  assert.match(still, /STORY_FREE_MODE/u);
+  assert.match(still, /normaliseVideo\(rawFile, outputFile, duration\)/u);
+
+  // The report has to distinguish a moving episode from a slideshow.
+  assert.match(still, /sources\.includes\('video'\)/u);
+
+  // A model that returns a shorter clip than it was asked for cannot be
+  // stretched, and a silently short shot slides the whole montage, so the still
+  // renderer covers that slot at exactly the planned length instead.
+  assert.match(still, /actual < duration - 0\.5/u);
+  assert.match(still, /Clip trop court/u);
 
   // A regenerated episode has to look like the first attempt, so nothing in the
   // seed may come from the clock or a random draw.

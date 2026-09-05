@@ -596,6 +596,7 @@ const AI_MODELS = Object.freeze({
   speech: '@cf/deepgram/aura-2-en',
   text: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
   transcribe: '@cf/openai/whisper-large-v3-turbo',
+  video: 'alibaba/hh1.1-t2v',
 });
 const AI_MAX_PROMPT = 8000;
 
@@ -615,6 +616,29 @@ export function validateAiRequest(body) {
       input: {
         prompt,
         steps: Number.isFinite(steps) ? Math.max(1, Math.min(8, Math.round(steps))) : 4,
+      },
+    };
+  }
+
+  // Story clips are vertical shorts, so the frame is pinned here rather than
+  // trusted from the runner: a landscape clip would be published cropped. The
+  // model bills by duration and resolution, and the whole point of this task is
+  // to stay inside the daily free Neuron allocation, so both are bounded.
+  if (task === 'video') {
+    const prompt = String(input.prompt || '').trim();
+    if (!prompt || prompt.length > 2500) throw new HttpError(400, 'Prompt de vidéo invalide.');
+    const duration = Number(input.duration);
+    const seed = Number(input.seed);
+    return {
+      model: AI_MODELS.video,
+      input: {
+        prompt,
+        ratio: '9:16',
+        resolution: String(input.resolution) === '720P' ? '720P' : '1080P',
+        duration: Number.isFinite(duration) ? Math.max(3, Math.min(15, Math.round(duration))) : 10,
+        // A regenerated episode has to match the first attempt frame for frame.
+        ...(Number.isFinite(seed) ? { seed: Math.max(0, Math.min(2147483647, Math.round(seed))) } : {}),
+        watermark: false,
       },
     };
   }

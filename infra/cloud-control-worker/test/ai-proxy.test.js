@@ -2,7 +2,34 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateAiRequest } from '../src/index.js';
 
-test('only the four story tasks are reachable', () => {
+test('a video request is pinned to a vertical frame and a bounded length', () => {
+  const request = validateAiRequest({ task: 'video', input: { prompt: 'a cracked porcelain mask', duration: 10, seed: 42 } });
+  assert.equal(request.model, 'alibaba/hh1.1-t2v');
+
+  // A landscape clip would reach the shorts feed cropped, so the runner is
+  // never allowed to choose the frame.
+  assert.equal(request.input.ratio, '9:16');
+  assert.equal(request.input.watermark, false);
+  assert.equal(request.input.duration, 10);
+  assert.equal(request.input.seed, 42);
+
+  // Duration drives the Neuron bill, and the model itself refuses anything
+  // outside three to fifteen seconds.
+  assert.equal(validateAiRequest({ task: 'video', input: { prompt: 'x', duration: 90 } }).input.duration, 15);
+  assert.equal(validateAiRequest({ task: 'video', input: { prompt: 'x', duration: 1 } }).input.duration, 3);
+  assert.equal(validateAiRequest({ task: 'video', input: { prompt: 'x' } }).input.duration, 10);
+
+  // An unseeded request stays unseeded rather than being pinned to zero, which
+  // would make every episode of the series open on the same frame.
+  assert.equal(Object.hasOwn(validateAiRequest({ task: 'video', input: { prompt: 'x' } }).input, 'seed'), false);
+
+  assert.equal(validateAiRequest({ task: 'video', input: { prompt: 'x', resolution: '720P' } }).input.resolution, '720P');
+  assert.equal(validateAiRequest({ task: 'video', input: { prompt: 'x', resolution: '4K' } }).input.resolution, '1080P');
+  assert.throws(() => validateAiRequest({ task: 'video', input: { prompt: '' } }), /Prompt de vidéo invalide/);
+  assert.throws(() => validateAiRequest({ task: 'video', input: { prompt: 'x'.repeat(2501) } }), /Prompt de vidéo invalide/);
+});
+
+test('only the five story tasks are reachable', () => {
   assert.throws(() => validateAiRequest({ task: 'embeddings', input: {} }), /Tâche IA inconnue/);
   assert.throws(() => validateAiRequest({ task: '', input: {} }), /Tâche IA inconnue/);
   assert.throws(() => validateAiRequest({ task: 'image' }), /Entrée IA manquante/);
