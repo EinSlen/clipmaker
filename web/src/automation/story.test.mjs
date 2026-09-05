@@ -234,9 +234,9 @@ test('a day without clip credits falls back to the free still renderer', async (
   // its publication, so the still renderer stays underneath.
   assert.ok(still.indexOf('generateVideo(') < still.indexOf('generateImage('));
 
-  // The account's Workers AI catalogue exposes no video category yet, so the
-  // video attempt is opt-in: leaving it on by default would spend a failing
-  // request per clip on every run.
+  // The video model answers on this account but bills through AI Gateway
+  // credits rather than the free Neuron allocation, so the attempt is opt-in:
+  // on an empty balance it would spend a failing round trip per clip.
   assert.match(still, /process\.env\.STORY_FREE_MODE \|\| 'still'/u);
   assert.match(still, /normaliseVideo\(rawFile, outputFile, duration\)/u);
 

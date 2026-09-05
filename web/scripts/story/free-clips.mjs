@@ -152,10 +152,13 @@ async function run() {
   await fs.mkdir(clipsDir, { recursive: true });
   await fs.mkdir(stillsDir, { recursive: true });
 
-  // Generated video is opt-in, not the default: the account's Workers AI
-  // catalogue exposes no video category today, so trying it first would spend a
-  // failing request per clip on every run. Set STORY_FREE_MODE=auto once the
-  // model answers, or =video to make its absence a hard failure.
+  // Generated video is opt-in, not the default. The model answers on this
+  // account but bills through AI Gateway credits rather than the free daily
+  // Neuron allocation, so with an empty balance every clip would spend a
+  // failing round trip before falling back. Probed 2026-09-05: the video model
+  // returns "2021: Insufficient AI Gateway credits" while first-party image
+  // generation succeeds on the free allocation. Set STORY_FREE_MODE=auto once
+  // the gateway is funded, or =video to make an empty balance a hard failure.
   const mode = String(process.env.STORY_FREE_MODE || 'still').toLowerCase();
   const planned = Math.min(Number(args.limit) || prompts.length, prompts.length);
   const failed = [];
