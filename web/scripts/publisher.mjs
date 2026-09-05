@@ -20,6 +20,15 @@ function output(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+// Accounts are isolated from each other, so a single failure is reported and
+// named in the daily ticket while the others still publish. The run only turns
+// red when nothing at all could be generated or published.
+function reportChannels(results) {
+  output(results);
+  const entries = Array.isArray(results) ? results : Object.values(results).flat();
+  if (entries.length && entries.every((entry) => entry?.ok === false)) process.exitCode = 1;
+}
+
 async function sleep(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -47,6 +56,7 @@ async function main() {
   const configPath = path.resolve(option(args, '--config', process.env.PUBLISHER_CONFIG || 'config/publisher.json'));
   const channelId = option(args, '--channel');
   const skipGame = option(args, '--skip-game');
+  const skipGames = skipGame ? [skipGame] : [];
   const forcePlatform = option(args, '--force-platform');
   if (forcePlatform && !['youtube', 'tiktok'].includes(forcePlatform)) {
     throw new Error(`Unsupported forced platform: ${forcePlatform}.`);
@@ -60,9 +70,9 @@ async function main() {
   if (command === 'doctor') return output(await doctor(config));
   if (command === 'status') return output(await status(config));
   if (command === 'cleanup') return output(await cleanupPublishedRenders(config, { dryRun: forcedDryRun }));
-  if (command === 'generate') return output(await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] }));
+  if (command === 'generate') return reportChannels(await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames }));
   if (command === 'publish') {
-    return output(await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms }));
+    return reportChannels(await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms, skipGames }));
   }
   if (command === 'import-3d') {
     const manifestPath = path.resolve(option(args, '--manifest'));
@@ -92,9 +102,9 @@ async function main() {
     }));
   }
   if (command === 'run') {
-    const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames: skipGame ? [skipGame] : [] });
-    const published = await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms });
-    return output({ generated, published });
+    const generated = await generate(config, { date, channelId, dryRun: forcedDryRun, skipGames });
+    const published = await publish(config, { date, channelId, dryRun: forcedDryRun, forcePlatforms, skipGames });
+    return reportChannels({ generated, published });
   }
   if (command === 'due') return output(await runDue(config, { channelId, dryRun: forcedDryRun }));
   if (command === 'daemon') {

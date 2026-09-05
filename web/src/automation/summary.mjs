@@ -48,6 +48,16 @@ function storyLine(render) {
   return `  - ${label} : monté sur ${clips} clip(s) généré(s)`;
 }
 
+// A video that was never rendered and an upload that was refused are both
+// isolated from the other accounts, so neither one reaches the run status.
+function failureReason(job) {
+  if (job.render?.error) return String(job.render.error);
+  const refused = ['youtube', 'tiktok']
+    .filter((platform) => job.platforms?.[platform]?.error)
+    .map((platform) => `${platform}: ${job.platforms[platform].error}`);
+  return refused.length ? refused.join(' | ') : null;
+}
+
 export function buildPublisherSummary({ operation, config, doctor = null, status = null, configurationError = null }) {
   const activeChannels = (config?.channels || []).filter((channel) => channel.enabled !== false);
   const doctorChannels = new Map((doctor?.channels || []).map((channel) => [channel.id, channel]));
@@ -91,9 +101,9 @@ export function buildPublisherSummary({ operation, config, doctor = null, status
   // A channel that fails is isolated from the others, so its reason never
   // reaches the run status and would otherwise be invisible in the ticket. The
   // most recent failures are named with what actually went wrong.
-  const failures = jobs.filter((job) => job.status === 'failed' && job.render?.error).slice(-3);
+  const failures = jobs.filter((job) => ['failed', 'partial'].includes(job.status) && failureReason(job)).slice(-3);
   for (const job of failures) {
-    lines.push(`- ❌ \`${job.channelId || '-'}\` ${job.date || ''} : ${String(job.render.error).replace(/\s+/g, ' ').slice(0, 300)}`);
+    lines.push(`- ❌ \`${job.channelId || '-'}\` ${job.date || ''} : ${failureReason(job).replace(/\s+/g, ' ').slice(0, 300)}`);
   }
   return `${lines.join('\n')}\n`;
 }
