@@ -887,6 +887,50 @@ test('a publication renders the account that missed its generation slot and isol
   assert.equal(calls.render, 1);
 });
 
+test('a publication retries the render its account failed during the night', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const calls = { render: 0, tiktok: 0 };
+  const baseUrl = await fakeClipmakerApi(t, calls);
+  const channel = { ...sampleChannel(), id: 'late-account', publishTime: '18:15' };
+  channel.tiktok = { enabled: true, username: 'clipmaker.late', musicId: null, visibility: 'private', confirmPublic: false };
+  const config = {
+    dryRun: false,
+    baseUrl,
+    requestTimeoutMinutes: 1,
+    timeZone: 'Europe/Paris',
+    seedNamespace: 'test',
+    stateDir: directory,
+    catchupDays: 2,
+    retentionDays: 120,
+    channels: [channel],
+  };
+  const date = '2026-09-05';
+  const now = new Date().toISOString();
+  const platform = (enabled) => ({ enabled, status: enabled ? 'pending' : 'disabled', attempts: 0,
+    lastAttemptAt: null, completedAt: null, error: null, receipt: null, raw: null });
+  // The nightly generation planned the day, then its render died on the way.
+  await saveState(directory, { version: 1, updatedAt: now, jobs: [{
+    ...planForDate(config, channel, date),
+    createdAt: now,
+    updatedAt: now,
+    status: 'failed',
+    render: { status: 'failed', attempts: 1, lastAttemptAt: now, completedAt: null,
+      error: 'xvfb-run: error: xauth command not found', filename: null, raw: null },
+    platforms: { youtube: platform(false), tiktok: platform(true) },
+  }] });
+
+  await publish(config, { date });
+
+  assert.equal(calls.render, 1);
+  assert.equal(calls.tiktok, 1);
+  const job = (await loadState(directory)).jobs[0];
+  assert.equal(job.status, 'published');
+  assert.equal(job.render.status, 'ready');
+  assert.equal(job.render.error, null);
+  assert.equal(job.render.attempts, 2);
+  assert.equal(job.platforms.tiktok.receipt.id, 'tiktok-1');
+});
+
 test('the daily publisher reports every account and only fails when nothing could publish', async (t) => {
   const directory = await temporaryDirectory(t);
   const configDirectory = path.join(directory, 'config');
