@@ -94,10 +94,29 @@ async function run() {
   // --from-plan reports exactly as much as a full run.
   const written = JSON.parse(await fs.readFile(path.join(plan.planDir, 'episode.json'), 'utf8'));
 
-  const clips = await stage('minimax-agent.cjs', [
-    'plan', '--plan', plan.planDir,
-    ...forward(args, [['limit', 'limit'], ['timeout', 'timeout']]),
-  ], 'CLIPMAKER_MINIMAX:', { needsWindow: true });
+  // The paid provider stays the first choice, but a day without credits must
+  // not cost the channel its episode. The free still renderer answers the same
+  // prompts into the same clip files, so everything downstream is unchanged.
+  // STORY_CLIP_SOURCE pins one source when a run must not silently fall back.
+  const clipSource = String(process.env.STORY_CLIP_SOURCE || 'auto').toLowerCase();
+  let clips = null;
+  if (clipSource !== 'still') {
+    try {
+      clips = await stage('minimax-agent.cjs', [
+        'plan', '--plan', plan.planDir,
+        ...forward(args, [['limit', 'limit'], ['timeout', 'timeout']]),
+      ], 'CLIPMAKER_MINIMAX:', { needsWindow: true });
+    } catch (error) {
+      if (clipSource === 'minimax') throw error;
+      process.stderr.write(`Repli sur les images fixes : ${error.message}\n`);
+    }
+  }
+  if (!clips) {
+    clips = await stage('still-clips.mjs', [
+      '--plan', plan.planDir,
+      ...forward(args, [['limit', 'limit']]),
+    ], 'CLIPMAKER_STILL:');
+  }
 
   const episode = await stage('assemble-episode.mjs', [
     '--plan', plan.planDir,

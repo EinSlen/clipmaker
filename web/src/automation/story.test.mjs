@@ -202,3 +202,35 @@ test('subtitles follow the spoken words instead of being spread evenly', () => {
   assert.ok(long.length >= 3);
   assert.ok(long.every((cue) => cue.text.length <= 26));
 });
+
+test('a day without clip credits falls back to the free still renderer', async () => {
+  const maker = fs.readFileSync(new URL('../../scripts/story/make-episode.mjs', import.meta.url), 'utf8');
+
+  // The paid provider is attempted first, and its failure is caught rather than
+  // ending the episode: an exhausted balance must not cost the channel its day.
+  assert.match(maker, /try \{[\s\S]*minimax-agent\.cjs[\s\S]*\} catch \(error\) \{/u);
+  assert.match(maker, /stage\('still-clips\.mjs'/u);
+
+  // Pinning the source keeps a run honest when a fallback would hide a real
+  // regression in the paid path.
+  assert.match(maker, /STORY_CLIP_SOURCE/u);
+  assert.match(maker, /if \(clipSource === 'minimax'\) throw error;/u);
+
+  const still = fs.readFileSync(new URL('../../scripts/story/still-clips.mjs', import.meta.url), 'utf8');
+
+  // The fallback is only a drop-in if it writes the very files the assembler
+  // already looks for, in the vertical format every destination expects.
+  assert.match(still, /clip-\$\{label\(index\)\}\.mp4/u);
+  assert.match(still, /const WIDTH = 1080;/u);
+  assert.match(still, /const HEIGHT = 1920;/u);
+  assert.match(still, /const FPS = 30;/u);
+
+  // Images come from the Workers AI proxy the runner already authenticates
+  // against, so the episode never reaches a metered provider.
+  assert.match(still, /import \{ generateImage \} from '\.\/workers-ai\.mjs'/u);
+
+  // A regenerated episode has to look like the first attempt, so nothing in the
+  // seed may come from the clock or a random draw.
+  assert.match(still, /function seedFor\(episode, index\)/u);
+  assert.doesNotMatch(still, /Math\.random|Date\.now/u);
+});
