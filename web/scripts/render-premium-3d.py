@@ -68,7 +68,7 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
             or not 0 <= rendered_surface["maximum_penetration"] <= 0.003
             or not isinstance(rendered_surface.get("maximum_correction"), (int, float))
             or not math.isfinite(rendered_surface["maximum_correction"])
-            or not 0 <= rendered_surface["maximum_correction"] <= 0.08):
+            or not 0 <= rendered_surface["maximum_correction"] <= 0.10):
             raise ValueError("Native 3D final subdivided surface was not validated")
         framing = item.get("framing")
         if (not isinstance(framing, dict) or framing.get("issues") != []

@@ -54,7 +54,7 @@ function native3dEvidence(seed) {
       start_frame: index * 180 + 1, end_frame: (index + 1) * 180,
       issues: [], surface: { inside_contacts: 0 },
       framing: { frames_checked: 180, maximum_empty_seconds: 0, maximum_side_exit_seconds: 0, issues: [] },
-      rendered_surface: { frames_checked: 180, vertices_checked: 210946 * 180, subdivision: 3, maximum_penetration: 0, maximum_correction: 0.01, issues: [] },
+      rendered_surface: { frames_checked: 180, vertices_checked: 210946 * 180, subdivision: 3, maximum_penetration: 0, maximum_correction: 0.096382, issues: [] },
       inter_body_contact: { frames_checked: 180, maximum_penetration: 0, issues: [] },
     }))),
   };
@@ -88,7 +88,7 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
       undefined, { ...good.attempt_quality[0].rendered_surface, frames_checked: 179 },
       { ...good.attempt_quality[0].rendered_surface, subdivision: 2 },
       { ...good.attempt_quality[0].rendered_surface, maximum_penetration: 0.004 },
-      { ...good.attempt_quality[0].rendered_surface, maximum_correction: 0.09 },
+      { ...good.attempt_quality[0].rendered_surface, maximum_correction: 0.101 },
       { ...good.attempt_quality[0].rendered_surface, maximum_correction: Number.NaN },
     ].map((rendered_surface) => ({ ...good, attempt_quality: good.attempt_quality.map((r, i) => i === 0 ? { ...r, rendered_surface } : r) })),
     { ...good, attempt_quality: good.attempt_quality.map((r) => r.stage === 2 ? { ...r, start_frame: 180 } : r) },

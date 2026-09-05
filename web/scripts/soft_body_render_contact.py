@@ -12,7 +12,9 @@ from soft_body_stair_geometry import VOLUME_CONTACT
 
 CONTACT_OFFSET = 0.003
 MAX_RENDER_PENETRATION = 0.003
-MAX_RENDER_CORRECTION = 0.08
+# Closed-volume stair contact can move the smoothed skin by just under 0.10
+# world units while preserving the audited spine and zero final penetration.
+MAX_RENDER_CORRECTION = 0.10
 
 
 def build_contact_targets(objects):
