@@ -7,6 +7,7 @@ import { readPublisherConfig } from './config.mjs';
 import { fetchYoutubeComments } from '../../scripts/story/comments.mjs';
 import { lastEpisode, nextEpisodeNumber, storySoFar, upsertEpisode } from '../../scripts/story/state.mjs';
 import { clipPrompt } from '../../scripts/story/writer.mjs';
+import { SCENES, wrap } from '../../scripts/story/quote-clip.mjs';
 import { cuesFromWords } from '../../scripts/story/transcribe.mjs';
 
 let counter = 0;
@@ -253,4 +254,29 @@ test('a day without clip credits falls back to the free still renderer', async (
   // seed may come from the clock or a random draw.
   assert.match(still, /function seedFor\(episode, index\)/u);
   assert.doesNotMatch(still, /Math\.random|Date\.now/u);
+});
+
+test('the quote format keeps every face out of frame and every line readable', () => {
+  // drawtext cannot wrap, so the break has to happen here. A line that runs
+  // past the frame is the one failure a viewer cannot recover from.
+  const lines = wrap('If you are tired then do it tired');
+  assert.deepEqual(lines, ['If you are tired', 'then do it tired']);
+  assert.ok(lines.every((line) => line.length <= 20));
+
+  // A single word longer than the limit still gets its own line rather than
+  // being dropped or truncated.
+  assert.deepEqual(wrap('Discipline'), ['Discipline']);
+  assert.deepEqual(wrap(''), []);
+
+  const long = wrap('You will never always be motivated so learn to be disciplined');
+  assert.ok(long.length >= 3);
+  assert.equal(long.join(' '), 'You will never always be motivated so learn to be disciplined');
+
+  // The face is never blurred after the fact: the scene simply never contains
+  // one. A blur can fail on a frame the detector misreads, a prompt cannot.
+  assert.ok(SCENES.length >= 3);
+  for (const scene of SCENES) {
+    assert.match(scene, /face (not visible|completely in shadow)|silhouette/u);
+    assert.match(scene, /night|dark|dim/u);
+  }
 });
