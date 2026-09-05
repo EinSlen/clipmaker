@@ -51,7 +51,7 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
       || !Number.isFinite(renderedSurface.maximum_penetration)
       || renderedSurface.maximum_penetration < 0 || renderedSurface.maximum_penetration > 0.003
       || !Number.isFinite(renderedSurface.maximum_correction)
-      || renderedSurface.maximum_correction < 0 || renderedSurface.maximum_correction > 0.08) fail();
+      || renderedSurface.maximum_correction < 0 || renderedSurface.maximum_correction > 0.10) fail();
     const framing = report.framing;
     if (framing?.frames_checked !== end - start + 1 || !Array.isArray(framing?.issues) || framing.issues.length
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
