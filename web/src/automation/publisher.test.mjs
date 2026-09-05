@@ -350,6 +350,19 @@ test('cloud YouTube uploads use the OAuth Data API without a persistent browser'
   assert.doesNotMatch(ciStage, /xvfb/u);
 });
 
+test('the story clips keep the virtual display they are recorded in', async () => {
+  const dockerfilePath = new URL('../../Dockerfile', import.meta.url);
+  const gatePath = await repositoryFile('.github/workflows/quality-gate.yml');
+  const [dockerfile, gate] = await Promise.all([
+    fs.readFile(dockerfilePath, 'utf8'),
+    fs.readFile(gatePath, 'utf8'),
+  ]);
+  // Without xauth, dropped by --no-install-recommends, xvfb-run exits before
+  // the browser starts and the episode only reports an agent that said nothing.
+  assert.match(dockerfile, /^ +xvfb xauth /mu);
+  assert.match(gate, /docker run --rm --init clipmaker-ci:surface xvfb-run -a true/u);
+});
+
 test('the required Blender surface gate has enough hosted-runner time to finish', async () => {
   const workflowPath = await repositoryFile('.github/workflows/quality-gate.yml');
   const workflow = await fs.readFile(workflowPath, 'utf8');
