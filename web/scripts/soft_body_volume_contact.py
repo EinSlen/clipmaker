@@ -8,6 +8,15 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+# The contact node keeps a vertex within this distance of its own target
+# unchanged, because a point lying on a face registers a zero-distance exit in
+# some ray directions and not others. The audit needs the same rule against
+# the whole obstacle surface: the four solids share seams, so a vertex sitting
+# on one of them can still be strictly inside another and be moved along the
+# seam. Parity is undefined there, so only a vertex measurably away from the
+# surface can be called outside.
+BOUNDARY_DISTANCE = .00001
+
 
 def inspect_volume_surface(body, obstacle_surface, start, end):
     """Independent full-vertex audit; deliberately retains production limits."""
@@ -52,7 +61,7 @@ def inspect_volume_surface(body, obstacle_surface, start, end):
             if displacement > correction:
                 correction, peak_correction = displacement, frame
             for index in np.flatnonzero(distances > .00001):
-                if not point_inside_closed_surface(tree, Vector(original[index])):
+                if moved_from_outside(tree, Vector(original[index])):
                     outside_moved += 1
             candidates = positions[possible_inside_vertices(positions, obstacle_surface.objects, depsgraph)]
             for value in candidates:
@@ -163,6 +172,14 @@ def add_volume_contact(body, targets):
         modifier = body.modifiers.new('Final skin contact - closed volume', 'NODES')
         modifier.node_group = group
 
+
+
+def moved_from_outside(tree, point):
+    """Report a corrected vertex that started away from the closed surface."""
+    _hit, _normal, _face, distance = tree.find_nearest(point)
+    if distance is None or distance <= BOUNDARY_DISTANCE:
+        return False
+    return not point_inside_closed_surface(tree, point)
 
 
 def point_inside_closed_surface(tree, point):
