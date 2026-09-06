@@ -149,6 +149,34 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertGreater(counts[0], 4000)
         self.assertGreater(counts[1], 300)
 
+    def test_a_vertex_on_the_closed_surface_is_never_reported_as_outside(self):
+        """The four stair solids share seams, where parity is undefined.
+
+        A vertex lying on the staircase can still be strictly inside the
+        receiver that meets it, so the contact node slides it along the seam.
+        Exact native frame-846 point of the 6 September stairs: 2.7e-07 from
+        the surface before the move and 4e-08 after, a 4.9 mm slide that
+        refused a whole render whose final penetration stayed at the 1e-05
+        floor. Its parity is the outside answer, which is why the audit needs
+        the boundary rule the contact node already applies to its own target.
+        """
+        from soft_body_stair_geometry import stair_outline
+        from soft_body_volume_contact import BOUNDARY_DISTANCE, moved_from_outside
+        _variant, _objects, surface = self.stair_surface()
+        tree = surface.at_frame(1)
+        seam = Vector((2.065634, 0.127874, 2.53295))
+        self.assertLess(tree.find_nearest(seam)[3], BOUNDARY_DISTANCE)
+        self.assertFalse(renderer.point_inside_closed_surface(tree, seam))
+        self.assertFalse(moved_from_outside(tree, seam))
+        left, top = stair_outline()[0]
+        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
+            outside = Vector((left + .35, depth, top + .25))
+            self.assertGreater(tree.find_nearest(outside)[3], BOUNDARY_DISTANCE)
+            self.assertTrue(moved_from_outside(tree, outside))
+            inside = Vector((left + .35, depth, top - .35))
+            self.assertTrue(renderer.point_inside_closed_surface(tree, inside))
+            self.assertFalse(moved_from_outside(tree, inside))
+
     def test_closed_volume_mode_rejects_open_or_mixed_geometry(self):
         from soft_body_stair_geometry import VOLUME_CONTACT
         open_mesh = renderer.add_mesh("Unclosed contact", [(0, 0, 0), (1, 0, 0), (0, 1, 0)],
