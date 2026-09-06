@@ -170,6 +170,26 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertEqual(variant.receiver.top, path[0][1])
             self.assertEqual(variant.receiver.x, path[0][0])
 
+    def test_stair_release_keeps_every_lane_on_the_landing_it_can_leave(self):
+        """A 0% capsule spends the authored launch after about .3 of flat tread.
+
+        Released on the left of the .70-wide top landing it settles there and
+        never tips over the first nosing: seed 1588952635 put its left lane at
+        x=-2.3048 and the publication preflight refused the whole render. The
+        three lanes and the per-stage offset must therefore fit inside the part
+        of the landing the launch can still clear.
+        """
+        from soft_body_stair_geometry import stair_outline
+        outline = stair_outline()
+        landing_left, landing_right = outline[0][0], outline[1][0]
+        for seed in range(400):
+            variant = variant_for_seed(seed, "stair-cascade")
+            for stage in range(len(variant.stages)):
+                base = variant.start_x + stage_motion_for(variant, stage).spawn_x_offset
+                for offset in obstacle_specimen_offsets("stair-cascade"):
+                    self.assertGreaterEqual(base + offset, landing_left + .20)
+                    self.assertLessEqual(base + offset, landing_right)
+
     def test_requested_preview_softness_is_exact_even_between_presets(self):
         variant = variant_for_seed(910105, "moving-slide")
         self.assertNotIn(55, variant.stages)
