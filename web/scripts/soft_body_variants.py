@@ -352,6 +352,10 @@ class ObstaclePreset:
     camera_target_x: float
     camera_target_z: float
     camera_scale: float
+    # How far the seeded release may wander from ``start_x``. A family whose
+    # first support is a narrow landing gets a smaller window than a family
+    # that releases the body in open air.
+    start_x_jitter: float = 0.12
 
 
 @dataclass(frozen=True)
@@ -435,7 +439,15 @@ RECEIVERS = (
 
 OBSTACLES = (
     ObstaclePreset("moving-slide", "Moving marble slide", "7653094317728271636", 0.30, 6.48, -1.20, 0.55, 3.12, 11.80),
-    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -2.00, 6.45, RECEIVER_X, 0.30, 3.35, 14.20),
+    # The three lanes are released on the .70-wide top landing, and the launch
+    # that carries them to the first nosing is spent by contact friction after
+    # roughly .3 of flat tread. A 0% capsule released on the left of the
+    # landing therefore settles there instead of starting the cascade: at
+    # x=-2.30 it stalls with a .50 drop, at x=-2.20 it descends. Keep the
+    # release far enough right that the leftmost lane always clears the nosing:
+    # the lanes span .18 and the per-stage offset another .045, which leaves
+    # .025 of room for the seeded release itself.
+    ObstaclePreset("stair-cascade", "Triple capsule stair run", "7635638193169222933", -1.90, 6.45, RECEIVER_X, 0.30, 3.35, 14.20, 0.025),
     ObstaclePreset("v-stairs", "Double V staircase", "7671635370747940116", -2.75, 6.90, 0.0, 0.0, 2.80, 12.80),
     ObstaclePreset("pipe-bend", "Transparent pipe bend", "7662762295776333076", -0.85, 6.52, 0.36, 0.0, 3.45, 9.50),
     ObstaclePreset("peg-grid", "Soft body peg grid", "7670929910126447893", 0.0, 6.48, 0.0, 0.0, 3.35, 10.10),
@@ -573,7 +585,7 @@ def variant_for_seed(seed: int, obstacle_key: str | None = None) -> SoftBodyVari
                                   RECEIVER_X, OUTER_RADIUS, INNER_RADIUS, RECEIVER_TOP, 0.0)
     stage_key, stages = STAGE_PRESETS[(positive * 11 + positive // 13 + 3) % len(STAGE_PRESETS)]
     rng = random.Random(positive ^ 0x5F7B0D17)
-    start_x = obstacle.start_x + rng.uniform(-0.12, 0.12)
+    start_x = obstacle.start_x + rng.uniform(-obstacle.start_x_jitter, obstacle.start_x_jitter)
     start_height = obstacle.start_height + rng.uniform(-0.08, 0.12)
     if obstacle.key in {"v-stairs", "pipe-bend", "peg-grid", "twin-gears", "compression-ring"}:
         start_rotation = math.pi / 2 + rng.uniform(-0.10, 0.10)
