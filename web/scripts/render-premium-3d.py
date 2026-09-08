@@ -19,6 +19,7 @@ from soft_body_variants import (
     OBSTACLE_KEYS, obstacle_specimen_offsets, stage_attempt_frame_spans,
     stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
 )
+from sample_foley import resolve_pack, synth_sample_foley
 from soft_body_framing import validate_stair_outlet_evidence
 from soft_body_stair_geometry import VOLUME_CONTACT
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
@@ -489,7 +490,12 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             "-c:v", "libx264", "-preset", video_preset, "-crf", video_crf,
             "-pix_fmt", "yuv420p", "-an", str(silent),
         ], check=True)
-        synth_premium_foley(args.duration, events, effects, args.seed)
+        pack = resolve_pack(args.sound_pack)
+        if pack:
+            sound = synth_sample_foley(args.duration, events, effects, args.seed, pack)
+        else:
+            synth_premium_foley(args.duration, events, effects, args.seed)
+            sound = {"sound_pack": "premium-foley", "sound_pack_kind": "synthesised"}
         music_source = external_music or generated_bed
         audio_filter = build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
         audio_command = [
@@ -508,7 +514,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "seed": args.seed,
         "game": "soft-body-slide",
         "difficulty": args.difficulty,
-        "sound_pack": "premium-foley",
+        **sound,
         "requested_sound_pack": args.sound_pack,
         **soundtrack,
         "music_mode": soundtrack.get("music_mode", "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed"),

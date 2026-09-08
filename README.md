@@ -289,6 +289,26 @@ soit deux à trois clips, alors qu'un épisode de soixante secondes en demande q
 secondes : baisser `--seconds` réduit le nombre de clips demandés. Et le site est protégé par Akamai
 Bot Manager, donc un pilotage répété peut déclencher un contrôle.
 
+## Sons de collision
+
+Souplesse 3D ne synthétise plus ses impacts : chaque contact exporté par Blender déclenche un vrai
+échantillon du pack rangé dans `web/data/sound-packs/`. Le pack `funny` réunit quinze pops humides,
+bulles et grincements de caoutchouc, tous en CC0 depuis Freesound, donc utilisables commercialement
+sans attribution. `pack.json` conserve le titre, l'auteur, la page source et la licence de chaque
+échantillon, et l'assemblage refuse une vidéo dont les crédits manquent.
+
+Le choix se fait par canal avec « Pack sonore » dans le tableau de bord :
+
+| Réglage | Sons des collisions |
+| --- | --- |
+| Automatique, Drôle | Pack `funny` échantillonné |
+| Arcade, Impacts, ASMR, Mème | Foley synthétisé historique |
+
+La hauteur, le panoramique et le volume de chaque coup viennent de la souplesse, de la force et de
+la position du contact simulé, tirés au sort à partir du seed : un même rendu rejoué donne la même
+bande-son. Les échantillons sont du PCM mono 48 kHz, lus par la bibliothèque standard, et le
+contexte Docker les embarque, contrairement aux mp3 qu'il exclut.
+
 ## Architecture
 
 ```text

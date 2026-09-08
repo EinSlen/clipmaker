@@ -55,6 +55,12 @@ on:
         default: edit-sad
         type: choice
         options: [edit-auto, edit-sad, edit-revenge, original, auto, revenge, sad-english]
+      sound_pack:
+        description: Collision sounds, sampled one-shots or the synthesised premium Foley
+        required: false
+        default: auto
+        type: choice
+        options: [auto, funny, meme, arcade, impact, asmr]
 
 permissions:
   contents: read
@@ -90,6 +96,7 @@ jobs:
       MANUAL_CHUNK_SIZE: ${{ inputs.chunk_size }}
       MANUAL_TITLE: ${{ inputs.title }}
       MANUAL_MUSIC_PROFILE: ${{ inputs.music_profile }}
+      MANUAL_SOUND_PACK: ${{ inputs.sound_pack }}
       USE_CLOUD_CONFIG: ${{ github.event_name == 'schedule' || inputs.use_cloud_config }}
       PLAN_ONLY: ${{ inputs.plan_only || false }}
       REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
@@ -133,6 +140,7 @@ jobs:
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
                   "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "edit-sad",
+                  "sound_pack": os.environ.get("MANUAL_SOUND_PACK") or "auto",
                   "music_volume": 0.58,
               })
           else:
@@ -154,6 +162,7 @@ jobs:
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
                       "music_profile": game.get("musicProfile", "original"),
+                      "sound_pack": game.get("soundPack", "auto"),
                       "music_volume": game.get("musicVolume", 0.58),
                   })
           if len(channels) > 8:
@@ -169,6 +178,8 @@ jobs:
           for channel in channels:
               if channel["music_profile"] not in (*EDIT_PROFILES, "auto", "revenge", "sad-english", "original"):
                   raise SystemExit("Invalid vocal playlist")
+              if channel["sound_pack"] not in ("auto", "funny", "meme", "arcade", "impact", "asmr"):
+                  raise SystemExit("Invalid sound pack")
               if not isinstance(channel["music_volume"], (int, float)) or not 0 <= channel["music_volume"] <= 1:
                   raise SystemExit("Invalid soundtrack volume")
               if channel["music_profile"] in EDIT_PROFILES:
@@ -382,6 +393,7 @@ jobs:
         env:
           CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
           MUSIC_PROFILE: ${{ matrix.music_profile }}
+          SOUND_PACK: ${{ matrix.sound_pack }}
           MUSIC_VOLUME: ${{ matrix.music_volume }}
           MUSIC_DATE: ${{ matrix.date }}
           MUSIC_CHANNEL: ${{ matrix.channel_id }}
@@ -394,6 +406,7 @@ jobs:
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --seed "${{ matrix.seed }}" --obstacle "${{ matrix.obstacle }}" \
               --music-profile "$MUSIC_PROFILE" --music-volume "$MUSIC_VOLUME" \
+              --sound-pack "$SOUND_PACK" \
               --date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"
       - name: Create the publisher import manifest and verify the MP4
         env:
@@ -445,8 +458,13 @@ jobs:
           # automatic review out and refused a finished video.
           spoken_edit = (metadata.get("music_provider") == "private-edit-library"
                          and metadata.get("music_content_kind") == "spoken")
-          if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or metadata.get("sound_pack") != "premium-foley":
+          # A sampled pack replaces the synthesised Foley, so the check asks
+          # for a known collision layer instead of a single hardcoded name.
+          sound_pack = metadata.get("sound_pack")
+          if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or sound_pack not in ("premium-foley", "funny"):
               raise SystemExit("Missing soundtrack clearance or collision Foley metadata")
+          if sound_pack != "premium-foley" and (metadata.get("sound_pack_kind") != "sampled-one-shots" or not metadata.get("sound_pack_credits")):
+              raise SystemExit("Missing sampled sound pack provenance")
           title = os.environ["DAILY_TITLE"]
           video = f"soft-body-{os.environ['DAILY_OBSTACLE']}-{os.environ['DAILY_SEED']}.mp4"
           manifest = {
@@ -487,6 +505,7 @@ jobs:
       RECOVERY_SEED: ${{ inputs.seed }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
       RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'original' }}
+      RECOVERY_SOUND_PACK: ${{ inputs.sound_pack || 'auto' }}
       CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
     steps:
       - uses: actions/checkout@v6
@@ -515,7 +534,8 @@ jobs:
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
-              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE"
+              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE" \
+              --sound-pack "$RECOVERY_SOUND_PACK"
       - name: Verify and report the recovered production video
         run: |
           video="artifacts/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4"

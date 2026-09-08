@@ -1,0 +1,128 @@
+{
+  "id": "funny",
+  "label": "Squish",
+  "description": "Wet pops, bubbles and rubber squeaks fired on every contact.",
+  "rights": "Every sample is Freesound CC0: commercial use, no attribution required.",
+  "samples": [
+    {
+      "file": "411671.wav",
+      "title": "BloodSquish.wav",
+      "author": "deoking",
+      "source": "https://freesound.org/people/deoking/sounds/411671/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.117
+    },
+    {
+      "file": "411462.wav",
+      "title": "Bubble Pop",
+      "author": "TheBuilder15",
+      "source": "https://freesound.org/people/TheBuilder15/sounds/411462/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.118
+    },
+    {
+      "file": "253956.wav",
+      "title": "Bubble Pop",
+      "author": "Mafon2",
+      "source": "https://freesound.org/people/Mafon2/sounds/253956/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.124
+    },
+    {
+      "file": "733264.wav",
+      "title": "Bubble_Pop",
+      "author": "arttim",
+      "source": "https://freesound.org/people/arttim/sounds/733264/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.126
+    },
+    {
+      "file": "669918.wav",
+      "title": "The Best Bubble Pop Sound For Game and UI",
+      "author": "el_boss",
+      "source": "https://freesound.org/people/el_boss/sounds/669918/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.129
+    },
+    {
+      "file": "683587.wav",
+      "title": "Bubble Pop",
+      "author": "YehawSnail",
+      "source": "https://freesound.org/people/YehawSnail/sounds/683587/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.129
+    },
+    {
+      "file": "535958.wav",
+      "title": "rubber-00.flac",
+      "author": "pbimal",
+      "source": "https://freesound.org/people/pbimal/sounds/535958/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.211
+    },
+    {
+      "file": "380324.wav",
+      "title": "Plunger Pop.wav",
+      "author": "praxis_bard",
+      "source": "https://freesound.org/people/praxis_bard/sounds/380324/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.275
+    },
+    {
+      "file": "686363.wav",
+      "title": "squished.mp3",
+      "author": "FairCashew",
+      "source": "https://freesound.org/people/FairCashew/sounds/686363/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.335
+    },
+    {
+      "file": "442772.wav",
+      "title": "Slime Squish",
+      "author": "qubodup",
+      "source": "https://freesound.org/people/qubodup/sounds/442772/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.381
+    },
+    {
+      "file": "515621.wav",
+      "title": "Splat/Squish 4",
+      "author": "mrickey13",
+      "source": "https://freesound.org/people/mrickey13/sounds/515621/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.402
+    },
+    {
+      "file": "383240.wav",
+      "title": "Bounce",
+      "author": "Jofae",
+      "source": "https://freesound.org/people/Jofae/sounds/383240/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.41
+    },
+    {
+      "file": "536765.wav",
+      "title": "Squish.ogg",
+      "author": "egomassive",
+      "source": "https://freesound.org/people/egomassive/sounds/536765/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.442
+    },
+    {
+      "file": "187354.wav",
+      "title": "Rubber Band Snap.wav",
+      "author": "baidonovan",
+      "source": "https://freesound.org/people/baidonovan/sounds/187354/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.488
+    },
+    {
+      "file": "547666.wav",
+      "title": "rubber snap.mp3",
+      "author": "DuranBurrus",
+      "source": "https://freesound.org/people/DuranBurrus/sounds/547666/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.608
+    }
+  ]
+}

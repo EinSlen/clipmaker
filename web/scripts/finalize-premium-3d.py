@@ -14,6 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
 from edit_audio import EDIT_PROFILES, prepare_edit_soundtrack
+from sample_foley import resolve_pack, synth_sample_foley
 from soft_body_variants import source_variant_summary
 
 
@@ -85,6 +86,7 @@ def main() -> None:
     parser.add_argument("--music-profile", choices=PROFILES, default="original")
     parser.add_argument("--date")
     parser.add_argument("--channel-id", default="preview")
+    parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--preset", default="slow")
     parser.add_argument("--crf", default="14")
     args = parser.parse_args()
@@ -136,7 +138,12 @@ def main() -> None:
             ],
             check=True,
         )
-        renderer.synth_premium_foley(args.duration, events, effects, args.seed)
+        pack = resolve_pack(args.sound_pack)
+        if pack:
+            sound = synth_sample_foley(args.duration, events, effects, args.seed, pack)
+        else:
+            renderer.synth_premium_foley(args.duration, events, effects, args.seed)
+            sound = {"sound_pack": "premium-foley", "sound_pack_kind": "synthesised"}
         audio_filter = renderer.build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
         subprocess.run(
             [
@@ -158,7 +165,8 @@ def main() -> None:
         "seed": args.seed,
         "game": "soft-body-slide",
         "difficulty": args.difficulty,
-        "sound_pack": "premium-foley",
+        **sound,
+        "requested_sound_pack": args.sound_pack,
         **soundtrack,
         "music_mode": soundtrack.get("music_mode", "vocal-playlist" if soundtrack.get("music_has_vocals") else "subtle-bed"),
         "music_hits": len(events),
