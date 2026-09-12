@@ -78,7 +78,61 @@ export const CAPTIONS = Object.freeze({
     'the strongest reply might be a peaceful life.',
     'new boundaries. new beginnings.',
   ],
+  // The wordless channel had no deck, so publicationCopy returned null
+  // for it and the publisher fell back to the one caption baked into the
+  // render manifest. Every post carried the same words and the same four
+  // tags, which is the shape TikTok calls unoriginal and keeps out of the
+  // For You feed. These say nothing about how a drop ends, because the
+  // physics decides that fresh on every render.
+  gameplay: [
+    'guess which one lands before it does.',
+    'which softness would you bet on?',
+    'five levels of soft, one moving ramp.',
+    'softness is the only thing that changes here.',
+    'same release, five different bodies.',
+    'the ramp never stops moving.',
+    'stiff bounces, soft folds.',
+    'watch the gold bend.',
+    'how soft is too soft?',
+    'wait for the hundred.',
+    'every level falls differently.',
+    'no cuts, no tricks, just softness.',
+    'the bounce tells you the softness.',
+    'softer does not always mean better.',
+    'this is what one hundred percent soft looks like.',
+    'physics, but make it soft.',
+    'a moving ramp ruins every plan.',
+    'the middle levels are the interesting ones.',
+    'i could watch the hundred percent all day.',
+    'the softest one moves like liquid.',
+    'did you call it before the end?',
+    'the cup is smaller than it looks.',
+    'stiff, firm, soft, softer, gel.',
+    'watch what happens at seventy five.',
+    'it gets softer every time.',
+    'the difference shows up in the last second.',
+    'one release, five answers.',
+    'the ramp is doing its own thing.',
+    'soft body physics never gets old.',
+    'which one would you have picked?',
+    'the gel level is the best level.',
+    'you can see the softness in the bounce.',
+    'nothing here is animated by hand.',
+    'every drop is simulated, not keyframed.',
+    'the whole point is the last one.',
+    'guess the landing before it happens.',
+  ],
 });
+
+// Two tags stay put so the account keeps one address, two move with the
+// day so two posts never carry an identical footer.
+const GAMEPLAY_TAGS = Object.freeze([
+  ['#softbody', '#satisfying', '#oddlysatisfying', '#simulation'],
+  ['#softbody', '#satisfying', '#physics', '#3danimation'],
+  ['#softbody', '#satisfying', '#simulation', '#blender'],
+  ['#softbody', '#satisfying', '#asmr', '#oddlysatisfying'],
+  ['#softbody', '#satisfying', '#3dart', '#physics'],
+]);
 
 function hash(value) {
   let result = 2166136261;
@@ -92,7 +146,6 @@ export function publicationCopy({ style = 'auto', channelId = 'preview', date, s
   const resolved = style === 'auto'
     ? mood === 'edit-revenge' ? 'revenge' : mood === 'edit-sad' ? 'melancholic' : 'gameplay'
     : style;
-  if (resolved === 'gameplay') return null;
   let index = seed;
   if (date !== undefined) {
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(date) || !Number.isFinite(Date.parse(date))
@@ -111,8 +164,10 @@ export function publicationCopy({ style = 'auto', channelId = 'preview', date, s
     captionStyle: resolved, captionId: `${resolved}-v1-${selected.id}`,
     youtubeTitle: `${selected.text} #shorts`,
     caption: [selected.text, credit].filter(Boolean).join('\n\n'),
-    tags: resolved === 'melancholic'
-      ? ['#melancholy', '#latenightthoughts', '#softbody', '#shorts']
-      : ['#quietcomeback', '#newchapter', '#softbody', '#shorts'],
+    tags: resolved === 'gameplay'
+      ? GAMEPLAY_TAGS[((index % GAMEPLAY_TAGS.length) + GAMEPLAY_TAGS.length) % GAMEPLAY_TAGS.length]
+      : resolved === 'melancholic'
+        ? ['#melancholy', '#latenightthoughts', '#softbody', '#shorts']
+        : ['#quietcomeback', '#newchapter', '#softbody', '#shorts'],
   };
 }
