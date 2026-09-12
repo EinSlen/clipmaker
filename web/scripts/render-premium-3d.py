@@ -568,6 +568,9 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "output": output.name,
         "duration": args.duration,
         "seed": args.seed,
+        # A local render asks for one seed and gets one video, so the scene it
+        # drew and the plan it answers are the same number.
+        "plan_seed": args.seed,
         "game": "soft-body-slide",
         "difficulty": args.difficulty,
         **sound,

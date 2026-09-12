@@ -80,6 +80,11 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--seed", type=int, required=True)
+    # The scene seed draws the variant and now changes on every render. The
+    # plan seed stays the key the publisher and this artifact share: which day
+    # and which channel the video was made for. They are equal for a local
+    # render, which asks for one seed and gets one video.
+    parser.add_argument("--plan-seed", type=int)
     parser.add_argument("--difficulty", type=int, default=100)
     parser.add_argument("--obstacle", required=True)
     parser.add_argument("--music-volume", type=float, default=0.58)
@@ -101,6 +106,11 @@ def main() -> None:
     if not events_path.is_file():
         raise FileNotFoundError(f"Motion event sidecar not found: {events_path}")
 
+    # The scene seed draws the variant, the generated bed and the Foley: all
+    # of it belongs to this render. The plan seed owns the choices the daily
+    # plan already made for this slot, so the spoken clip it fetched is the
+    # one played here rather than a second draw.
+    plan_seed = args.seed if args.plan_seed is None else args.plan_seed
     variant = renderer.variant_for_seed(args.seed, args.obstacle)
     stages = variant.stages
     motion_payload = json.loads(events_path.read_text(encoding="utf-8"))
@@ -128,9 +138,9 @@ def main() -> None:
             renderer.synth_soft_body_bed(args.duration, music, args.seed)
             soundtrack = {"music": "Original seeded ambient bed", "music_generated": True, "music_profile": "original"}
         elif args.music_profile in EDIT_PROFILES:
-            soundtrack = prepare_edit_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id, synth_bed=renderer.synth_soft_body_bed)
+            soundtrack = prepare_edit_soundtrack(args.duration, music, plan_seed, args.music_profile, args.date, args.channel_id, synth_bed=renderer.synth_soft_body_bed)
         else:
-            soundtrack = prepare_vocal_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id)
+            soundtrack = prepare_vocal_soundtrack(args.duration, music, plan_seed, args.music_profile, args.date, args.channel_id)
         video_filter = renderer.build_video_filter(
             args.duration, stages, variant.obstacle.key,
             renderer.stage_label_time_spans(published_spans, args.fps),
@@ -170,6 +180,7 @@ def main() -> None:
         "output": output.name,
         "duration": args.duration,
         "seed": args.seed,
+        "plan_seed": plan_seed,
         "game": "soft-body-slide",
         "difficulty": args.difficulty,
         **sound,

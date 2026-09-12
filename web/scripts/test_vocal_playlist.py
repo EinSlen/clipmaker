@@ -111,6 +111,28 @@ class VocalPlaylistTests(unittest.TestCase):
         self.assertIn('--date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"', workflow)
         self.assertIn('metadata["music_credit"]', workflow)
 
+    def test_daily_draws_a_scene_and_keeps_the_plan_key_for_the_publisher(self):
+        scripts = Path(__file__).parent
+        workflow = (scripts.parents[1] / ".github/workflows/soft-body-artifact.yml").read_text(encoding="utf-8")
+        # The scene is redrawn on every run, so replaying a day cannot hand
+        # back the video that already went out.
+        self.assertIn("scene_seed = secrets.randbelow(0x7fffffff) + 1", workflow)
+        self.assertIn('--seed "${{ matrix.scene_seed }}"', workflow)
+        # The plan key stays derived from the day and the channel: it names
+        # the file and the publisher refuses an import that does not match it.
+        self.assertIn('digest = hashlib.sha256(f"{namespace}:{channel_id}:{today}".encode()).digest()', workflow)
+        self.assertIn('--plan-seed "${{ matrix.seed }}"', workflow)
+        self.assertIn('soft-body-${{ matrix.obstacle }}-${{ matrix.seed }}.mp4', workflow)
+        finalize = (scripts / "finalize-premium-3d.py").read_text(encoding="utf-8")
+        self.assertIn("plan_seed = args.seed if args.plan_seed is None else args.plan_seed", finalize)
+        self.assertIn('"plan_seed": plan_seed,', finalize)
+        # The plan fetches the spoken clip with the plan seed, so the assembly
+        # has to select with the same one or it would play a second draw and
+        # the workflow would refuse the finished video.
+        self.assertIn("prepare_edit_soundtrack(args.duration, music, plan_seed,", finalize)
+        self.assertIn("prepare_vocal_soundtrack(args.duration, music, plan_seed,", finalize)
+        self.assertIn('select_clip(channel["seed"]', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,11 @@ on:
         required: true
         default: "910104"
         type: string
+      scene_seed:
+        description: Scene seed of the run being reassembled, when it differs from the seed above
+        required: false
+        default: ""
+        type: string
       samples:
         description: Eevee samples per native frame
         required: true
@@ -118,6 +123,7 @@ jobs:
           import json
           import os
           import re
+          import secrets
           import sys
           from datetime import datetime
           from pathlib import Path
@@ -133,9 +139,12 @@ jobs:
           plan_only = os.environ.get("PLAN_ONLY", "false").lower() == "true"
           reuse_run_id = os.environ.get("REUSE_RUN_ID", "").strip()
           if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch" and not use_cloud_config:
+              # A manual render asks for one seed and must get that exact
+              # scene back, so both seeds are the requested one.
+              manual_seed = int(os.environ.get("MANUAL_SEED") or "910104")
               channels.append({
                   "channel_id": "manual-3d", "key": "manual-3d", "date": today,
-                  "seed": int(os.environ.get("MANUAL_SEED") or "910104"),
+                  "seed": manual_seed, "scene_seed": manual_seed,
                   "obstacle": os.environ.get("MANUAL_OBSTACLE") or "peg-grid",
                   "samples": int(os.environ.get("MANUAL_SAMPLES") or "64"),
                   "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
@@ -154,8 +163,18 @@ jobs:
                   if not channel.get("enabled", True) or game.get("id") != "soft-body-slide":
                       continue
                   channel_id = channel["id"]
+                  # Two different numbers on purpose. The plan seed is the key
+                  # this render and the publisher share, so it stays derived
+                  # from the day and the channel: the import refuses a video
+                  # that was not planned for this slot, and the file is named
+                  # after it. The scene seed draws the variant and is redrawn
+                  # on every run, so replaying a day gives a new video instead
+                  # of the one that already went out. It is printed in the
+                  # plan summary and stored in the render metadata, which is
+                  # what makes a finished render replayable afterwards.
                   digest = hashlib.sha256(f"{namespace}:{channel_id}:{today}".encode()).digest()
                   seed = int.from_bytes(digest[:4], "big") & 0x7fffffff or 1
+                  scene_seed = secrets.randbelow(0x7fffffff) + 1
                   # Resolve the family here instead of leaving it to the seed.
                   # Drawing it from the seed brought the same scene back three
                   # mornings in a row; the rotation gives each family one day
@@ -166,7 +185,7 @@ jobs:
                   channels.append({
                       "channel_id": channel_id,
                       "key": re.sub(r"[^a-z0-9_-]", "-", channel_id.lower()),
-                      "date": today, "seed": seed, "obstacle": obstacle,
+                      "date": today, "seed": seed, "scene_seed": scene_seed, "obstacle": obstacle,
                       "samples": 64, "chunk_size": 15,
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
@@ -209,7 +228,12 @@ jobs:
               output.write("render_enabled=" + ("true" if channels and not plan_only and not reuse_run_id else "false") + "\n")
           summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
           lines = ["# Soft Body 3D plan", "", f"- Channels: `{len(channels)}`", f"- Native frames: `{len(frames)}`", f"- Plan only: `{'yes' if plan_only else 'no'}`", f"- Reassemble run: `{reuse_run_id or 'no'}`", ""]
-          lines.extend(f"- `{channel['channel_id']}` · `{channel['obstacle']}` · seed `{channel['seed']}`" for channel in channels)
+          # The scene seed is drawn once and never recomputed, so this line is
+          # the record that lets a finished render be replayed.
+          lines.extend(
+              f"- `{channel['channel_id']}` · `{channel['obstacle']}` · scene seed `{channel['scene_seed']}` · plan seed `{channel['seed']}`"
+              for channel in channels
+          )
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           cat "$GITHUB_STEP_SUMMARY"
@@ -237,7 +261,7 @@ jobs:
             blender --background --factory-startup --python-exit-code 1 --python scripts/blender-soft-body-slide.py -- \
               --frames /scene/frames --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --width "$RENDER_WIDTH" --height "$RENDER_HEIGHT" --samples "${{ matrix.samples }}" \
-              --seed "${{ matrix.seed }}" --softness 100 --theme ice --title "${{ matrix.title }}" \
+              --seed "${{ matrix.scene_seed }}" --softness 100 --theme ice --title "${{ matrix.title }}" \
               --obstacle "${{ matrix.obstacle }}" --events /scene/motion-events.json --build-only
           test -s artifacts/scene/frames/soft-body-comparison.blend
           test -s artifacts/scene/motion-events.json
@@ -413,7 +437,8 @@ jobs:
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${{ matrix.obstacle }}-${{ matrix.seed }}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
-              --seed "${{ matrix.seed }}" --obstacle "${{ matrix.obstacle }}" \
+              --seed "${{ matrix.scene_seed }}" --plan-seed "${{ matrix.seed }}" \
+              --obstacle "${{ matrix.obstacle }}" \
               --music-profile "$MUSIC_PROFILE" --music-volume "$MUSIC_VOLUME" \
               --sound-pack "$SOUND_PACK" \
               --date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"
@@ -512,6 +537,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
       RECOVERY_SEED: ${{ inputs.seed }}
+      RECOVERY_SCENE_SEED: ${{ inputs.scene_seed || inputs.seed }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
       RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'original' }}
       RECOVERY_SOUND_PACK: ${{ inputs.sound_pack || 'auto' }}
@@ -543,7 +569,8 @@ jobs:
               --frames /frames --events /scene/motion-events.json \
               --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
-              --seed "$RECOVERY_SEED" --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE" \
+              --seed "$RECOVERY_SCENE_SEED" --plan-seed "$RECOVERY_SEED" \
+              --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE" \
               --sound-pack "$RECOVERY_SOUND_PACK"
       - name: Verify and report the recovered production video
         run: |
@@ -568,7 +595,8 @@ jobs:
               "# Recovered Soft Body 3D production\n\n"
               f"- Source run: `{os.environ['SOURCE_RUN_ID']}`\n"
               f"- Obstacle: `{os.environ['RECOVERY_OBSTACLE']}`\n"
-              f"- Seed: `{os.environ['RECOVERY_SEED']}`\n"
+              f"- Scene seed: `{os.environ['RECOVERY_SCENE_SEED']}`\n"
+              f"- Plan seed: `{os.environ['RECOVERY_SEED']}`\n"
               f"- Native frames: `900`\n"
               f"- Output: `1080x1920 @ 30 fps`\n"
               f"- Duration: `{probe['format']['duration']} s`\n"

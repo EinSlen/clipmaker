@@ -24,7 +24,11 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
     : metadata?.requested_music_profile !== musicProfile)) {
     throw new Error('3D publication blocked: the artifact does not match the selected vocal playlist. Regenerate this video.');
   }
-  if (metadata?.physics_preflight !== 'passed' || metadata?.seed !== seed
+  // The scene seed is drawn per render, so it is no longer the key this plan
+  // and the artifact share. plan_seed is. Renders made before that split
+  // carried a single seed, which was the plan key, so they still validate.
+  const planSeed = metadata?.plan_seed ?? metadata?.seed;
+  if (metadata?.physics_preflight !== 'passed' || planSeed !== seed
     || metadata?.game !== 'soft-body-slide' || !specimens
     || (obstacle !== 'auto' && metadata.variant_obstacle !== obstacle)
     || metadata.render_width !== 1080 || metadata.render_height !== 1920
