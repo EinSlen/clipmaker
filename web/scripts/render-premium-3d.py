@@ -157,8 +157,8 @@ def repair_stage_cut_frames(
 ) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
-    spans = spans or stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values)
-    boundaries = {spans[stage_index][0] for stage_index in range(1, stage_count)}
+    levels = stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values) if spans is None else spans
+    boundaries = {levels[stage_index][0] for stage_index in range(1, stage_count)}
     boundaries.update(
         boundary for boundary in extra_boundaries if 1 < boundary < frame_count
     )
@@ -440,7 +440,7 @@ def build_video_filter(
         "fps=30:round=up",
     ]
     for index, (softness, (start, stop)) in enumerate(
-        zip(stages, spans or stage_time_spans(duration, len(stages), obstacle_key, stages))
+        zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages) if spans is None else spans)
     ):
         end = duration if index == len(stages) - 1 else stop - 0.001
         filters.append(

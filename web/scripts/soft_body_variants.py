@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 from datetime import date
+from functools import lru_cache
 import math
 import random
 from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, INNER_RADIUS
@@ -192,21 +193,41 @@ def stage_attempt_frame_spans(
     )
 
 
+def _hand_out(lengths: list[int], targets, amount: int, room: int | None) -> int:
+    """Share ``amount`` frames over ``targets``, at most ``room`` each."""
+
+    targets = list(targets)
+    if not targets or amount <= 0 or (room is not None and room <= 0):
+        return amount
+    total = sum(lengths[index] for index in targets)
+    shares = {index: amount * lengths[index] / total for index in targets}
+    whole = {index: int(share) for index, share in shares.items()}
+    order = sorted(targets, key=lambda index: (whole[index] - shares[index], index))
+    for index in order[: amount - sum(whole.values())]:
+        whole[index] += 1
+    for index in targets:
+        granted = whole[index] if room is None else min(whole[index], room)
+        lengths[index] += granted
+        amount -= granted
+    return amount
+
+
 def published_attempt_frame_spans(
     frame_count: int,
     reference_spans: tuple[tuple[int, int], ...],
     useful_lengths: tuple[int, ...],
     minimum_lengths: tuple[int, ...],
+    extension_limit: int,
 ) -> tuple[tuple[int, int], ...]:
     """Re-time the authored edit around the action the physics actually shows.
 
     The reference rhythm hands every take a fixed slot, so a rigid body thrown
     clear of the portrait frame can leave a second of empty studio before the
     cut, which the framing gate rightly refuses. Each take keeps only the
-    frames its action occupies, and the recovered frames are shared out over
-    the takes still on camera at their last frame. The complete movie still
-    lasts exactly ``frame_count`` frames and every cut still falls between
-    whole rendered frames.
+    frames its action occupies, and the recovered frames go to the takes still
+    on camera at their last frame. The complete movie still lasts exactly
+    ``frame_count`` frames and every cut still falls between whole rendered
+    frames.
 
     Nothing here touches gravity, friction, the ramp sweep or a release: a
     re-timed take is the same simulation observed for a different number of
@@ -217,21 +238,33 @@ def published_attempt_frame_spans(
         raise ValueError("Re-timing requires one useful and minimum length per take")
     if frame_count < len(reference_spans):
         raise ValueError("frame_count must provide at least one frame per take")
+    authored = [end - start + 1 for start, end in reference_spans]
     lengths = [
-        max(1, min(end - start + 1, max(minimum, useful)))
-        for (start, end), useful, minimum in zip(reference_spans, useful_lengths, minimum_lengths)
+        max(1, min(slot, max(minimum, useful)))
+        for slot, useful, minimum in zip(authored, useful_lengths, minimum_lengths)
     ]
+    # A frame handed to a take whose body is still on camera at its last frame
+    # costs nothing: the body simply stays a moment longer. The same frame
+    # handed to a take that has already emptied is dead air. So the recovered
+    # frames go to the takes that used their whole slot, never back to the one
+    # they were just taken from. When no take fills its slot the physics
+    # cannot fill the movie at all, and no layout avoids a tail: spread it so
+    # the worst one stays as short as possible and let the framing gate refuse
+    # the render.
     recovered = frame_count - sum(lengths)
-    if recovered < 0:
-        return tuple(reference_spans)
     if recovered:
-        total = sum(lengths)
-        shares = [recovered * length / total for length in lengths]
-        whole = [int(share) for share in shares]
-        order = sorted(range(len(lengths)), key=lambda index: (whole[index] - shares[index], index))
-        for index in order[: recovered - sum(whole)]:
-            whole[index] += 1
-        lengths = [length + share for length, share in zip(lengths, whole)]
+        holders = [index for index, (useful, slot) in enumerate(zip(useful_lengths, authored))
+                   if useful >= slot] or list(range(len(lengths)))
+        # A take was only measured inside its own slot, so nothing proves the
+        # body is still there one frame later. ``extension_limit`` keeps any
+        # stretch short enough that, even if the body leaves immediately, the
+        # tail it creates cannot on its own reach the framing limit.
+        recovered = _hand_out(lengths, holders, recovered, extension_limit)
+        if recovered:
+            # The takes that stay on camera cannot absorb the slack, so no cut
+            # of this physics fills the movie. Keep the exact duration and let
+            # the framing gate refuse the render rather than ship a short film.
+            _hand_out(lengths, range(len(lengths)), recovered, None)
     spans = []
     cursor = 1
     for length in lengths:
@@ -539,7 +572,8 @@ AUTO_OBSTACLES = tuple(item for item in OBSTACLES if item.key in AUTO_OBSTACLE_K
 AUTO_OBSTACLE_EPOCH = date(2026, 1, 1)
 
 
-def auto_obstacle_cycle(index: int) -> tuple[str, ...]:
+@lru_cache(maxsize=None)
+def auto_obstacle_cycle(index: int, channel_id: str = "daily") -> tuple[str, ...]:
     """Order the four automatic families run in during one cycle.
 
     Drawing the family from the render seed let the same scene come back three
@@ -547,6 +581,9 @@ def auto_obstacle_cycle(index: int) -> tuple[str, ...]:
     moved. A cycle shows each family exactly once, its order is drawn rather
     than fixed, and a cycle never opens on the family the previous one closed
     on, so two consecutive days can never share an obstacle.
+
+    Each channel draws its own sequence, so two accounts publishing the same
+    morning do not publish the same scene.
     """
 
     previous, order = None, ()
@@ -554,7 +591,7 @@ def auto_obstacle_cycle(index: int) -> tuple[str, ...]:
         attempt = 0
         while True:
             candidate = list(AUTO_OBSTACLE_KEYS)
-            scoped_random(cycle, f"auto-obstacle-cycle:{attempt}").shuffle(candidate)
+            scoped_random(cycle, f"auto-obstacle-cycle:{channel_id}:{attempt}").shuffle(candidate)
             if candidate[0] != previous:
                 break
             attempt += 1
@@ -563,12 +600,15 @@ def auto_obstacle_cycle(index: int) -> tuple[str, ...]:
     return order
 
 
-def rotated_auto_obstacle(day: date) -> str:
-    """Family a calendar day runs, never the one the day before ran."""
+def rotated_auto_obstacle(day: date, channel_id: str = "daily") -> str:
+    """Family a calendar day runs, never the one the day before ran.
 
-    elapsed = max(0, (day - AUTO_OBSTACLE_EPOCH).days)
-    index, position = divmod(elapsed, len(AUTO_OBSTACLE_KEYS))
-    return auto_obstacle_cycle(index)[position]
+    Days before the epoch keep the guarantee: the position walks backwards
+    through the first cycle instead of collapsing onto its first entry.
+    """
+
+    index, position = divmod((day - AUTO_OBSTACLE_EPOCH).days, len(AUTO_OBSTACLE_KEYS))
+    return auto_obstacle_cycle(index, channel_id)[position]
 
 
 STAGE_PRESETS = (

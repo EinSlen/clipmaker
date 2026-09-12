@@ -181,7 +181,7 @@ jobs:
                   # per cycle and never two days running.
                   obstacle = game.get("obstacle", "auto")
                   if obstacle == "auto":
-                      obstacle = rotated_auto_obstacle(today_date)
+                      obstacle = rotated_auto_obstacle(today_date, channel_id)
                   channels.append({
                       "channel_id": channel_id,
                       "key": re.sub(r"[^a-z0-9_-]", "-", channel_id.lower()),
