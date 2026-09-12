@@ -495,7 +495,7 @@ jobs:
           # A sampled pack replaces the synthesised Foley, so the check asks
           # for a known collision layer instead of a single hardcoded name.
           sound_pack = metadata.get("sound_pack")
-          if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or sound_pack not in ("premium-foley", "funny"):
+          if (metadata.get("music_generated") is not True and not cleared_vocals and not spoken_edit) or sound_pack not in ("premium-foley", "funny", "meme"):
               raise SystemExit("Missing soundtrack clearance or collision Foley metadata")
           if sound_pack != "premium-foley" and (metadata.get("sound_pack_kind") != "sampled-one-shots" or not metadata.get("sound_pack_credits")):
               raise SystemExit("Missing sampled sound pack provenance")

@@ -1,0 +1,136 @@
+{
+  "id": "meme",
+  "label": "Cartoon",
+  "description": "Boings, bonks, squeaks and the occasional meow on every contact.",
+  "rights": "Every sample is Freesound CC0: commercial use, no attribution required.",
+  "samples": [
+    {
+      "file": "741368.wav",
+      "title": "Cartoon Pop",
+      "author": "Mish7913",
+      "source": "https://freesound.org/people/Mish7913/sounds/741368/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.063
+    },
+    {
+      "file": "439186.wav",
+      "title": "Pop 5.ogg",
+      "author": "FourthWoods",
+      "source": "https://freesound.org/people/FourthWoods/sounds/439186/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.065
+    },
+    {
+      "file": "571119.wav",
+      "title": "Boing-SFX.mp3",
+      "author": "elfstonepress",
+      "source": "https://freesound.org/people/elfstonepress/sounds/571119/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.097
+    },
+    {
+      "file": "486971.wav",
+      "title": "Fast Whistle.mp3",
+      "author": "kmmediafactory",
+      "source": "https://freesound.org/people/kmmediafactory/sounds/486971/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.108
+    },
+    {
+      "file": "245646.wav",
+      "title": "Cartoon Pop (Distorted)",
+      "author": "unfa",
+      "source": "https://freesound.org/people/unfa/sounds/245646/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.134
+    },
+    {
+      "file": "428114.wav",
+      "title": "squeakFinal.wav",
+      "author": "Higgs01",
+      "source": "https://freesound.org/people/Higgs01/sounds/428114/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.201
+    },
+    {
+      "file": "321163.wav",
+      "title": "TOONY pops.wav",
+      "author": "mikala_oidua",
+      "source": "https://freesound.org/people/mikala_oidua/sounds/321163/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.342
+    },
+    {
+      "file": "362953.wav",
+      "title": "Cat Call (Meow)",
+      "author": "Jofae",
+      "source": "https://freesound.org/people/Jofae/sounds/362953/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.417
+    },
+    {
+      "file": "458572.wav",
+      "title": "Bonk.wav",
+      "author": "facklere",
+      "source": "https://freesound.org/people/facklere/sounds/458572/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.561
+    },
+    {
+      "file": "448084.wav",
+      "title": "Cute Kitten Meow",
+      "author": "Breviceps",
+      "source": "https://freesound.org/people/Breviceps/sounds/448084/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.581
+    },
+    {
+      "file": "109831.wav",
+      "title": "TubeSqueak09_NTG3.wav",
+      "author": "uwesoundboiz",
+      "source": "https://freesound.org/people/uwesoundboiz/sounds/109831/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.602
+    },
+    {
+      "file": "859734.wav",
+      "title": "Meow 9",
+      "author": "PuzzlingGGG",
+      "source": "https://freesound.org/people/PuzzlingGGG/sounds/859734/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.625
+    },
+    {
+      "file": "543641.wav",
+      "title": "Funny Boing",
+      "author": "se2001",
+      "source": "https://freesound.org/people/se2001/sounds/543641/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.695
+    },
+    {
+      "file": "641894.wav",
+      "title": "Bonk - [Rpg] 1",
+      "author": "colorsCrimsonTears",
+      "source": "https://freesound.org/people/colorsCrimsonTears/sounds/641894/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.7
+    },
+    {
+      "file": "442904.wav",
+      "title": "Pig Squeak",
+      "author": "qubodup",
+      "source": "https://freesound.org/people/qubodup/sounds/442904/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.73
+    },
+    {
+      "file": "159375.wav",
+      "title": "8-bit boing.wav",
+      "author": "Greenhourglass",
+      "source": "https://freesound.org/people/Greenhourglass/sounds/159375/",
+      "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "duration": 0.914
+    }
+  ]
+}

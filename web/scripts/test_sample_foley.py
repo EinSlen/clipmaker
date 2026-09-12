@@ -36,7 +36,10 @@ class SoundPackTests(unittest.TestCase):
     def test_only_the_sampled_requests_resolve(self):
         self.assertEqual(foley.resolve_pack("auto"), "funny")
         self.assertEqual(foley.resolve_pack("funny"), "funny")
-        for request in ("meme", "arcade", "impact", "asmr", "unknown"):
+        self.assertEqual(foley.resolve_pack("meme"), "meme")
+        # The remaining names have no shipped pack and keep the synthesised
+        # Foley rather than silently borrowing another pack's samples.
+        for request in ("arcade", "impact", "asmr", "unknown"):
             self.assertIsNone(foley.resolve_pack(request))
 
 
