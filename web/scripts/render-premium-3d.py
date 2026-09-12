@@ -443,11 +443,23 @@ def build_video_filter(
         zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages) if spans is None else spans)
     ):
         end = duration if index == len(stages) - 1 else stop - 0.001
+        window = f"enable='between(t\\,{start:.3f}\\,{end:.3f})'"
+        # The percentage is the whole point of the comparison, so it carries
+        # the size and the word sits under it, small and letter spaced. A hard
+        # shadow offset four pixels down and right read as a default overlay;
+        # a soft one straight underneath lifts the type off the studio wall
+        # without announcing itself.
         filters.append(
-            f"drawtext=fontfile='{font_file}':text='{softness}% SOFT':expansion=none:"
-            "fontcolor=white:fontsize=78:x=(w-text_w)/2:y=112:"
-            "shadowcolor=black@0.46:shadowx=4:shadowy=4:"
-            f"enable='between(t\\,{start:.3f}\\,{end:.3f})'"
+            f"drawtext=fontfile='{font_file}':text='{softness}%':expansion=none:"
+            "fontcolor=white:fontsize=124:x=(w-text_w)/2:y=96:"
+            "shadowcolor=black@0.30:shadowx=0:shadowy=3:"
+            f"{window}"
+        )
+        filters.append(
+            f"drawtext=fontfile='{font_file}':text='S O F T':expansion=none:"
+            "fontcolor=white@0.80:fontsize=34:x=(w-text_w)/2:y=242:"
+            "shadowcolor=black@0.26:shadowx=0:shadowy=2:"
+            f"{window}"
         )
     return ",".join(filters)
 
