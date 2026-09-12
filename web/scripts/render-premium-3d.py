@@ -437,22 +437,21 @@ def premium_font_file() -> str:
 HOOK_SECONDS = 2.0
 
 
-def hook_text(title: str) -> str:
-    """A drawtext-safe hook line.
+def hook_text(stages) -> str:
+    """The opening line, read off the comparison rather than off a setting.
 
-    The title is typed in the dashboard, and a filtergraph has no room for
-    quoting games: a colon, a comma or an apostrophe in it would break the
-    whole chain or, worse, change what the rest of the filter means. The hook
-    is display text, so anything outside a plain headline alphabet is dropped
-    rather than escaped.
+    The channel's own title asked a question, which needs the viewer to
+    already know what they are looking at. The genre names this format after
+    its own arc, and TikTok's search box completes it that way, so the hook
+    states the arc: the first percentage, the last, and the thing being
+    compared. Deriving it from the stages means it cannot drift from what the
+    render actually shows, and it cannot carry a character that would break
+    the filtergraph it is written into.
     """
-    cleaned = "".join(
-        character for character in str(title or "").upper()
-        if character.isalnum() or character in " ?!.-"
-    )
-    hook = " ".join(cleaned.split())[:52]
-    # Punctuation on its own is not a hook, it is noise on the opening frame.
-    return hook if any(character.isalnum() for character in hook) else ""
+    levels = [level for level in (stages or ()) if isinstance(level, int)]
+    if len(levels) < 2 or levels[0] == levels[-1]:
+        return ""
+    return f"{levels[0]}% TO {levels[-1]}% SOFT BODY"
 
 
 def build_video_filter(
@@ -460,7 +459,6 @@ def build_video_filter(
     stages: tuple[int, ...],
     obstacle_key: str | None = None,
     spans: tuple[tuple[float, float], ...] | None = None,
-    title: str | None = None,
 ) -> str:
     """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
@@ -472,7 +470,7 @@ def build_video_filter(
     # states the question for the first two seconds, then leaves the frame to
     # the comparison. It rides under the label rather than replacing it, so
     # the first stage keeps the reading the rest of the clip uses.
-    hook = hook_text(title) if title else ""
+    hook = hook_text(stages)
     if hook:
         filters.append(
             f"drawtext=fontfile='{font_file}':text='{hook}':expansion=none:"
@@ -591,7 +589,6 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         video_filter = build_video_filter(
             args.duration, stages, variant.obstacle.key,
             stage_label_time_spans(published_spans, fps),
-            args.title,
         )
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
