@@ -512,6 +512,45 @@ class SoftBodyVariantTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "timeline"):
                 PREMIUM_RENDERER.published_attempt_timeline({"attempt_spans": invalid}, variant, 900, 30)
 
+    def test_assembly_accepts_the_retimed_daily_that_used_to_be_refused(self):
+        # The 12 September daily, re-timed: the rigid opening drops from 133
+        # to 113 frames and the seven remaining takes share those frames.
+        variant = variant_for_seed(339635668, "auto")
+        self.assertEqual(variant.obstacle.key, "moving-slide")
+        lengths = (113, 118, 111, 111, 118, 118, 106, 105)
+        self.assertEqual(sum(lengths), 900)
+        spans, cursor = [], 1
+        for length in lengths:
+            spans.append((cursor, cursor + length - 1))
+            cursor += length
+        quality, index = [], 0
+        for stage, (softness, count) in enumerate(zip(variant.stages, (1, 1, 2, 2, 2)), start=1):
+            for attempt, (start, end) in enumerate(spans[index:index + count], start=1):
+                count_frames = end - start + 1
+                quality.append({"stage": stage, "softness": softness, "attempt": attempt, "body": 1,
+                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": count_frames, "maximum_empty_seconds": 0.3667,
+                                "maximum_side_exit_seconds": 0.3333, "issues": []},
+                    "rendered_surface": {"frames_checked": count_frames, "subdivision": 3,
+                                         "vertices_checked": 210946 * count_frames,
+                                         "maximum_penetration": 0, "maximum_correction": 0.0, "issues": []}})
+            index += count
+        payload = {"preflight_schema": 4, "obstacle": "moving-slide", "stages": list(variant.stages),
+                   "fps": 30, "duration": 30, "attempt_quality": quality,
+                   "attempt_spans": [list(span) for span in spans]}
+        self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
+        _attempts, levels, _counts = PREMIUM_RENDERER.published_attempt_timeline(payload, variant, 900, 30)
+        self.assertEqual(levels, ((1, 113), (114, 231), (232, 453), (454, 689), (690, 900)))
+        value = PREMIUM_RENDERER.build_video_filter(
+            30.0, variant.stages, "moving-slide", PREMIUM_RENDERER.stage_label_time_spans(levels, 30))
+        self.assertIn("3.766", value)
+        self.assertNotIn("4.447", value)
+        # The authored rhythm is no longer a valid timeline for this render.
+        with self.assertRaisesRegex(ValueError, "timeline"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_spans": [
+                list(span) for span in stage_frame_spans(900, 5, "moving-slide", variant.stages)]},
+                variant, 900, 30)
+
     def test_native_stair_assembly_requires_outlet_evidence(self):
         variant = variant_for_seed(734193085, "stair-cascade")
         reports = []
