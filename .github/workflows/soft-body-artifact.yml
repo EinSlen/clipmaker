@@ -438,7 +438,7 @@ jobs:
               --output "/final/soft-body-${{ matrix.obstacle }}-${{ matrix.seed }}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --seed "${{ matrix.scene_seed }}" --plan-seed "${{ matrix.seed }}" \
-              --obstacle "${{ matrix.obstacle }}" \
+              --obstacle "${{ matrix.obstacle }}" --title "${{ matrix.title }}" \
               --music-profile "$MUSIC_PROFILE" --music-volume "$MUSIC_VOLUME" \
               --sound-pack "$SOUND_PACK" \
               --date "$MUSIC_DATE" --channel-id "$MUSIC_CHANNEL"
@@ -538,6 +538,7 @@ jobs:
       SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
       RECOVERY_SEED: ${{ inputs.seed }}
       RECOVERY_SCENE_SEED: ${{ inputs.scene_seed || inputs.seed }}
+      RECOVERY_TITLE: ${{ inputs.title }}
       RECOVERY_OBSTACLE: ${{ inputs.obstacle }}
       RECOVERY_MUSIC_PROFILE: ${{ inputs.music_profile || 'original' }}
       RECOVERY_SOUND_PACK: ${{ inputs.sound_pack || 'auto' }}
@@ -570,7 +571,8 @@ jobs:
               --output "/final/soft-body-${RECOVERY_OBSTACLE}-${RECOVERY_SEED}.mp4" \
               --metadata /final/metadata.json --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --seed "$RECOVERY_SCENE_SEED" --plan-seed "$RECOVERY_SEED" \
-              --obstacle "$RECOVERY_OBSTACLE" --music-profile "$RECOVERY_MUSIC_PROFILE" \
+              --obstacle "$RECOVERY_OBSTACLE" --title "$RECOVERY_TITLE" \
+              --music-profile "$RECOVERY_MUSIC_PROFILE" \
               --sound-pack "$RECOVERY_SOUND_PACK"
       - name: Verify and report the recovered production video
         run: |

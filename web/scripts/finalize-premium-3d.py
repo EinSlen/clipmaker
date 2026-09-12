@@ -91,6 +91,7 @@ def main() -> None:
     parser.add_argument("--music-profile", choices=PROFILES, default="original")
     parser.add_argument("--date")
     parser.add_argument("--channel-id", default="preview")
+    parser.add_argument("--title", default="")
     parser.add_argument("--sound-pack", choices=("auto", "meme", "funny", "arcade", "impact", "asmr"), default="auto")
     parser.add_argument("--preset", default="slow")
     parser.add_argument("--crf", default="14")
@@ -144,6 +145,7 @@ def main() -> None:
         video_filter = renderer.build_video_filter(
             args.duration, stages, variant.obstacle.key,
             renderer.stage_label_time_spans(published_spans, args.fps),
+            args.title,
         )
         subprocess.run(
             [
