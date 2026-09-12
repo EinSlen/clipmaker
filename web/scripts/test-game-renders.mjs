@@ -26,6 +26,10 @@ process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'script
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_vocal_playlist.py', '-v'], { includeStderr: true })}\n`);
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_edit_audio.py', '-v'], { includeStderr: true })}\n`);
 process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_discover_edit_audio.py', '-v'], { includeStderr: true })}\n`);
+// The sampled sound packs and the reach report had no runner, so their
+// suites only ever ran on a developer's machine.
+process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_sample_foley.py', '-v'], { includeStderr: true })}\n`);
+process.stdout.write(`${run(python, ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_reach_report.py', '-v'], { includeStderr: true })}\n`);
 
 if (!process.argv.includes('--smoke')) process.exit(0);
 
