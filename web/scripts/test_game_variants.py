@@ -9,6 +9,7 @@ import re
 import tempfile
 import unittest
 import wave
+from datetime import date, timedelta
 from pathlib import Path
 
 from game_variants import (
@@ -20,7 +21,10 @@ from game_variants import (
 from soft_body_variants import (
     AIR_RETENTION_PER_SECOND,
     PHYSICS_HZ,
+    AUTO_OBSTACLE_EPOCH,
     AUTO_OBSTACLE_KEYS,
+    auto_obstacle_cycle,
+    rotated_auto_obstacle,
     OBSTACLES,
     SHAPES,
     deformation_response,
@@ -643,6 +647,25 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertEqual(variant.obstacle, obstacle)
             self.assertIn(obstacle.key, variant.key)
             self.assertEqual(variant.receiver.x, obstacle.receiver_x)
+
+    def test_automatic_obstacle_rotation_never_repeats_two_days_running(self):
+        window = 400
+        families = [rotated_auto_obstacle(AUTO_OBSTACLE_EPOCH + timedelta(days=offset))
+                    for offset in range(window)]
+        for previous, following in zip(families, families[1:]):
+            self.assertNotEqual(previous, following)
+        # Every family owns exactly one day per cycle, so none can disappear
+        # for weeks the way a seed-derived draw let stair-cascade disappear.
+        for index in range(0, window, len(AUTO_OBSTACLE_KEYS)):
+            self.assertEqual(sorted(families[index:index + len(AUTO_OBSTACLE_KEYS)]),
+                             sorted(AUTO_OBSTACLE_KEYS))
+        # The order inside a cycle is drawn, not a fixed carousel.
+        self.assertGreater(len({auto_obstacle_cycle(index) for index in range(40)}), 1)
+        # The daily plan and any later replay must agree on the same day.
+        self.assertEqual(rotated_auto_obstacle(date(2026, 9, 13)),
+                         rotated_auto_obstacle(date(2026, 9, 13)))
+        # A date before the epoch stays in range instead of raising.
+        self.assertIn(rotated_auto_obstacle(date(2025, 1, 1)), AUTO_OBSTACLE_KEYS)
 
     def test_automatic_obstacles_cover_only_reference_matched_scenes(self):
         resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}

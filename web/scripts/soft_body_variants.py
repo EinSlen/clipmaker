@@ -7,6 +7,7 @@ Blender scene and fast unit tests all resolve a seed to the exact same variant.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from datetime import date
 import math
 import random
 from soft_body_stair_geometry import RECEIVER_X, RECEIVER_TOP, OUTER_RADIUS, INNER_RADIUS
@@ -535,6 +536,39 @@ OBSTACLES = (
 OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
 AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid")
 AUTO_OBSTACLES = tuple(item for item in OBSTACLES if item.key in AUTO_OBSTACLE_KEYS)
+AUTO_OBSTACLE_EPOCH = date(2026, 1, 1)
+
+
+def auto_obstacle_cycle(index: int) -> tuple[str, ...]:
+    """Order the four automatic families run in during one cycle.
+
+    Drawing the family from the render seed let the same scene come back three
+    mornings in a row, which reads as a repeat even though every other axis
+    moved. A cycle shows each family exactly once, its order is drawn rather
+    than fixed, and a cycle never opens on the family the previous one closed
+    on, so two consecutive days can never share an obstacle.
+    """
+
+    previous, order = None, ()
+    for cycle in range(max(0, index) + 1):
+        attempt = 0
+        while True:
+            candidate = list(AUTO_OBSTACLE_KEYS)
+            scoped_random(cycle, f"auto-obstacle-cycle:{attempt}").shuffle(candidate)
+            if candidate[0] != previous:
+                break
+            attempt += 1
+        order = tuple(candidate)
+        previous = order[-1]
+    return order
+
+
+def rotated_auto_obstacle(day: date) -> str:
+    """Family a calendar day runs, never the one the day before ran."""
+
+    elapsed = max(0, (day - AUTO_OBSTACLE_EPOCH).days)
+    index, position = divmod(elapsed, len(AUTO_OBSTACLE_KEYS))
+    return auto_obstacle_cycle(index)[position]
 
 
 STAGE_PRESETS = (

@@ -124,8 +124,10 @@ jobs:
           from zoneinfo import ZoneInfo
           sys.path.insert(0, "web/scripts")
           from edit_audio import EDIT_PROFILES, select_clip, fetch_clip
+          from soft_body_variants import rotated_auto_obstacle
 
-          today = datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
+          today_date = datetime.now(ZoneInfo("Europe/Paris")).date()
+          today = today_date.isoformat()
           channels = []
           use_cloud_config = os.environ.get("USE_CLOUD_CONFIG", "false").lower() == "true"
           plan_only = os.environ.get("PLAN_ONLY", "false").lower() == "true"
@@ -154,10 +156,17 @@ jobs:
                   channel_id = channel["id"]
                   digest = hashlib.sha256(f"{namespace}:{channel_id}:{today}".encode()).digest()
                   seed = int.from_bytes(digest[:4], "big") & 0x7fffffff or 1
+                  # Resolve the family here instead of leaving it to the seed.
+                  # Drawing it from the seed brought the same scene back three
+                  # mornings in a row; the rotation gives each family one day
+                  # per cycle and never two days running.
+                  obstacle = game.get("obstacle", "auto")
+                  if obstacle == "auto":
+                      obstacle = rotated_auto_obstacle(today_date)
                   channels.append({
                       "channel_id": channel_id,
                       "key": re.sub(r"[^a-z0-9_-]", "-", channel_id.lower()),
-                      "date": today, "seed": seed, "obstacle": game.get("obstacle", "auto"),
+                      "date": today, "seed": seed, "obstacle": obstacle,
                       "samples": 64, "chunk_size": 15,
                       "title": str(game.get("title") or "HOW SOFT CAN IT GET?")[:52],
                       "scheduled": True,
