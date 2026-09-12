@@ -407,7 +407,13 @@ def build_continuous_audio_filter(music_volume: float, vocals: bool = False, spo
         "[music][fxkey]sidechaincompress=threshold=0.020:ratio=2.8:attack=8:release=190:makeup=1[ducked];"
         "[ducked][fxmix]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
         "[mix]alimiter=limit=0.891:attack=5:release=70:level=false[limited];"
-        "[limited]loudnorm=I=-18:TP=-1.5:LRA=10[a]"
+        # Measured on the 12 September daily, 61 impacts: asking for -1.5
+        # lands the true peak at -0.55 dBFS, because loudnorm shapes the
+        # inter-sample peak it is aiming for rather than reaching it. At
+        # -2.5 the same file measures -1.40 dBFS for -17.77 LUFS, so the
+        # mix keeps its loudness and gains most of a decibel of headroom
+        # for the re-encode the platforms run on it.
+        "[limited]loudnorm=I=-18:TP=-2.5:LRA=10[a]"
     )
 
 
