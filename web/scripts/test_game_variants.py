@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import math
+import random
 import re
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ from soft_body_variants import (
     PHYSICS_HZ,
     AUTO_OBSTACLE_EPOCH,
     AUTO_OBSTACLE_KEYS,
+    OBSTACLE_KEYS,
     auto_obstacle_cycle,
     rotated_auto_obstacle,
     OBSTACLES,
@@ -31,6 +33,7 @@ from soft_body_variants import (
     natural_ramp_exit_time,
     obstacle_collision_radius_scale,
     obstacle_drag_retention_per_second,
+    minimum_complete_attempt_seconds,
     obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
     published_attempt_frame_spans,
@@ -257,18 +260,22 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_published_takes_drop_empty_tails_and_keep_the_exact_duration(self):
         reference = ((1, 133), (134, 248), (249, 356), (357, 464))
         minimums = (90, 90, 90, 90)
-        spans = published_attempt_frame_spans(464, reference, (110, 200, 200, 200), minimums)
+        spans = published_attempt_frame_spans(464, reference, (110, 200, 200, 200), minimums, 15)
         self.assertEqual(spans[0][0], 1)
         self.assertEqual(spans[-1][1], 464)
         for previous, following in zip(spans, spans[1:]):
             self.assertEqual(previous[1] + 1, following[0])
-        self.assertLess(spans[0][1] - spans[0][0] + 1, 133)
-        self.assertGreaterEqual(spans[0][1] - spans[0][0] + 1, 110)
+        # The emptied take keeps exactly the frames its action needs. Handing
+        # any of them back would put the studio it was cut for on screen.
+        self.assertEqual(spans[0][1] - spans[0][0] + 1, 110)
         self.assertGreater(spans[1][1] - spans[1][0] + 1, 115)
+        # No take is stretched further than the extension limit allows.
+        for (start, end), (authored_start, authored_end) in zip(spans[1:], reference[1:]):
+            self.assertLessEqual(end - start + 1, authored_end - authored_start + 1 + 15)
         # A take its action fills keeps the authored rhythm untouched, and a
         # take shorter than a complete action is never published.
-        self.assertEqual(published_attempt_frame_spans(464, reference, (133, 115, 108, 108), minimums), reference)
-        self.assertEqual(published_attempt_frame_spans(464, reference, (1, 1, 1, 1), (133, 115, 108, 108)), reference)
+        self.assertEqual(published_attempt_frame_spans(464, reference, (133, 115, 108, 108), minimums, 15), reference)
+        self.assertEqual(published_attempt_frame_spans(464, reference, (1, 1, 1, 1), (133, 115, 108, 108), 15), reference)
         self.assertEqual(
             stage_spans_from_attempt_spans(spans, (1, 2, 1)), (spans[0], (spans[1][0], spans[2][1]), spans[3]))
         with self.assertRaises(ValueError):
@@ -555,6 +562,32 @@ class SoftBodyVariantTests(unittest.TestCase):
                 list(span) for span in stage_frame_spans(900, 5, "moving-slide", variant.stages)]},
                 variant, 900, 30)
 
+    def test_every_layout_the_editor_produces_is_accepted_by_the_assembly(self):
+        # The editor cuts in Blender and the assembly validates hours later in
+        # another job. A layout one accepts and the other refuses would only
+        # show up at the end of a five hour render, so the contract is checked
+        # here over every family and any measurement the scout could return.
+        rng = random.Random(20260912)
+        for _trial in range(120):
+            seed = rng.randrange(1, 0x7fffffff)
+            variant = variant_for_seed(seed, rng.choice(("auto",) + OBSTACLE_KEYS))
+            spans = stage_frame_spans(900, len(variant.stages), variant.obstacle.key, variant.stages)
+            reference, minimums = [], []
+            for softness, (start, end) in zip(variant.stages, spans):
+                for first, last in stage_attempt_frame_spans(start, end, 30, variant.obstacle.key, softness):
+                    reference.append((first, last))
+                    minimums.append(round(minimum_complete_attempt_seconds(variant.obstacle.key, softness) * 30))
+            tail = max(1, round(0.25 * 30))
+            useful = tuple(rng.randint(1, last - first + 1) + tail for first, last in reference)
+            published = published_attempt_frame_spans(900, tuple(reference), useful, tuple(minimums), 15)
+            self.assertEqual(sum(end - start + 1 for start, end in published), 900)
+            attempts, levels, counts = PREMIUM_RENDERER.published_attempt_timeline(
+                {"attempt_spans": [list(span) for span in published]}, variant, 900, 30)
+            self.assertEqual(attempts, published)
+            self.assertEqual(levels[0][0], 1)
+            self.assertEqual(levels[-1][1], 900)
+            self.assertEqual(sum(counts), len(published))
+
     def test_native_stair_assembly_requires_outlet_evidence(self):
         variant = variant_for_seed(734193085, "stair-cascade")
         reports = []
@@ -649,14 +682,16 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertEqual(variant.receiver.x, obstacle.receiver_x)
 
     def test_automatic_obstacle_rotation_never_repeats_two_days_running(self):
-        window = 400
-        families = [rotated_auto_obstacle(AUTO_OBSTACLE_EPOCH + timedelta(days=offset))
-                    for offset in range(window)]
+        # The window deliberately straddles the epoch: the guarantee has to
+        # hold on both sides of it and across the boundary itself.
+        days = [AUTO_OBSTACLE_EPOCH + timedelta(days=offset) for offset in range(-400, 400)]
+        families = [rotated_auto_obstacle(day) for day in days]
         for previous, following in zip(families, families[1:]):
             self.assertNotEqual(previous, following)
         # Every family owns exactly one day per cycle, so none can disappear
         # for weeks the way a seed-derived draw let stair-cascade disappear.
-        for index in range(0, window, len(AUTO_OBSTACLE_KEYS)):
+        first = days.index(AUTO_OBSTACLE_EPOCH)
+        for index in range(first, len(days) - len(AUTO_OBSTACLE_KEYS), len(AUTO_OBSTACLE_KEYS)):
             self.assertEqual(sorted(families[index:index + len(AUTO_OBSTACLE_KEYS)]),
                              sorted(AUTO_OBSTACLE_KEYS))
         # The order inside a cycle is drawn, not a fixed carousel.
@@ -664,8 +699,18 @@ class SoftBodyVariantTests(unittest.TestCase):
         # The daily plan and any later replay must agree on the same day.
         self.assertEqual(rotated_auto_obstacle(date(2026, 9, 13)),
                          rotated_auto_obstacle(date(2026, 9, 13)))
-        # A date before the epoch stays in range instead of raising.
-        self.assertIn(rotated_auto_obstacle(date(2025, 1, 1)), AUTO_OBSTACLE_KEYS)
+
+    def test_each_channel_draws_its_own_family_on_the_same_morning(self):
+        # Two accounts publishing the same morning must not publish the same
+        # scene, which a rotation keyed on the date alone would guarantee.
+        days = [date(2026, 9, 12) + timedelta(days=offset) for offset in range(120)]
+        first = [rotated_auto_obstacle(day, "softbody-dvlad") for day in days]
+        second = [rotated_auto_obstacle(day, "softbody-second") for day in days]
+        self.assertNotEqual(first, second)
+        # Each channel keeps the guarantee on its own sequence.
+        for families in (first, second):
+            for previous, following in zip(families, families[1:]):
+                self.assertNotEqual(previous, following)
 
     def test_automatic_obstacles_cover_only_reference_matched_scenes(self):
         resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}

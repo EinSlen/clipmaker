@@ -1175,7 +1175,7 @@ def _chain_ticks(
     # The authored slot owns the release hold and the ramp release window, not
     # the published one. Cutting a take where its action ends is an edit
     # decision, so it must leave the preceding fall exactly as it was.
-    trial_duration = (authored_frame_count or frame_count) / fps
+    trial_duration = (frame_count if authored_frame_count is None else authored_frame_count) / fps
     release_delay = stage_release_delay(trial_duration, variant.obstacle.key)
     gravity_multiplier = {
         "stair-cascade": 0.62,
@@ -2493,6 +2493,7 @@ def scouted_attempt_frame_spans(reference_attempts, variant, fps, frame_end):
         tuple((first, last) for _stage, _softness, _attempt, first, last in reference_attempts),
         tuple(useful),
         tuple(minimums),
+        max(1, round(0.5 * fps)),
     )
 
 

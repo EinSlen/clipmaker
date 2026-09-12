@@ -136,6 +136,18 @@ test('3D upload evidence rejects missing bodies, overlaps, defects and old low-f
   }
 });
 
+test('a redrawn scene still has to answer the plan it was made for', () => {
+  const expected = { seed: 123, duration: 30, obstacle: 'auto' };
+  // The scene seed is redrawn on every render, so it is no longer the key
+  // shared with the plan. plan_seed is, and it still has to match.
+  const redrawn = { ...native3dEvidence(987654321), plan_seed: 123 };
+  assert.doesNotThrow(() => assertNative3dQuality(redrawn, expected));
+  assert.throws(() => assertNative3dQuality({ ...redrawn, plan_seed: 124 }, expected),
+    /3D publication blocked/u);
+  // A render made before the split carried one seed, which was the plan key.
+  assert.doesNotThrow(() => assertNative3dQuality(native3dEvidence(123), expected));
+});
+
 test('3D upload rejects an artifact from a different requested playlist', () => {
   const base = native3dEvidence(123);
   for (const profile of ['auto', 'revenge', 'sad-english', 'original']) {
