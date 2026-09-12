@@ -48,7 +48,8 @@ from soft_body_variants import (
     supported_body_damping,
     variant_for_seed,
 )
-from soft_body_framing import inspect_simulation_framing, inspect_stair_outlet, validate_stair_outlet_evidence, project_point
+from soft_body_framing import (backdrop_corners, inspect_simulation_framing, inspect_stair_outlet,
+                               validate_stair_outlet_evidence, project_point)
 ROOT = Path(__file__).resolve().parents[1]
 PREMIUM_IDS = ("soft-body-slide",)
 # The comment driven story is assembled by the Node pipeline, so it appears in
@@ -630,6 +631,20 @@ class SoftBodyVariantTests(unittest.TestCase):
                 1,
             )
 
+    def test_backdrop_covers_every_camera_frame(self):
+        # Standing the studio wall back to soften the rim light took its
+        # coverage with it. The stair camera looks along the scene from the
+        # side and lands twenty three units off centre on the wall, so an
+        # extent that suited it at three units leaves the frame open onto the
+        # dark world colour at nine.
+        for obstacle in OBSTACLES:
+            projected = [project_point(corner, obstacle) for corner in backdrop_corners()]
+            with self.subTest(obstacle=obstacle.key):
+                self.assertLessEqual(min(point[0] for point in projected), -0.15)
+                self.assertGreaterEqual(max(point[0] for point in projected), 1.15)
+                self.assertLessEqual(min(point[1] for point in projected), -0.15)
+                self.assertGreaterEqual(max(point[1] for point in projected), 1.15)
+
     def test_obstacle_receivers_remain_inside_the_vertical_camera(self):
         for obstacle in OBSTACLES:
             variant = variant_for_seed(910104, obstacle.key)
@@ -1004,7 +1019,7 @@ class SoftBodyAudioTests(unittest.TestCase):
                 self.assertGreater(source.getnframes(), 10_000)
         audio_filter = PREMIUM_RENDERER.build_continuous_audio_filter(0.58)
         self.assertIn("sidechaincompress", audio_filter)
-        self.assertIn("loudnorm=I=-18:TP=-1.5:LRA=10", audio_filter)
+        self.assertIn("loudnorm=I=-18:TP=-2.5:LRA=10", audio_filter)
 
 
 class GameEngineTests(unittest.TestCase):

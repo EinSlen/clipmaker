@@ -45,7 +45,12 @@ from soft_body_variants import (
     variant_for_seed,
     variant_summary,
 )
-from soft_body_framing import camera_location, inspect_simulation_framing
+from soft_body_framing import (
+    BACKDROP_DISTANCE,
+    BACKDROP_HALF_EXTENT,
+    camera_location,
+    inspect_simulation_framing,
+)
 from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
 from soft_body_volume_contact import point_inside_closed_surface
 from soft_body_stair_geometry import add_staircase, add_curved_receivers, collision_segments, project_inside_stair
@@ -169,31 +174,57 @@ def marble_material(variant: SoftBodyVariant):
 
 
 def background_material(variant: SoftBodyVariant):
+    """A lit cyclorama rather than a flat emitting wall.
+
+    The backdrop used to be pure emission, so it could not be lit and could
+    not receive a shadow: every body floated in an even grey with nothing
+    behind it. A rough diffuse surface puts the studio back. The bodies now
+    drop a soft shadow onto it, and a pool of light centred behind the action
+    falls off towards the edges, which is what gives the frame its depth and
+    keeps the eye on the capsule instead of the corners.
+    """
     palette = variant.palette
-    background_low = mix_color(palette.background_low, (0.36, 0.41, 0.47), 0.82)
-    background_high = mix_color(palette.background_high, (0.55, 0.60, 0.65), 0.82)
+    deep = mix_color(palette.background_low, (0.22, 0.26, 0.32), 0.74)
+    pool = mix_color(palette.background_high, (0.74, 0.78, 0.83), 0.74)
     value = bpy.data.materials.new(f"{palette.label} clouded studio")
     value.use_nodes = True
     nodes, links = value.node_tree.nodes, value.node_tree.links
     shader = nodes.get("Principled BSDF")
-    output = nodes.get("Material Output")
-    coordinates = nodes.new("ShaderNodeTexCoord")
+    shader.inputs["Roughness"].default_value = 0.94
+    if "Specular" in shader.inputs:
+        shader.inputs["Specular"].default_value = 0.06
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    # Distance from a point sitting behind the action, in world units, so the
+    # pool follows the obstacle family instead of a texture's own axes.
+    centre = nodes.new("ShaderNodeVectorMath")
+    centre.operation = "DISTANCE"
+    centre.inputs[1].default_value = (
+        variant.obstacle.camera_target_x, BACKDROP_DISTANCE, variant.obstacle.camera_target_z + 0.6,
+    )
+    falloff = nodes.new("ShaderNodeMapRange")
+    falloff.inputs["From Min"].default_value = 2.2
+    falloff.inputs["From Max"].default_value = 12.0
+    falloff.clamp = True
+    # A whisper of cloud keeps the gradient from banding on a flat wall.
     noise = nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 1.45
+    noise.inputs["Scale"].default_value = 1.15
     noise.inputs["Detail"].default_value = 3.1
     noise.inputs["Roughness"].default_value = 0.75
+    clouded = nodes.new("ShaderNodeMixRGB")
+    clouded.blend_type = "MIX"
+    clouded.inputs["Fac"].default_value = 0.12
     ramp = nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].position = 0.25
-    ramp.color_ramp.elements[0].color = (*background_low, 1)
-    ramp.color_ramp.elements[1].position = 0.77
-    ramp.color_ramp.elements[1].color = (*background_high, 1)
-    emission = nodes.new("ShaderNodeEmission")
-    emission.inputs["Strength"].default_value = 0.72
-    links.new(coordinates.outputs["Generated"], noise.inputs["Vector"])
-    links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
-    links.new(ramp.outputs["Color"], emission.inputs["Color"])
-    links.new(emission.outputs["Emission"], output.inputs["Surface"])
-    nodes.remove(shader)
+    ramp.color_ramp.elements[0].position = 0.0
+    ramp.color_ramp.elements[0].color = (*pool, 1)
+    ramp.color_ramp.elements[1].position = 1.0
+    ramp.color_ramp.elements[1].color = (*deep, 1)
+    links.new(geometry.outputs["Position"], centre.inputs[0])
+    links.new(geometry.outputs["Position"], noise.inputs["Vector"])
+    links.new(centre.outputs["Value"], falloff.inputs["Value"])
+    links.new(falloff.outputs["Result"], clouded.inputs["Color1"])
+    links.new(noise.outputs["Fac"], clouded.inputs["Color2"])
+    links.new(clouded.outputs["Color"], ramp.inputs["Fac"])
+    links.new(ramp.outputs["Color"], shader.inputs["Base Color"])
     return value
 
 
@@ -2437,12 +2468,19 @@ def add_area(name: str, location, energy: float, size: float, color, target=(0.0
 
 
 def add_background(value):
-    bpy.ops.mesh.primitive_plane_add(size=2, location=(0.0, 3.2, 3.25), rotation=(math.pi / 2, 0.0, 0.0))
+    # The rim light sits at y=2.8. With the wall at 3.2 its rectangle printed
+    # itself on the backdrop with hard edges, which was invisible while the
+    # backdrop emitted its own light and became a glaring panel as soon as it
+    # was lit. Standing the wall back spreads that footprint into a soft pool
+    # and lets the bodies drop a believable shadow instead of a hard copy.
+    bpy.ops.mesh.primitive_plane_add(
+        size=2, location=(0.0, BACKDROP_DISTANCE, 3.25), rotation=(math.pi / 2, 0.0, 0.0),
+    )
     backdrop = bpy.context.object
     backdrop.name = "Horizonless clouded backdrop"
     # The complete backdrop must cover the widened multi-body cameras too;
     # otherwise its lower edge exposes a dark world-colour "floor".
-    backdrop.scale = (20.0, 20.0, 1.0)
+    backdrop.scale = (BACKDROP_HALF_EXTENT, BACKDROP_HALF_EXTENT, 1.0)
     backdrop.data.materials.append(value)
     return backdrop
 
@@ -2667,8 +2705,12 @@ def main() -> None:
     scene.eevee.gtao_distance = 2.5
     scene.eevee.gtao_factor = 1.05
     scene.eevee.use_bloom = True
-    scene.eevee.bloom_intensity = 0.008
-    scene.eevee.bloom_radius = 2.0
+    # The gold carries the shot, and its specular highlight was rendered
+    # clinically sharp. A little bloom around it is what separates a product
+    # render from a viewport grab; enough to feel, not enough to haze.
+    scene.eevee.bloom_intensity = 0.026
+    scene.eevee.bloom_radius = 3.2
+    scene.eevee.bloom_threshold = 1.1
     scene.eevee.use_soft_shadows = True
     scene.eevee.use_ssr = True
     scene.eevee.ssr_quality = 1.0
