@@ -126,17 +126,23 @@ export const CAPTIONS = Object.freeze({
 
 // Two tags stay put so the account keeps one address, two move with the
 // day so two posts never carry an identical footer.
+//
+// The fixed pair used to be #softbody, and TikTok's own numbers argued
+// against it: #softbodysimulation carries 78.2M views against 12.5M for
+// #softbodyphysics, and the search box completes "soft body" into chubby
+// body and body trimmer before it reaches anything three dimensional. The
+// short form is ambiguous on this platform; the long one is the genre.
 const GAMEPLAY_TAGS = Object.freeze([
-  ['#softbody', '#satisfying', '#oddlysatisfying', '#simulation'],
-  ['#softbody', '#satisfying', '#physics', '#3danimation'],
-  ['#softbody', '#satisfying', '#simulation', '#blender'],
-  ['#softbody', '#satisfying', '#asmr', '#oddlysatisfying'],
-  ['#softbody', '#satisfying', '#3dart', '#physics'],
+  ['#softbodysimulation', '#satisfying', '#oddlysatisfying', '#simulation'],
+  ['#softbodysimulation', '#satisfying', '#softbodyphysics', '#3danimation'],
+  ['#softbodysimulation', '#satisfying', '#simulation', '#blender'],
+  ['#softbodysimulation', '#satisfying', '#asmr', '#oddlysatisfying'],
+  ['#softbodysimulation', '#satisfying', '#3dart', '#physics'],
   // Public listings for this genre pair #satisfyingvideo with
   // #3danimation. #cinema4d travels with them too and is left out: the
   // renders are Blender, and a tag that lies about the tool is a tag
   // the audience it attracts will bounce off.
-  ['#softbody', '#satisfying', '#satisfyingvideo', '#3danimation'],
+  ['#softbodysimulation', '#satisfying', '#satisfyingvideo', '#3danimation'],
 ]);
 
 function hash(value) {
