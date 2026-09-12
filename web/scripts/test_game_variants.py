@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import math
+import random
 import re
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ from soft_body_variants import (
     PHYSICS_HZ,
     AUTO_OBSTACLE_EPOCH,
     AUTO_OBSTACLE_KEYS,
+    OBSTACLE_KEYS,
     auto_obstacle_cycle,
     rotated_auto_obstacle,
     OBSTACLES,
@@ -31,6 +33,7 @@ from soft_body_variants import (
     natural_ramp_exit_time,
     obstacle_collision_radius_scale,
     obstacle_drag_retention_per_second,
+    minimum_complete_attempt_seconds,
     obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
     published_attempt_frame_spans,
@@ -554,6 +557,32 @@ class SoftBodyVariantTests(unittest.TestCase):
             PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_spans": [
                 list(span) for span in stage_frame_spans(900, 5, "moving-slide", variant.stages)]},
                 variant, 900, 30)
+
+    def test_every_layout_the_editor_produces_is_accepted_by_the_assembly(self):
+        # The editor cuts in Blender and the assembly validates hours later in
+        # another job. A layout one accepts and the other refuses would only
+        # show up at the end of a five hour render, so the contract is checked
+        # here over every family and any measurement the scout could return.
+        rng = random.Random(20260912)
+        for _trial in range(120):
+            seed = rng.randrange(1, 0x7fffffff)
+            variant = variant_for_seed(seed, rng.choice(("auto",) + OBSTACLE_KEYS))
+            spans = stage_frame_spans(900, len(variant.stages), variant.obstacle.key, variant.stages)
+            reference, minimums = [], []
+            for softness, (start, end) in zip(variant.stages, spans):
+                for first, last in stage_attempt_frame_spans(start, end, 30, variant.obstacle.key, softness):
+                    reference.append((first, last))
+                    minimums.append(round(minimum_complete_attempt_seconds(variant.obstacle.key, softness) * 30))
+            tail = max(1, round(0.25 * 30))
+            useful = tuple(rng.randint(1, last - first + 1) + tail for first, last in reference)
+            published = published_attempt_frame_spans(900, tuple(reference), useful, tuple(minimums))
+            self.assertEqual(sum(end - start + 1 for start, end in published), 900)
+            attempts, levels, counts = PREMIUM_RENDERER.published_attempt_timeline(
+                {"attempt_spans": [list(span) for span in published]}, variant, 900, 30)
+            self.assertEqual(attempts, published)
+            self.assertEqual(levels[0][0], 1)
+            self.assertEqual(levels[-1][1], 900)
+            self.assertEqual(sum(counts), len(published))
 
     def test_native_stair_assembly_requires_outlet_evidence(self):
         variant = variant_for_seed(734193085, "stair-cascade")
