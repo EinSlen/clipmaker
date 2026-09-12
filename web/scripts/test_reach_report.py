@@ -53,6 +53,28 @@ class ExportReadingTests(unittest.TestCase):
                 reach_report.read_export(useless)
 
 
+class ExportDiscoveryTests(unittest.TestCase):
+    def test_a_guessed_file_has_to_look_like_a_tiktok_export(self):
+        # Picking the newest CSV in Downloads found an unrelated ad placement
+        # report, which carries a date column and a views column too, and
+        # reported three million views as if they were the account's.
+        for name in ("tiktok-analytics.csv", "Post_analytics_2026.csv",
+                     "creator_export.csv", "video-list.csv"):
+            self.assertTrue(reach_report.looks_like_export(Path(name)), name)
+        for name in ("kwords-placement-report-2026-07-15.csv", "budget.csv",
+                     "export.csv", "sales_2026.csv"):
+            self.assertFalse(reach_report.looks_like_export(Path(name)), name)
+
+    def test_discovery_returns_nothing_rather_than_the_wrong_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "kwords-placement-report.csv").write_text("date,views\n", encoding="utf-8")
+            self.assertIsNone(reach_report.newest_export([folder]))
+            wanted = folder / "tiktok-analytics.csv"
+            wanted.write_text("date,views\n", encoding="utf-8")
+            self.assertEqual(reach_report.newest_export([folder]), wanted)
+
+
 class GroupingTests(unittest.TestCase):
     def test_groups_are_ordered_by_median_and_keep_their_count(self):
         rows = [

@@ -6,7 +6,10 @@ is recomputed from the date, because it is all deterministic: the obstacle
 family follows the rotation, and the caption and tags follow the deck. Only
 the scene seed is drawn per render, and it is not a variable worth tuning.
 
-    python reach_report.py analytics.csv [--channel softbody-dvlad]
+    python reach_report.py [analytics.csv] [--channel softbody-dvlad]
+
+With no path it takes the newest CSV sitting in Downloads, so exporting
+from TikTok Studio and running this is the whole procedure.
 
 The report groups the days by what changed between them. It also says how
 little a handful of days can tell you, because one video a day against four
@@ -157,12 +160,46 @@ def report(rows, channel_id):
     )
 
 
+EXPORT_NAME_HINTS = ("tiktok", "analytic", "analyse", "post", "video", "creator")
+
+
+def looks_like_export(path: Path) -> bool:
+    """A date and a view count are not enough to call a file yours.
+
+    Picking the newest CSV in Downloads found an unrelated ad placement report,
+    which has a date column and a views column too, and reported three million
+    views as if they were the account's. A guessed file has to look the part.
+    """
+    name = path.name.lower()
+    return any(hint in name for hint in EXPORT_NAME_HINTS)
+
+
+def newest_export(folders=None):
+    """The most recent plausible export in Downloads, or nothing."""
+    candidates = []
+    for folder in folders or (Path.home() / "Downloads", Path.home() / "Téléchargements"):
+        if folder.is_dir():
+            candidates.extend(
+                path for path in folder.glob("*.csv")
+                if path.is_file() and looks_like_export(path)
+            )
+    return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("export", help="CSV exported from TikTok Studio analytics")
+    parser.add_argument("export", nargs="?", help="CSV exported from TikTok Studio analytics")
     parser.add_argument("--channel", default="softbody-dvlad")
     args = parser.parse_args()
-    rows = read_export(Path(args.export))
+    source = Path(args.export) if args.export else newest_export()
+    if source is None:
+        raise SystemExit(
+            "No CSV given, and nothing in Downloads looks like a TikTok export.\n"
+            "Export one from TikTok Studio, Analytics, or pass the path yourself."
+        )
+    if not args.export:
+        print(f"reading {source}")
+    rows = read_export(source)
     if not rows:
         raise SystemExit("The export carried no readable row.")
     report(rows, args.channel)
