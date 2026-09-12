@@ -2469,6 +2469,10 @@ def scouted_attempt_frame_spans(reference_attempts, variant, fps, frame_end):
     measures: each take is simulated again inside the final layout, and every
     published gate runs on that second simulation.
     """
+    if len(reference_attempts) < 2:
+        # A lone take owns the whole clip, so there is nowhere to spend a
+        # recovered frame. Skip the measurement instead of simulating twice.
+        return tuple((first, last) for *_take, first, last in reference_attempts)
     tail = max(1, round(0.25 * fps))
     useful, minimums = [], []
     for stage_index, softness, attempt_index, first, last in reference_attempts:
