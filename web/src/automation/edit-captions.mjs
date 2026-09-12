@@ -132,6 +132,11 @@ const GAMEPLAY_TAGS = Object.freeze([
   ['#softbody', '#satisfying', '#simulation', '#blender'],
   ['#softbody', '#satisfying', '#asmr', '#oddlysatisfying'],
   ['#softbody', '#satisfying', '#3dart', '#physics'],
+  // Public listings for this genre pair #satisfyingvideo with
+  // #3danimation. #cinema4d travels with them too and is left out: the
+  // renders are Blender, and a tag that lies about the tool is a tag
+  // the audience it attracts will bounce off.
+  ['#softbody', '#satisfying', '#satisfyingvideo', '#3danimation'],
 ]);
 
 function hash(value) {
