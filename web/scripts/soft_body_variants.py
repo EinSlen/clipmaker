@@ -114,6 +114,38 @@ def stage_time_spans(
     return tuple(zip(boundaries, boundaries[1:]))
 
 
+def attempt_target_seconds(obstacle_key: str, softness: int) -> float:
+    """Authored length of one complete take for this family."""
+
+    target = {
+        "moving-slide": 4.20,
+        "v-stairs": 3.45,
+        "pipe-bend": 3.35,
+        "peg-grid": 4.05,
+        "twin-gears": 3.25,
+        "compression-ring": 3.20,
+    }.get(obstacle_key, 6.0)
+    if obstacle_key == "peg-grid" and softness >= 50:
+        target = 3.25
+    if obstacle_key == "stair-cascade":
+        target = 3.45
+    return target
+
+
+def minimum_complete_attempt_seconds(obstacle_key: str, softness: int) -> float:
+    """Shortest take the edit may keep, for the split and for the re-timing."""
+
+    return {
+        "moving-slide": 3.00,
+        "stair-cascade": 3.05,
+        "v-stairs": 3.05,
+        "pipe-bend": 3.00,
+        "peg-grid": 3.00,
+        "twin-gears": 3.00,
+        "compression-ring": 3.00,
+    }.get(obstacle_key, attempt_target_seconds(obstacle_key, softness))
+
+
 def stage_attempt_frame_spans(
     start: int,
     end: int,
@@ -142,27 +174,8 @@ def stage_attempt_frame_spans(
     # stair attempt, cutting the second body halfway down the obstacle.  Equal
     # spans and a strict two-attempt ceiling guarantee complete actions and the
     # repeated 50/55% comparison visible in the source videos.
-    target_seconds = {
-        "moving-slide": 4.20,
-        "v-stairs": 3.45,
-        "pipe-bend": 3.35,
-        "peg-grid": 4.05,
-        "twin-gears": 3.25,
-        "compression-ring": 3.20,
-    }.get(obstacle_key, 6.0)
-    if obstacle_key == "peg-grid" and softness >= 50:
-        target_seconds = 3.25
-    if obstacle_key == "stair-cascade":
-        target_seconds = 3.45
-    minimum_complete_seconds = {
-        "moving-slide": 3.00,
-        "stair-cascade": 3.05,
-        "v-stairs": 3.05,
-        "pipe-bend": 3.00,
-        "peg-grid": 3.00,
-        "twin-gears": 3.00,
-        "compression-ring": 3.00,
-    }.get(obstacle_key, target_seconds)
+    target_seconds = attempt_target_seconds(obstacle_key, softness)
+    minimum_complete_seconds = minimum_complete_attempt_seconds(obstacle_key, softness)
     frame_count = end - start + 1
     duration = frame_count / fps
     attempt_count = max(1, min(2, round(duration / target_seconds)))
@@ -176,6 +189,71 @@ def stage_attempt_frame_spans(
         (boundaries[index], boundaries[index + 1] - 1)
         for index in range(attempt_count)
     )
+
+
+def published_attempt_frame_spans(
+    frame_count: int,
+    reference_spans: tuple[tuple[int, int], ...],
+    useful_lengths: tuple[int, ...],
+    minimum_lengths: tuple[int, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Re-time the authored edit around the action the physics actually shows.
+
+    The reference rhythm hands every take a fixed slot, so a rigid body thrown
+    clear of the portrait frame can leave a second of empty studio before the
+    cut, which the framing gate rightly refuses. Each take keeps only the
+    frames its action occupies, and the recovered frames are shared out over
+    the takes still on camera at their last frame. The complete movie still
+    lasts exactly ``frame_count`` frames and every cut still falls between
+    whole rendered frames.
+
+    Nothing here touches gravity, friction, the ramp sweep or a release: a
+    re-timed take is the same simulation observed for a different number of
+    frames.
+    """
+
+    if not reference_spans or len(reference_spans) != len(useful_lengths) or len(reference_spans) != len(minimum_lengths):
+        raise ValueError("Re-timing requires one useful and minimum length per take")
+    if frame_count < len(reference_spans):
+        raise ValueError("frame_count must provide at least one frame per take")
+    lengths = [
+        max(1, min(end - start + 1, max(minimum, useful)))
+        for (start, end), useful, minimum in zip(reference_spans, useful_lengths, minimum_lengths)
+    ]
+    recovered = frame_count - sum(lengths)
+    if recovered < 0:
+        return tuple(reference_spans)
+    if recovered:
+        total = sum(lengths)
+        shares = [recovered * length / total for length in lengths]
+        whole = [int(share) for share in shares]
+        order = sorted(range(len(lengths)), key=lambda index: (whole[index] - shares[index], index))
+        for index in order[: recovered - sum(whole)]:
+            whole[index] += 1
+        lengths = [length + share for length, share in zip(lengths, whole)]
+    spans = []
+    cursor = 1
+    for length in lengths:
+        spans.append((cursor, cursor + length - 1))
+        cursor += length
+    return tuple(spans)
+
+
+def stage_spans_from_attempt_spans(
+    attempt_spans: tuple[tuple[int, int], ...],
+    attempt_counts: tuple[int, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Group re-timed takes back into the level spans the captions follow."""
+
+    if sum(attempt_counts) != len(attempt_spans) or any(count < 1 for count in attempt_counts):
+        raise ValueError("Every level must own at least one of the listed takes")
+    spans = []
+    cursor = 0
+    for count in attempt_counts:
+        group = attempt_spans[cursor:cursor + count]
+        spans.append((group[0][0], group[-1][1]))
+        cursor += count
+    return tuple(spans)
 
 
 def deformation_response(softness: float) -> tuple[float, float, float]:

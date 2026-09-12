@@ -29,6 +29,7 @@ from soft_body_variants import (
     obstacle_drag_retention_per_second,
     obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
+    published_attempt_frame_spans,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
@@ -36,6 +37,7 @@ from soft_body_variants import (
     stage_motion_for,
     stage_release_delay,
     stage_selection_for,
+    stage_spans_from_attempt_spans,
     supported_body_damping,
     variant_for_seed,
 )
@@ -236,6 +238,38 @@ class SoftBodyVariantTests(unittest.TestCase):
                 self.assertTrue(all(end >= start for start, end in spans))
                 self.assertGreaterEqual(spans[-1][1] - spans[-1][0] + 1, 27)
 
+    def test_framing_reports_the_last_frame_that_still_shows_a_body(self):
+        variant = variant_for_seed(910103, "moving-slide")
+        def frames(position, count):
+            return [([position],)] * count
+        leaves_early = frames((0.0, 3.0), 41) + frames((-20.0, -20.0), 20)
+        self.assertEqual(
+            inspect_simulation_framing([leaves_early], variant, 30)["last_visible_frame"], 41)
+        self.assertEqual(
+            inspect_simulation_framing([frames((0.0, 3.0), 61)], variant, 30)["last_visible_frame"], 60)
+        self.assertIsNone(
+            inspect_simulation_framing([frames((-20.0, -20.0), 61)], variant, 30)["last_visible_frame"])
+
+    def test_published_takes_drop_empty_tails_and_keep_the_exact_duration(self):
+        reference = ((1, 133), (134, 248), (249, 356), (357, 464))
+        minimums = (90, 90, 90, 90)
+        spans = published_attempt_frame_spans(464, reference, (110, 200, 200, 200), minimums)
+        self.assertEqual(spans[0][0], 1)
+        self.assertEqual(spans[-1][1], 464)
+        for previous, following in zip(spans, spans[1:]):
+            self.assertEqual(previous[1] + 1, following[0])
+        self.assertLess(spans[0][1] - spans[0][0] + 1, 133)
+        self.assertGreaterEqual(spans[0][1] - spans[0][0] + 1, 110)
+        self.assertGreater(spans[1][1] - spans[1][0] + 1, 115)
+        # A take its action fills keeps the authored rhythm untouched, and a
+        # take shorter than a complete action is never published.
+        self.assertEqual(published_attempt_frame_spans(464, reference, (133, 115, 108, 108), minimums), reference)
+        self.assertEqual(published_attempt_frame_spans(464, reference, (1, 1, 1, 1), (133, 115, 108, 108)), reference)
+        self.assertEqual(
+            stage_spans_from_attempt_spans(spans, (1, 2, 1)), (spans[0], (spans[1][0], spans[2][1]), spans[3]))
+        with self.assertRaises(ValueError):
+            stage_spans_from_attempt_spans(spans, (1, 2))
+
     def test_multi_body_references_use_their_observed_stage_rhythm(self):
         spans = stage_frame_spans(900, 5, "peg-grid")
         self.assertEqual(tuple(end - start + 1 for start, end in spans), (120, 180, 210,210, 180))
@@ -381,6 +415,25 @@ class SoftBodyVariantTests(unittest.TestCase):
                     (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
             self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(frames, 900, 5, (), "peg-grid"), (121, 301, 511, 721))
 
+    def test_labels_and_cut_repairs_follow_the_published_take_timeline(self):
+        stages = (0, 15, 45, 75, 100)
+        spans = ((1, 113), (114, 231), (232, 453), (454, 689), (690, 900))
+        value = PREMIUM_RENDERER.build_video_filter(
+            30.0, stages, "moving-slide", PREMIUM_RENDERER.stage_label_time_spans(spans, 30))
+        self.assertIn("3.766", value)
+        self.assertIn("3.767", value)
+        self.assertIn("22.967", value)
+        self.assertNotIn("4.447", value)
+        self.assertIn("4.447", PREMIUM_RENDERER.build_video_filter(30.0, stages, "moving-slide"))
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            for boundary in (114, 232, 454, 690):
+                for index in (boundary, boundary + 1):
+                    (frames / f"frame_{index:04d}.png").write_bytes(str(index).encode())
+            self.assertEqual(PREMIUM_RENDERER.repair_stage_cut_frames(
+                frames, 900, 5, (), "moving-slide", stages, spans), (114, 232, 454, 690))
+            self.assertEqual((frames / "frame_0114.png").read_bytes(), b"115")
+
     def test_native_preflight_requires_every_body_and_rejects_failed_surfaces(self):
         variant = variant_for_seed(910103, "v-stairs")
         quality = []
@@ -393,18 +446,20 @@ class SoftBodyVariantTests(unittest.TestCase):
                     "rendered_surface": {"frames_checked": end - start + 1, "vertices_checked": 210946 * (end - start + 1),
                                          "subdivision": 3, "maximum_penetration": 0, "maximum_correction": 0.096382, "issues": []},
                     "inter_body_contact": {"issues": [], "frames_checked": end - start + 1}})
-        payload = {"preflight_schema": 3, "obstacle": "v-stairs", "stages": list(variant.stages),
-            "fps": 30, "duration": 30, "attempt_quality": quality}
+        payload = {"preflight_schema": 4, "obstacle": "v-stairs", "stages": list(variant.stages),
+            "fps": 30, "duration": 30, "attempt_quality": quality,
+            "attempt_spans": [list(span) for span in stage_frame_spans(900, 5, "v-stairs")]}
         self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
         # Another seed's 75% comparison must not silently reuse the old 85%
         # edit. Every proof, label and native span must follow the new clock.
         shorter = variant_for_seed(910104, "v-stairs")
+        shorter_spans = stage_frame_spans(900, 5, "v-stairs", shorter.stages)
         obsolete = [{**item, "softness": shorter.stages[item["stage"] - 1]} for item in quality]
-        shorter_payload = {**payload, "stages": list(shorter.stages), "attempt_quality": obsolete}
+        shorter_payload = {**payload, "stages": list(shorter.stages), "attempt_quality": obsolete,
+                           "attempt_spans": [list(span) for span in shorter_spans]}
         with self.assertRaisesRegex(ValueError, "timeline"):
             PREMIUM_RENDERER.validate_motion_preflight(shorter_payload, shorter, 900, 30)
         corrected = []
-        shorter_spans = stage_frame_spans(900, 5, "v-stairs", shorter.stages)
         for item in obsolete:
             start, end = shorter_spans[item["stage"] - 1]
             corrected.append({**item, "start_frame": start, "end_frame": end,
@@ -435,6 +490,67 @@ class SoftBodyVariantTests(unittest.TestCase):
                 PREMIUM_RENDERER.validate_motion_preflight({**payload,
                     "attempt_quality": [{**quality[0], "framing": invalid}, *quality[1:]]}, variant, 900, 30)
 
+    def test_published_timeline_must_cover_the_movie_with_every_take(self):
+        variant = variant_for_seed(910103, "v-stairs")
+        authored = stage_frame_spans(900, 5, "v-stairs", variant.stages)
+        retimed = ((authored[0][0], authored[0][1] - 20),
+                   *((start - 20, end - 20) for start, end in authored[1:-1]),
+                   (authored[-1][0] - 20, 900))
+        attempts, spans, counts = PREMIUM_RENDERER.published_attempt_timeline(
+            {"attempt_spans": [list(span) for span in retimed]}, variant, 900, 30)
+        self.assertEqual(attempts, retimed)
+        self.assertEqual(spans, retimed)
+        self.assertEqual(counts, (1, 1, 1, 1, 1))
+        for broken in (retimed[:-1],
+                       (*retimed[:-1], (retimed[-1][0], 899)),
+                       (*retimed[:2], (retimed[2][0] + 1, retimed[2][1]), *retimed[3:]),
+                       (*retimed[:-1], (retimed[-1][0], retimed[-1][0] + 10))):
+            with self.assertRaisesRegex(ValueError, "timeline"):
+                PREMIUM_RENDERER.published_attempt_timeline(
+                    {"attempt_spans": [list(span) for span in broken]}, variant, 900, 30)
+        for invalid in (None, "1,900", [[1, 900]], [[1.5, 900.5]] * 5):
+            with self.assertRaisesRegex(ValueError, "timeline"):
+                PREMIUM_RENDERER.published_attempt_timeline({"attempt_spans": invalid}, variant, 900, 30)
+
+    def test_assembly_accepts_the_retimed_daily_that_used_to_be_refused(self):
+        # The 12 September daily, re-timed: the rigid opening drops from 133
+        # to 113 frames and the seven remaining takes share those frames.
+        variant = variant_for_seed(339635668, "auto")
+        self.assertEqual(variant.obstacle.key, "moving-slide")
+        lengths = (113, 118, 111, 111, 118, 118, 106, 105)
+        self.assertEqual(sum(lengths), 900)
+        spans, cursor = [], 1
+        for length in lengths:
+            spans.append((cursor, cursor + length - 1))
+            cursor += length
+        quality, index = [], 0
+        for stage, (softness, count) in enumerate(zip(variant.stages, (1, 1, 2, 2, 2)), start=1):
+            for attempt, (start, end) in enumerate(spans[index:index + count], start=1):
+                count_frames = end - start + 1
+                quality.append({"stage": stage, "softness": softness, "attempt": attempt, "body": 1,
+                    "start_frame": start, "end_frame": end, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": count_frames, "maximum_empty_seconds": 0.3667,
+                                "maximum_side_exit_seconds": 0.3333, "issues": []},
+                    "rendered_surface": {"frames_checked": count_frames, "subdivision": 3,
+                                         "vertices_checked": 210946 * count_frames,
+                                         "maximum_penetration": 0, "maximum_correction": 0.0, "issues": []}})
+            index += count
+        payload = {"preflight_schema": 4, "obstacle": "moving-slide", "stages": list(variant.stages),
+                   "fps": 30, "duration": 30, "attempt_quality": quality,
+                   "attempt_spans": [list(span) for span in spans]}
+        self.assertEqual(PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30), quality)
+        _attempts, levels, _counts = PREMIUM_RENDERER.published_attempt_timeline(payload, variant, 900, 30)
+        self.assertEqual(levels, ((1, 113), (114, 231), (232, 453), (454, 689), (690, 900)))
+        value = PREMIUM_RENDERER.build_video_filter(
+            30.0, variant.stages, "moving-slide", PREMIUM_RENDERER.stage_label_time_spans(levels, 30))
+        self.assertIn("3.766", value)
+        self.assertNotIn("4.447", value)
+        # The authored rhythm is no longer a valid timeline for this render.
+        with self.assertRaisesRegex(ValueError, "timeline"):
+            PREMIUM_RENDERER.validate_motion_preflight({**payload, "attempt_spans": [
+                list(span) for span in stage_frame_spans(900, 5, "moving-slide", variant.stages)]},
+                variant, 900, 30)
+
     def test_native_stair_assembly_requires_outlet_evidence(self):
         variant = variant_for_seed(734193085, "stair-cascade")
         reports = []
@@ -454,8 +570,9 @@ class SoftBodyVariantTests(unittest.TestCase):
                                          "contact_model": "closed-stair-volume-v1", "outside_vertices_moved": 0,
                                          "classification": "independent-three-ray-parity"},
                     "inter_body_contact": {"issues": [], "frames_checked": count}})
-        payload = {"preflight_schema": 3, "obstacle": "stair-cascade", "stages": list(variant.stages),
-                   "fps": 30, "duration": 30, "attempt_quality": reports}
+        payload = {"preflight_schema": 4, "obstacle": "stair-cascade", "stages": list(variant.stages),
+                   "fps": 30, "duration": 30, "attempt_quality": reports,
+                   "attempt_spans": [list(span) for span in stage_frame_spans(900, 5, "stair-cascade")]}
         PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30)
         broken = {**payload, "attempt_quality": [{**reports[0],
                   "framing": {**reports[0]["framing"], "outlet": None}}, *reports[1:]]}
@@ -819,7 +936,7 @@ class SoftBodyAudioTests(unittest.TestCase):
                 self.assertGreater(source.getnframes(), 10_000)
         audio_filter = PREMIUM_RENDERER.build_continuous_audio_filter(0.58)
         self.assertIn("sidechaincompress", audio_filter)
-        self.assertIn("loudnorm=I=-20:TP=-1.5:LRA=10", audio_filter)
+        self.assertIn("loudnorm=I=-18:TP=-1.5:LRA=10", audio_filter)
 
 
 class GameEngineTests(unittest.TestCase):

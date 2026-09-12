@@ -26,11 +26,13 @@ from soft_body_variants import (
     REFERENCE_SCENE_OFFSET_X,
     SoftBodyVariant,
     deformation_response,
+    minimum_complete_attempt_seconds,
     natural_ramp_exit_time,
     obstacle_collision_radius_scale,
     obstacle_drag_retention_per_second,
     obstacle_specimen_depth_offsets,
     obstacle_specimen_offsets,
+    published_attempt_frame_spans,
     ramp_motion_state,
     solver_timing,
     stage_attempt_frame_spans,
@@ -38,6 +40,7 @@ from soft_body_variants import (
     stage_motion_for,
     stage_release_delay,
     stage_selection_for,
+    stage_spans_from_attempt_spans,
     supported_body_damping,
     variant_for_seed,
     variant_summary,
@@ -1107,6 +1110,7 @@ def _chain_ticks(
     stage_index: int,
     instance_offset_x: float = 0.0,
     instance_rotation_offset: float = 0.0,
+    authored_frame_count: int | None = None,
 ):
     softness = softness_percent / 100.0
     node_count = 41
@@ -1168,7 +1172,10 @@ def _chain_ticks(
     frames.physics_dt = dt
     impact_memory = 0.0
     node_impact_memory = [0.0] * node_count
-    trial_duration = frame_count / fps
+    # The authored slot owns the release hold and the ramp release window, not
+    # the published one. Cutting a take where its action ends is an edit
+    # decision, so it must leave the preceding fall exactly as it was.
+    trial_duration = (authored_frame_count or frame_count) / fps
     release_delay = stage_release_delay(trial_duration, variant.obstacle.key)
     gravity_multiplier = {
         "stair-cascade": 0.62,
@@ -1543,12 +1550,13 @@ def simulate_chain(*args, **kwargs):
             return completed.value
 
 
-def simulate_specimens(softness, frame_count, fps, variant, stage_index):
+def simulate_specimens(softness, frame_count, fps, variant, stage_index, authored_frame_count=None):
     offsets = obstacle_specimen_offsets(variant.obstacle.key)
     depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
     generators = [
         _chain_ticks(softness, frame_count, fps, variant, stage_index, offset,
-                     (0.045 if index == 0 else -0.045) if len(offsets) > 1 else 0.0)
+                     (0.045 if index == 0 else -0.045) if len(offsets) > 1 else 0.0,
+                     authored_frame_count)
         for index, offset in enumerate(offsets)
     ]
     while True:
@@ -2452,6 +2460,42 @@ def add_camera(variant: SoftBodyVariant):
     return camera
 
 
+def scouted_attempt_frame_spans(reference_attempts, variant, fps, frame_end):
+    """Measure every authored take, then re-time the edit around its action.
+
+    The five-level rhythm is written for takes that land. A rigid body thrown
+    clear of the portrait frame by the sweeping ramp finishes a second early
+    and would leave empty studio on screen until the cut. This pass only
+    measures: each take is simulated again inside the final layout, and every
+    published gate runs on that second simulation.
+    """
+    if len(reference_attempts) < 2:
+        # A lone take owns the whole clip, so there is nowhere to spend a
+        # recovered frame. Skip the measurement instead of simulating twice.
+        return tuple((first, last) for *_take, first, last in reference_attempts)
+    tail = max(1, round(0.25 * fps))
+    useful, minimums = [], []
+    for stage_index, softness, attempt_index, first, last in reference_attempts:
+        authored = last - first + 1
+        simulations = simulate_specimens(
+            softness, authored, fps, variant,
+            stage_index + attempt_index * len(variant.stages),
+        )
+        framing = inspect_simulation_framing(simulations, variant, fps)
+        print(json.dumps({"phase": "scout", "obstacle": variant.obstacle.key,
+                          "softness": softness, "attempt": attempt_index + 1,
+                          "authored_frames": authored,
+                          "last_visible_frame": framing["last_visible_frame"]}), flush=True)
+        useful.append((framing["last_visible_frame"] or authored) + tail)
+        minimums.append(round(minimum_complete_attempt_seconds(variant.obstacle.key, softness) * fps))
+    return published_attempt_frame_spans(
+        frame_end,
+        tuple((first, last) for _stage, _softness, _attempt, first, last in reference_attempts),
+        tuple(useful),
+        tuple(minimums),
+    )
+
+
 def main() -> None:
     args = arguments()
     args.frames = str(Path(args.frames).resolve())
@@ -2464,16 +2508,34 @@ def main() -> None:
     else:
         spans = ((1, frame_end),)
 
-    stage_spans = tuple(
-        (stage_index, start, end)
-        for stage_index, (start, end) in zip(stage_indices, spans)
-    )
-    trial_spans = tuple(
-        (stage_index + attempt_index * len(variant.stages), trial_start, trial_end)
-        for softness, (stage_index, start, end) in zip(stages, stage_spans)
-        for attempt_index, (trial_start, trial_end) in enumerate(
+    reference_attempts = tuple(
+        (stage_index, softness, attempt_index, first, last)
+        for softness, stage_index, (start, end) in zip(stages, stage_indices, spans)
+        for attempt_index, (first, last) in enumerate(
             stage_attempt_frame_spans(start, end, args.fps, variant.obstacle.key, softness)
         )
+    )
+    attempts = tuple(
+        (stage_index, softness, attempt_index, first, last, authored_end - authored_start + 1)
+        for (stage_index, softness, attempt_index, authored_start, authored_end), (first, last)
+        in zip(reference_attempts, scouted_attempt_frame_spans(
+            reference_attempts, variant, args.fps, frame_end,
+        ))
+    )
+    attempt_counts = tuple(
+        sum(1 for take in attempts if take[0] == stage_index)
+        for stage_index in stage_indices
+    )
+    published_spans = tuple((take[3], take[4]) for take in attempts)
+    stage_spans = tuple(
+        (stage_index, start, end)
+        for stage_index, (start, end) in zip(
+            stage_indices, stage_spans_from_attempt_spans(published_spans, attempt_counts),
+        )
+    )
+    trial_spans = tuple(
+        (stage_index + attempt_index * len(variant.stages), first, last)
+        for stage_index, _softness, attempt_index, first, last, _authored_frames in attempts
     )
 
     gold = liquid_gold_material(args.seed, variant)
@@ -2492,15 +2554,13 @@ def main() -> None:
     all_events = []
     attempt_quality = []
     attempt_cut_frames = []
-    for softness, (stage_index, start, end) in zip(stages, stage_spans):
-        attempt_spans = stage_attempt_frame_spans(
-            start,
-            end,
-            args.fps,
-            variant.obstacle.key,
-            softness,
+    for softness, (stage_index, _stage_start, _stage_end) in zip(stages, stage_spans):
+        attempt_spans = tuple(
+            (first, last, authored_frames)
+            for index, _softness, _attempt, first, last, authored_frames in attempts
+            if index == stage_index
         )
-        for attempt_index, (attempt_start, attempt_end) in enumerate(attempt_spans):
+        for attempt_index, (attempt_start, attempt_end, authored_frames) in enumerate(attempt_spans):
             attempt_objects = []
             attempt_reports = []
             print(json.dumps({"phase": "simulate", "obstacle": variant.obstacle.key,
@@ -2512,7 +2572,7 @@ def main() -> None:
             specimen_depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
             simulations = simulate_specimens(
                 softness, attempt_end - attempt_start + 1, args.fps, variant,
-                stage_index + attempt_index * len(variant.stages),
+                stage_index + attempt_index * len(variant.stages), authored_frames,
             )
             framing = inspect_simulation_framing(simulations, variant, args.fps)
             for instance_index, instance_offset in enumerate(specimen_offsets):
@@ -2569,12 +2629,13 @@ def main() -> None:
         events_path.write_text(
             json.dumps(
                 {
-                    "preflight_schema": 3,
+                    "preflight_schema": 4,
                     **variant_summary(variant),
                     "obstacle": variant.obstacle.key,
                     "fps": args.fps,
                     "duration": frame_end / args.fps,
                     "stages": list(stages),
+                    "attempt_spans": [list(span) for span in published_spans],
                     "attempt_cuts": attempt_cut_frames,
                     "attempt_quality": attempt_quality,
                     "events": all_events,

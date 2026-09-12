@@ -52,7 +52,7 @@ on:
       music_profile:
         description: Random reviewed spoken edit from the selected mood, or original instrumental
         required: false
-        default: edit-sad
+        default: original
         type: choice
         options: [edit-auto, edit-sad, edit-revenge, original, auto, revenge, sad-english]
       sound_pack:
@@ -139,7 +139,7 @@ jobs:
                   "chunk_size": int(os.environ.get("MANUAL_CHUNK_SIZE") or "15"),
                   "title": (os.environ.get("MANUAL_TITLE") or "HOW SOFT CAN IT GET?")[:52],
                   "scheduled": False,
-                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "edit-sad",
+                  "music_profile": os.environ.get("MANUAL_MUSIC_PROFILE") or "original",
                   "sound_pack": os.environ.get("MANUAL_SOUND_PACK") or "auto",
                   "music_volume": 0.58,
               })
