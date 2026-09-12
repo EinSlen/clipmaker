@@ -10,6 +10,12 @@
  * disk, so the shape of the payload never has to be guessed in advance.
  *
  *   node web/scripts/tiktok-analytics-agent.cjs --user dvlad [--headed] [--out file.json]
+ *   node web/scripts/tiktok-analytics-agent.cjs --user dvlad --search "soft body simulation"
+ *
+ * The search mode reads the public results page the same way a person does,
+ * to see what the genre posts and how it performs. It is bounded on purpose:
+ * one query, two scrolls, no crawl. TikTok's terms restrict automated
+ * collection, so keep it to the occasional look rather than a routine.
  *
  * Nothing is uploaded and nothing is changed on the account. The session file
  * is read, never printed.
@@ -126,15 +132,27 @@ async function run() {
     captured.push({ url: url.split('?')[0], query: url.split('?')[1] || '', payload });
   });
 
+  const query = typeof args.search === 'string' ? args.search.trim() : '';
   try {
-    for (const target of STUDIO_PAGES) {
-      await page.goto(target, { waitUntil: 'networkidle', timeout: 90_000 }).catch(() => {});
-      // One settle, not a polling loop: the charts fetch on load.
-      await page.waitForTimeout(6000);
+    if (query) {
+      const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query)}`;
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {});
+      await page.waitForTimeout(8000);
+      // Two scrolls, not an endless crawl: enough for a first page of results.
+      for (let step = 0; step < 2; step += 1) {
+        await page.mouse.wheel(0, 4000).catch(() => {});
+        await page.waitForTimeout(4000);
+      }
+    } else {
+      for (const target of STUDIO_PAGES) {
+        await page.goto(target, { waitUntil: 'networkidle', timeout: 90_000 }).catch(() => {});
+        // One settle, not a polling loop: the charts fetch on load.
+        await page.waitForTimeout(6000);
+      }
     }
     const signedIn = !/\/login/i.test(page.url());
     fs.writeFileSync(destination, `${JSON.stringify({
-      account: username, signedIn, capturedAt: new Date().toISOString(), responses: captured,
+      account: username, query, signedIn, capturedAt: new Date().toISOString(), responses: captured,
     }, null, 2)}\n`, 'utf8');
     console.log(`signed in: ${signedIn}`);
     console.log(`captured ${captured.length} JSON response(s)`);
