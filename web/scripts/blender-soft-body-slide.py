@@ -45,7 +45,12 @@ from soft_body_variants import (
     variant_for_seed,
     variant_summary,
 )
-from soft_body_framing import camera_location, inspect_simulation_framing
+from soft_body_framing import (
+    BACKDROP_DISTANCE,
+    BACKDROP_HALF_EXTENT,
+    camera_location,
+    inspect_simulation_framing,
+)
 from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
 from soft_body_volume_contact import point_inside_closed_surface
 from soft_body_stair_geometry import add_staircase, add_curved_receivers, collision_segments, project_inside_stair
@@ -166,10 +171,6 @@ def marble_material(variant: SoftBodyVariant):
     links.new(noise.outputs["Fac"], bump.inputs["Height"])
     links.new(bump.outputs["Normal"], shader.inputs["Normal"])
     return value
-
-
-# How far the studio wall stands behind the action.
-BACKDROP_DISTANCE = 9.0
 
 
 def background_material(variant: SoftBodyVariant):
@@ -2479,7 +2480,7 @@ def add_background(value):
     backdrop.name = "Horizonless clouded backdrop"
     # The complete backdrop must cover the widened multi-body cameras too;
     # otherwise its lower edge exposes a dark world-colour "floor".
-    backdrop.scale = (20.0, 20.0, 1.0)
+    backdrop.scale = (BACKDROP_HALF_EXTENT, BACKDROP_HALF_EXTENT, 1.0)
     backdrop.data.materials.append(value)
     return backdrop
 

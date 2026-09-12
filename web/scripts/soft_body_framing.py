@@ -10,6 +10,23 @@ import math
 from soft_body_variants import obstacle_specimen_depth_offsets
 
 
+# The studio wall stands this far behind the action, and reaches this far out
+# from its centre. Standing it back softened the rim light's footprint, and it
+# has to grow with the distance: the stair camera looks along the scene from
+# the side, so its frame lands twenty three units off centre on the wall. An
+# edge inside the frame would show the dark world colour behind it.
+BACKDROP_DISTANCE = 9.0
+BACKDROP_HALF_EXTENT = 40.0
+
+
+def backdrop_corners():
+    """World corners of the studio wall, for coverage checks."""
+    return tuple(
+        (x * BACKDROP_HALF_EXTENT, BACKDROP_DISTANCE, 3.25 + z * BACKDROP_HALF_EXTENT)
+        for x in (-1, 1) for z in (-1, 1)
+    )
+
+
 def camera_location(obstacle):
     if obstacle.key == "stair-cascade":
         # Face the outlet lanes more directly, keeping their exits inside the
