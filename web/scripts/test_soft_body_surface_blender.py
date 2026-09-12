@@ -795,6 +795,38 @@ class SurfaceContactTests(unittest.TestCase):
                     if softness == 0:
                         self.assertEqual(framing["maximum_side_exit_seconds"], 0.0, framing)
 
+    def test_daily_moving_slide_seed_drops_its_empty_comparison_tail(self):
+        """The 12 September daily held 1.03 s of empty studio before the cut.
+
+        Seed 339635668 throws the rigid capsule off the widest sweeping ramp
+        and out of the portrait frame long before the authored slot ends. The
+        re-timed take must be shorter, clean, and the exact same fall.
+        """
+
+        variant = variant_for_seed(339635668, "auto")
+        self.assertEqual(variant.obstacle.key, "moving-slide")
+        spans = renderer.stage_frame_spans(900, 5, variant.obstacle.key, variant.stages)
+        opening, following = spans[0], spans[1]
+        authored = renderer.simulate_specimens(0, opening[1] - opening[0] + 1, 30, variant, 0)
+        self.assertIn("empty-comparison-tail",
+                      renderer.inspect_simulation_framing(authored, variant, 30)["issues"])
+        published = renderer.scouted_attempt_frame_spans(
+            ((0, 0, 0, *opening), (1, variant.stages[1], 0, *following)),
+            variant, 30, following[1],
+        )
+        self.assertEqual(published[0][0], 1)
+        self.assertEqual(published[-1][1], following[1])
+        self.assertEqual(published[0][1] + 1, published[1][0])
+        self.assertLess(published[0][1], opening[1])
+        retimed = renderer.simulate_specimens(
+            0, published[0][1], 30, variant, 0, opening[1] - opening[0] + 1,
+        )
+        framing = renderer.inspect_simulation_framing(retimed, variant, 30)
+        self.assertEqual(framing["issues"], [], framing)
+        for frame in range(len(retimed[0])):
+            for expected, actual in zip(authored[0][frame][0], retimed[0][frame][0]):
+                self.assertEqual((expected - actual).length, 0.0)
+
     def test_solver_velocity_limit_preserves_normal_motion_and_caps_only_spikes(self):
         dt = 1 / 240
         ordinary = Vector((0.04, -0.02))

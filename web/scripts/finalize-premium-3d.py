@@ -106,6 +106,9 @@ def main() -> None:
     motion_payload = json.loads(events_path.read_text(encoding="utf-8"))
     source_variant = source_variant_summary(variant, motion_payload)
     attempt_quality = renderer.validate_motion_preflight(motion_payload, variant, frame_count, args.fps)
+    _attempts, published_spans, _counts = renderer.published_attempt_timeline(
+        motion_payload, variant, frame_count, args.fps
+    )
     events, attempt_cuts = read_motion_events(events_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +118,8 @@ def main() -> None:
         staged_frames = root / "frames"
         stage_frame_sequence(frames, staged_frames, frame_count)
         repaired = renderer.repair_stage_cut_frames(
-            staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key, stages
+            staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key, stages,
+            published_spans,
         )
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
@@ -127,7 +131,10 @@ def main() -> None:
             soundtrack = prepare_edit_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id, synth_bed=renderer.synth_soft_body_bed)
         else:
             soundtrack = prepare_vocal_soundtrack(args.duration, music, args.seed, args.music_profile, args.date, args.channel_id)
-        video_filter = renderer.build_video_filter(args.duration, stages, variant.obstacle.key)
+        video_filter = renderer.build_video_filter(
+            args.duration, stages, variant.obstacle.key,
+            renderer.stage_label_time_spans(published_spans, args.fps),
+        )
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",

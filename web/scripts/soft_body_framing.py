@@ -117,7 +117,7 @@ def inspect_simulation_framing(simulations, variant, fps):
     radius = variant.shape.radius * 1.5
     pad_x = radius / (variant.obstacle.camera_scale * 9 / 16)
     pad_y = radius / variant.obstacle.camera_scale
-    empty_run = longest_empty = longest_side = 0
+    empty_run = longest_empty = longest_side = last_visible = 0
     side_runs = [0] * len(simulations)
     for frame in range(frame_count):
         any_visible = False
@@ -134,6 +134,8 @@ def inspect_simulation_framing(simulations, variant, fps):
             any_visible = any_visible or (max_x >= 0.0 and min_x <= 1.0 and max_y >= 0.0 and min_y <= 1.0)
         empty_run = 0 if any_visible else empty_run + 1
         longest_empty = max(longest_empty, empty_run)
+        if any_visible:
+            last_visible = frame + 1
     issues = []
     if longest_side > round(fps * 0.5):
         issues.append("body-left-camera-side")
@@ -145,5 +147,6 @@ def inspect_simulation_framing(simulations, variant, fps):
     return {"frames_checked": frame_count,
             "maximum_empty_seconds": round(longest_empty / fps, 4),
             "maximum_side_exit_seconds": round(longest_side / fps, 4),
+            "last_visible_frame": last_visible or None,
             "outlet": outlet,
             "issues": issues}

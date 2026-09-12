@@ -16,8 +16,9 @@ from array import array
 from pathlib import Path
 
 from soft_body_variants import (
-    OBSTACLE_KEYS, obstacle_specimen_offsets, stage_attempt_frame_spans,
-    stage_frame_spans, stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
+    OBSTACLE_KEYS, minimum_complete_attempt_seconds, obstacle_specimen_offsets,
+    stage_attempt_frame_spans, stage_frame_spans, stage_spans_from_attempt_spans,
+    stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
 )
 from sample_foley import resolve_pack, synth_sample_foley
 from soft_body_framing import validate_stair_outlet_evidence
@@ -31,24 +32,67 @@ def softness_stages(seed: int) -> tuple[int, ...]:
     return variant_for_seed(seed).stages
 
 
+def published_attempt_timeline(payload, variant, frame_count, fps):
+    """Rebuild the re-timed edit Blender published, and refuse any other one.
+
+    The authored rhythm is the starting point, not the published one: a take
+    whose action leaves the portrait frame early is cut there and its frames
+    are spent on the takes still on camera. The scene declares the result, so
+    the timeline is checked here instead of being recomputed: same number of
+    takes per level, contiguous, covering the complete movie, and no take
+    shorter than a complete action. Those bounds leave the re-timing free to
+    move a boundary while still refusing a timeline the evidence cannot cover.
+    """
+    reference = stage_frame_spans(frame_count, len(variant.stages), variant.obstacle.key, variant.stages)
+    counts = tuple(
+        len(stage_attempt_frame_spans(start, end, fps, variant.obstacle.key, softness))
+        for softness, (start, end) in zip(variant.stages, reference)
+    )
+    declared = payload.get("attempt_spans")
+    if (not isinstance(declared, list) or len(declared) != sum(counts)
+            or any(not isinstance(span, list) or len(span) != 2
+                   or any(type(value) is not int for value in span) for span in declared)):
+        raise ValueError("Missing or mismatched native 3D take timeline")
+    attempts = tuple((first, last) for first, last in declared)
+    cursor = 1
+    for first, last in attempts:
+        if first != cursor or last < first:
+            raise ValueError("Missing or mismatched native 3D take timeline")
+        cursor = last + 1
+    if cursor != frame_count + 1:
+        raise ValueError("Missing or mismatched native 3D take timeline")
+    spans = stage_spans_from_attempt_spans(attempts, counts)
+    index = 0
+    for softness, (authored_start, authored_end), count in zip(variant.stages, reference, counts):
+        shortest = min(
+            round(minimum_complete_attempt_seconds(variant.obstacle.key, softness) * fps),
+            (authored_end - authored_start + 1) // count,
+        )
+        if any(last - first + 1 < shortest for first, last in attempts[index:index + count]):
+            raise ValueError("Native 3D take timeline leaves an incomplete take")
+        index += count
+    return attempts, spans, counts
+
+
 def validate_motion_preflight(payload, variant, frame_count, fps):
     """Require native physics/surface evidence for every body of every take."""
     source_variant_summary(variant, payload)
     if (
-        payload.get("preflight_schema") != 3
+        payload.get("preflight_schema") != 4
         or payload.get("obstacle") != variant.obstacle.key
         or payload.get("stages") != list(variant.stages)
         or payload.get("fps") != fps
         or abs(float(payload.get("duration", 0)) - frame_count / fps) > 1e-6
     ):
         raise ValueError("Missing or mismatched native 3D preflight evidence")
+    attempts, _spans, counts = published_attempt_timeline(payload, variant, frame_count, fps)
     expected = set()
-    for stage_index, (softness, (start, end)) in enumerate(zip(
-        variant.stages, stage_frame_spans(frame_count, len(variant.stages), variant.obstacle.key, variant.stages),
-    ), start=1):
-        for attempt, (first, last) in enumerate(stage_attempt_frame_spans(start, end, fps, variant.obstacle.key, softness), start=1):
+    index = 0
+    for stage_index, (softness, count) in enumerate(zip(variant.stages, counts), start=1):
+        for attempt, (first, last) in enumerate(attempts[index:index + count], start=1):
             for body in range(1, len(obstacle_specimen_offsets(variant.obstacle.key)) + 1):
                 expected.add((stage_index, softness, attempt, body, first, last))
+        index += count
     quality = payload.get("attempt_quality")
     if not isinstance(quality, list) or len(quality) != len(expected):
         raise ValueError("Incomplete native 3D preflight: a trial or body is missing")
@@ -97,6 +141,11 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
     return quality
 
 
+def stage_label_time_spans(spans, fps):
+    """Second boundaries of the published levels, for the on-screen labels."""
+    return tuple(((start - 1) / fps, end / fps) for start, end in spans)
+
+
 def repair_stage_cut_frames(
     frames: Path,
     frame_count: int,
@@ -104,10 +153,11 @@ def repair_stage_cut_frames(
     extra_boundaries: tuple[int, ...] = (),
     obstacle_key: str | None = None,
     stage_values: tuple[int, ...] | None = None,
+    spans: tuple[tuple[int, int], ...] | None = None,
 ) -> tuple[int, ...]:
     """Replace Eevee's hidden-to-visible motion-blur ghost with a clean cut."""
     repaired: list[int] = []
-    spans = stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values)
+    spans = spans or stage_frame_spans(frame_count, stage_count, obstacle_key, stage_values)
     boundaries = {spans[stage_index][0] for stage_index in range(1, stage_count)}
     boundaries.update(
         boundary for boundary in extra_boundaries if 1 < boundary < frame_count
@@ -382,6 +432,7 @@ def build_video_filter(
     duration: float,
     stages: tuple[int, ...],
     obstacle_key: str | None = None,
+    spans: tuple[tuple[float, float], ...] | None = None,
 ) -> str:
     """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
@@ -389,7 +440,7 @@ def build_video_filter(
         "fps=30:round=up",
     ]
     for index, (softness, (start, stop)) in enumerate(
-        zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages))
+        zip(stages, spans or stage_time_spans(duration, len(stages), obstacle_key, stages))
     ):
         end = duration if index == len(stages) - 1 else stop - 0.001
         filters.append(
@@ -457,6 +508,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if motion_events.is_file():
             payload = json.loads(motion_events.read_text(encoding="utf-8"))
             attempt_quality = validate_motion_preflight(payload, variant, frame_count, fps)
+            _attempts, published_spans, _counts = published_attempt_timeline(payload, variant, frame_count, fps)
             exported_cuts = payload.get("attempt_cuts", [])
             if isinstance(exported_cuts, list):
                 attempt_cuts = tuple(
@@ -476,13 +528,17 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             attempt_cuts,
             variant.obstacle.key,
             stages,
+            published_spans,
         )
         if not events:
             # Silence is truthful here: Foley must correspond to a measured
             # collision or a clean geometric receiver entry exported by
             # Blender.  The ambient bed still keeps the mix alive.
             event_source = "no-physical-events"
-        video_filter = build_video_filter(args.duration, stages, variant.obstacle.key)
+        video_filter = build_video_filter(
+            args.duration, stages, variant.obstacle.key,
+            stage_label_time_spans(published_spans, fps),
+        )
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
             "-i", str(frames / "frame_%04d.png"),
