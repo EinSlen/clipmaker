@@ -17,26 +17,44 @@ test('each caption deck is original, unique and fits both platforms with full cr
       assert.ok(copy.youtubeTitle.length <= 100);
       assert.ok([copy.caption, ...copy.tags].join(' ').length <= 2000);
       assert.ok(copy.caption.endsWith('C'.repeat(1600)));
-      assert.match(copy.caption.split('\n')[0], /^[a-z .,]+$/u);
+      // The wordless deck asks questions on purpose: a question invites
+      // a reply, and replies are what the feed counts.
+      assert.match(copy.caption.split('\n')[0], /^[a-z ?.,]+$/u);
       seen.add(copy.captionId);
     }
     assert.equal(seen.size, deck.length, 'no repeated phrase within a full daily cycle');
   }
 });
 
-test('auto follows the selected recording mood, and legacy gameplay stays untouched', () => {
+test('auto follows the selected recording mood, and the wordless mix gets its own deck', () => {
   for (const moodKey of ['music_profile', 'musicProfile']) {
     for (const creditKey of ['music_credit', 'musicCredit']) {
       const raw = { [moodKey]: 'edit-sad', [creditKey]: 'Film credit / CC BY 3.0 / excerpt' };
       assert.equal(publicationCopy({ raw }).captionStyle, 'melancholic');
       assert.equal(publicationCopy({ raw }).caption.split('\n\n')[1], raw[creditKey]);
       assert.equal(publicationCopy({ raw: { ...raw, [moodKey]: 'edit-revenge' } }).captionStyle, 'revenge');
-      assert.equal(publicationCopy({ style: 'gameplay', raw }), null);
+      assert.equal(publicationCopy({ style: 'gameplay', raw }).captionStyle, 'gameplay');
     }
   }
+  // A wordless render used to return null here, so the publisher fell back to
+  // the single caption baked into the manifest and every post carried the same
+  // words and the same four tags.
   for (const raw of [undefined, null, {}, { music_profile: 'original' }, { music_profile: 'sad-english' }]) {
-    assert.equal(publicationCopy({ raw }), null);
+    const copy = publicationCopy({ raw, date: '2026-09-13' });
+    assert.equal(copy.captionStyle, 'gameplay');
+    assert.ok(copy.caption.length > 0);
+    assert.equal(copy.tags.length, 4);
   }
+  const week = new Set();
+  const footers = new Set();
+  for (let day = 0; day < 14; day += 1) {
+    const date = new Date(Date.UTC(2026, 8, 13 + day)).toISOString().slice(0, 10);
+    const copy = publicationCopy({ channelId: 'softbody-dvlad', date, raw: { music_profile: 'original' } });
+    week.add(copy.caption);
+    footers.add(copy.tags.join(' '));
+  }
+  assert.equal(week.size, 14, 'two days never carry the same caption');
+  assert.ok(footers.size >= 5, 'the tag footer moves with the day');
   assert.notEqual(publicationCopy({ style: 'melancholic', channelId: 'a' }).captionId,
     publicationCopy({ style: 'melancholic', channelId: 'b' }).captionId);
 });

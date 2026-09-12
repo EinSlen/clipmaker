@@ -17,7 +17,7 @@ RATE = 48_000
 PACKS = Path(__file__).resolve().parent.parent / "data" / "sound-packs"
 # Soft Body request values that resolve to a sampled pack. Anything else keeps
 # the synthesised premium Foley.
-ALIASES = {"auto": "funny", "funny": "funny"}
+ALIASES = {"auto": "funny", "funny": "funny", "meme": "meme"}
 
 
 def resolve_pack(requested: str) -> str | None:

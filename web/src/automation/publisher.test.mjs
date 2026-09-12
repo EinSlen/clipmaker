@@ -464,7 +464,9 @@ test('production 3D assembly rejects a video without the generated audio mix', a
   assert.match(workflow, /expected_audio = \("aac", "48000", 2\)/u);
   assert.match(workflow, /29\.9 <= duration <= 30\.1/u);
   assert.match(workflow, /metadata\.get\("music_generated"\) is not True/u);
-  assert.match(workflow, /sound_pack not in \("premium-foley", "funny"\)/u);
+  // Every shipped pack has to be named here, or the assembly refuses a
+  // finished render as missing its collision Foley clearance.
+  assert.match(workflow, /sound_pack not in \("premium-foley", "funny", "meme"\)/u);
   assert.match(workflow, /metadata\.get\("sound_pack_kind"\) != "sampled-one-shots"/u);
   // The spoken edit clearance is decided once, by the gate run at the top of
   // the same step. A second copy of those rules here went out of date and

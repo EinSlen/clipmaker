@@ -434,17 +434,52 @@ def premium_font_file() -> str:
     return ffmpeg_filter_path(Path(selected))
 
 
+HOOK_SECONDS = 2.0
+
+
+def hook_text(title: str) -> str:
+    """A drawtext-safe hook line.
+
+    The title is typed in the dashboard, and a filtergraph has no room for
+    quoting games: a colon, a comma or an apostrophe in it would break the
+    whole chain or, worse, change what the rest of the filter means. The hook
+    is display text, so anything outside a plain headline alphabet is dropped
+    rather than escaped.
+    """
+    cleaned = "".join(
+        character for character in str(title or "").upper()
+        if character.isalnum() or character in " ?!.-"
+    )
+    hook = " ".join(cleaned.split())[:52]
+    # Punctuation on its own is not a hook, it is noise on the opening frame.
+    return hook if any(character.isalnum() for character in hook) else ""
+
+
 def build_video_filter(
     duration: float,
     stages: tuple[int, ...],
     obstacle_key: str | None = None,
     spans: tuple[tuple[float, float], ...] | None = None,
+    title: str | None = None,
 ) -> str:
     """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
     filters = [
         "fps=30:round=up",
     ]
+    # The clip opened on a percentage and a capsule that has not moved yet,
+    # which asks a scrolling viewer for patience it will not give. The hook
+    # states the question for the first two seconds, then leaves the frame to
+    # the comparison. It rides under the label rather than replacing it, so
+    # the first stage keeps the reading the rest of the clip uses.
+    hook = hook_text(title) if title else ""
+    if hook:
+        filters.append(
+            f"drawtext=fontfile='{font_file}':text='{hook}':expansion=none:"
+            "fontcolor=white@0.92:fontsize=52:x=(w-text_w)/2:y=330:"
+            "shadowcolor=black@0.32:shadowx=0:shadowy=3:"
+            f"enable='between(t\\,0\\,{HOOK_SECONDS:.3f})'"
+        )
     for index, (softness, (start, stop)) in enumerate(
         zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages) if spans is None else spans)
     ):
@@ -556,6 +591,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         video_filter = build_video_filter(
             args.duration, stages, variant.obstacle.key,
             stage_label_time_spans(published_spans, fps),
+            args.title,
         )
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
