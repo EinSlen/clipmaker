@@ -446,28 +446,28 @@ class SoftBodyVariantTests(unittest.TestCase):
                 frames, 900, 5, (), "moving-slide", stages, spans), (114, 232, 454, 690))
             self.assertEqual((frames / "frame_0114.png").read_bytes(), b"115")
 
-    def test_opening_hook_states_the_question_then_leaves(self):
+    def test_opening_hook_states_the_arc_then_leaves(self):
         stages = (0, 15, 45, 75, 100)
-        with_hook = PREMIUM_RENDERER.build_video_filter(
-            30.0, stages, "moving-slide", None, "HOW SOFT CAN IT GET?")
-        self.assertIn("HOW SOFT CAN IT GET?", with_hook)
-        self.assertIn("between(t\\,0\\,2.000)", with_hook)
+        filter_chain = PREMIUM_RENDERER.build_video_filter(30.0, stages, "moving-slide")
+        # The channel title asked a question, which needs the viewer to know
+        # the format already. The hook names the arc instead, in the words
+        # the genre and the search box both use for it.
+        self.assertIn("0% TO 100% SOFT BODY", filter_chain)
+        self.assertIn("between(t\\,0\\,2.000)", filter_chain)
         # It rides under the label, never instead of it.
-        self.assertIn("text='0%'", with_hook)
-        # Nothing is drawn when the channel has no title to show.
-        for absent in (None, "", "   ", "!!!"):
-            self.assertNotIn("y=330", PREMIUM_RENDERER.build_video_filter(
-                30.0, stages, "moving-slide", None, absent))
+        self.assertIn("text='0%'", filter_chain)
 
-    def test_hook_text_cannot_break_the_filtergraph(self):
-        # The title is typed in the dashboard. A colon, a comma or a quote in
-        # it would break the chain or silently change what follows it.
-        for raw in ("It's 100%: soft, really", "drop:me,now", "a'b[c]d\\e"):
-            cleaned = PREMIUM_RENDERER.hook_text(raw)
-            self.assertFalse(set(cleaned) & set(":,'\\[]%"), cleaned)
-        self.assertEqual(PREMIUM_RENDERER.hook_text("  how   soft  "), "HOW SOFT")
-        self.assertEqual(len(PREMIUM_RENDERER.hook_text("A" * 80)), 52)
-        self.assertEqual(PREMIUM_RENDERER.hook_text(None), "")
+    def test_hook_follows_the_render_and_cannot_break_the_filtergraph(self):
+        # Read off the stages, so it can never promise an arc the render does
+        # not show, and can never carry a character the filtergraph would
+        # choke on or, worse, read as syntax.
+        self.assertEqual(PREMIUM_RENDERER.hook_text((0, 20, 40, 70, 100)), "0% TO 100% SOFT BODY")
+        self.assertEqual(PREMIUM_RENDERER.hook_text((10, 90)), "10% TO 90% SOFT BODY")
+        for empty in ((), (55,), (55, 55), None, ("0", "100")):
+            self.assertEqual(PREMIUM_RENDERER.hook_text(empty), "", empty)
+        self.assertFalse(set(PREMIUM_RENDERER.hook_text((0, 100))) & set(":,'\\[]"))
+        # A single stage preview draws no hook at all.
+        self.assertNotIn("y=330", PREMIUM_RENDERER.build_video_filter(30.0, (55,), "moving-slide"))
 
     def test_native_preflight_requires_every_body_and_rejects_failed_surfaces(self):
         variant = variant_for_seed(910103, "v-stairs")
