@@ -897,7 +897,7 @@ class SoftBodyAudioTests(unittest.TestCase):
                 self.assertGreater(source.getnframes(), 10_000)
         audio_filter = PREMIUM_RENDERER.build_continuous_audio_filter(0.58)
         self.assertIn("sidechaincompress", audio_filter)
-        self.assertIn("loudnorm=I=-20:TP=-1.5:LRA=10", audio_filter)
+        self.assertIn("loudnorm=I=-18:TP=-1.5:LRA=10", audio_filter)
 
 
 class GameEngineTests(unittest.TestCase):

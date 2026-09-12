@@ -407,7 +407,7 @@ def build_continuous_audio_filter(music_volume: float, vocals: bool = False, spo
         "[music][fxkey]sidechaincompress=threshold=0.020:ratio=2.8:attack=8:release=190:makeup=1[ducked];"
         "[ducked][fxmix]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
         "[mix]alimiter=limit=0.891:attack=5:release=70:level=false[limited];"
-        "[limited]loudnorm=I=-20:TP=-1.5:LRA=10[a]"
+        "[limited]loudnorm=I=-18:TP=-1.5:LRA=10[a]"
     )
 
 
