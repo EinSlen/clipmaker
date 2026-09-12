@@ -135,13 +135,23 @@ async function run() {
   const query = typeof args.search === 'string' ? args.search.trim() : '';
   try {
     if (query) {
-      const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query)}`;
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {});
-      await page.waitForTimeout(8000);
-      // Two scrolls, not an endless crawl: enough for a first page of results.
-      for (let step = 0; step < 2; step += 1) {
-        await page.mouse.wheel(0, 4000).catch(() => {});
-        await page.waitForTimeout(4000);
+      // The search page answered with its autocomplete and never with its
+      // results, so the hashtag pages carry the weight: those load an item
+      // list on their own and need no typing. The search URL stays in the
+      // list because its suggestions say what people actually type.
+      const targets = [
+        `https://www.tiktok.com/search/video?q=${encodeURIComponent(query)}`,
+        ...String(args.tags || 'softbodysimulation,softbodyphysics')
+          .split(',').map((tag) => `https://www.tiktok.com/tag/${encodeURIComponent(tag.trim())}`),
+      ];
+      for (const url of targets) {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {});
+        await page.waitForTimeout(9000);
+        // Two scrolls, not an endless crawl: enough for a first page.
+        for (let step = 0; step < 2; step += 1) {
+          await page.mouse.wheel(0, 4000).catch(() => {});
+          await page.waitForTimeout(4000);
+        }
       }
     } else {
       for (const target of STUDIO_PAGES) {
