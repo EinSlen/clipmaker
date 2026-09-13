@@ -190,6 +190,30 @@ test('stair upload requires a complete outlet beat for all three specimens', () 
   }
 });
 
+test('pipe upload requires the closed-volume contact the open rim needs', () => {
+  const base = native3dEvidence(123);
+  // One specimen, and a glass elbow that ends in mid air. The nearest-face
+  // classifier had no defined inside on that rim: it read a vertex hanging
+  // above the entrance as inside and dropped it a metre onto the glass.
+  const good = { ...base, variant_obstacle: 'pipe-bend',
+    attempt_quality: base.attempt_quality.filter((report) => report.body === 1).map((report) => ({
+      ...structuredClone(report),
+      rendered_surface: { ...report.rendered_surface, contact_model: 'closed-stair-volume-v1',
+        classification: 'independent-three-ray-parity', outside_vertices_moved: 0 },
+    })) };
+  assert.doesNotThrow(() => assertNative3dQuality(good, { seed: 123 }));
+  for (const patch of [{ contact_model: undefined }, { contact_model: 'old-shrinkwrap' },
+    { classification: undefined }, { classification: 'nearest-face' },
+    { outside_vertices_moved: undefined }, { outside_vertices_moved: 1 },
+    { outside_vertices_moved: false }, { outside_vertices_moved: NaN }]) {
+    const broken = structuredClone(good);
+    Object.assign(broken.attempt_quality[0].rendered_surface, patch);
+    assert.throws(() => assertNative3dQuality(broken, { seed: 123 }), /3D publication blocked/u);
+  }
+  // The outlet beat stays a staircase requirement: the pipe has none to show.
+  assert.equal(good.attempt_quality[0].framing.outlet, undefined);
+});
+
 test('daily 3D import prefers the latest default-branch render and accepts the cloud scheduler', async () => {
   const workflow = await repositoryFile('.github/workflows/daily-publisher.yml');
   const source = await fs.readFile(workflow, 'utf8');

@@ -550,8 +550,9 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_assembly_accepts_the_retimed_daily_that_used_to_be_refused(self):
         # The 12 September daily, re-timed: the rigid opening drops from 133
         # to 113 frames and the seven remaining takes share those frames.
-        variant = variant_for_seed(339635668, "auto")
-        self.assertEqual(variant.obstacle.key, "moving-slide")
+        # Named rather than resolved through "auto": this take is about the
+        # re-timed timeline, not about which family a seed draws.
+        variant = variant_for_seed(339635668, "moving-slide")
         lengths = (113, 118, 111, 111, 118, 118, 106, 105)
         self.assertEqual(sum(lengths), 900)
         spans, cursor = [], 1
@@ -646,6 +647,45 @@ class SoftBodyVariantTests(unittest.TestCase):
                       "rendered_surface": {**reports[0]["rendered_surface"], **patch}}, *reports[1:]]}
             with self.assertRaisesRegex(ValueError, "closed-volume"):
                 PREMIUM_RENDERER.validate_motion_preflight(broken, variant, 900, 30)
+
+    def test_native_pipe_assembly_requires_closed_volume_evidence(self):
+        # The pipe ends in mid air, and a nearest-face classifier has no
+        # defined inside on an open rim: it read a vertex hanging above the
+        # entrance as inside and dropped it a metre onto the glass, a 1.07
+        # correction against a 0.10 limit. The family answers with ray parity
+        # now, and the assembly refuses a report that quietly falls back.
+        variant = variant_for_seed(1807492708, "pipe-bend")
+        reports, spans = [], []
+        for stage, (softness, (start, end)) in enumerate(zip(
+                variant.stages, stage_frame_spans(900, 5, "pipe-bend")), 1):
+            takes = stage_attempt_frame_spans(start, end, 30, "pipe-bend", softness)
+            spans.extend(takes)
+            for attempt, (first, last) in enumerate(takes, 1):
+                count = last - first + 1
+                reports.append({"stage": stage, "softness": softness, "attempt": attempt, "body": 1,
+                    "start_frame": first, "end_frame": last, "issues": [], "surface": {"inside_contacts": 0},
+                    "framing": {"frames_checked": count, "maximum_empty_seconds": 0,
+                                "maximum_side_exit_seconds": 0, "issues": []},
+                    "rendered_surface": {"frames_checked": count, "vertices_checked": 210946 * count,
+                                         "subdivision": 3, "maximum_penetration": 0,
+                                         "maximum_correction": 0.03, "issues": [],
+                                         "contact_model": "closed-stair-volume-v1",
+                                         "outside_vertices_moved": 0,
+                                         "classification": "independent-three-ray-parity"}})
+        payload = {"preflight_schema": 4, "obstacle": "pipe-bend", "stages": list(variant.stages),
+                   "fps": 30, "duration": 30, "attempt_quality": reports,
+                   "attempt_spans": [list(span) for span in spans]}
+        PREMIUM_RENDERER.validate_motion_preflight(payload, variant, 900, 30)
+        for patch in ({"contact_model": None}, {"contact_model": "old-shrinkwrap"},
+                      {"classification": "nearest-face"}, {"outside_vertices_moved": 1},
+                      {"outside_vertices_moved": True}):
+            broken = {**payload, "attempt_quality": [{**reports[0],
+                      "rendered_surface": {**reports[0]["rendered_surface"], **patch}}, *reports[1:]]}
+            with self.assertRaisesRegex(ValueError, "closed-volume"):
+                PREMIUM_RENDERER.validate_motion_preflight(broken, variant, 900, 30)
+        # The stair outlet beat stays a staircase requirement; the pipe has
+        # no outlet to observe and must not be asked for one.
+        self.assertIsNone(reports[0]["framing"].get("outlet"))
 
     def test_fast_obstacles_repeat_during_long_levels(self):
         for obstacle in ("moving-slide", "pipe-bend", "twin-gears", "compression-ring"):
@@ -753,8 +793,12 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_automatic_obstacles_cover_only_reference_matched_scenes(self):
         resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}
         self.assertEqual(resolved, set(AUTO_OBSTACLE_KEYS))
+        # pipe-bend rejoined once its rendered skin could be classified
+        # against an open tube rim. The other two never matched a
+        # reference scene and stay out until they do.
+        self.assertIn("pipe-bend", resolved)
         self.assertTrue(
-            {"pipe-bend", "twin-gears", "compression-ring"}.isdisjoint(resolved)
+            {"twin-gears", "compression-ring"}.isdisjoint(resolved)
         )
 
     def test_capsule_presets_remain_slender_and_reference_scaled(self):
