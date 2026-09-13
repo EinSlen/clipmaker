@@ -575,14 +575,19 @@ OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
 # nearest-face classifier reads it as inside and drops it a metre onto the
 # glass. Parity answers the same question with three complete rays.
 CLOSED_VOLUME_OBSTACLES = frozenset({"stair-cascade", "pipe-bend"})
-AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid")
+AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid", "pipe-bend")
 AUTO_OBSTACLES = tuple(item for item in OBSTACLES if item.key in AUTO_OBSTACLE_KEYS)
 AUTO_OBSTACLE_EPOCH = date(2026, 1, 1)
+# pipe-bend joined on this morning, once its rendered contact model could
+# answer for the open rim of a tube. The rotation is derived from the date
+# rather than stored, so reading it backwards past this day would name a
+# family the post was never planned with.
+AUTO_OBSTACLE_ROTATION_CHANGED = date(2026, 9, 14)
 
 
 @lru_cache(maxsize=None)
 def auto_obstacle_cycle(index: int, channel_id: str = "daily") -> tuple[str, ...]:
-    """Order the four automatic families run in during one cycle.
+    """Order the automatic families a cycle runs through.
 
     Drawing the family from the render seed let the same scene come back three
     mornings in a row, which reads as a repeat even though every other axis

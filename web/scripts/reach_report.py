@@ -31,7 +31,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from soft_body_variants import rotated_auto_obstacle
+from soft_body_variants import (AUTO_OBSTACLE_KEYS, AUTO_OBSTACLE_ROTATION_CHANGED,
+                               rotated_auto_obstacle)
 
 DATE_HEADERS = ("date", "post time", "posted", "publish time", "published", "time", "create time")
 VIEW_HEADERS = ("video views", "views", "play count", "plays", "total views", "vues")
@@ -135,7 +136,9 @@ def report(rows, channel_id):
     copy = captions_for(days, channel_id)
     enriched = [
         {"day": day, "views": views,
-         "obstacle": rotated_auto_obstacle(day, channel_id),
+         "obstacle": (rotated_auto_obstacle(day, channel_id)
+                      if day >= AUTO_OBSTACLE_ROTATION_CHANGED
+                      else "planned before the rotation changed"),
          "caption": copy[day.isoformat()]["caption"],
          "tags": copy[day.isoformat()]["tags"]}
         for day, views in rows
@@ -153,7 +156,8 @@ def report(rows, channel_id):
         print(f"  {row['day']}  {row['views']:>9,}  {row['obstacle']:<14} {row['caption'][:44]}")
     smallest = min((count for _n, count, _m, _b in grouped(enriched, lambda row: row["obstacle"])), default=0)
     print(
-        "\nHow much of this to believe: one post a day across four obstacle families means "
+        f"\nHow much of this to believe: one post a day across "
+        f"{len(AUTO_OBSTACLE_KEYS)} obstacle families means "
         f"the thinnest group here holds {smallest} post(s). Views on a single video swing by "
         "an order of magnitude for reasons that have nothing to do with the render, so treat "
         "anything under roughly ten posts per group as a direction to test, never as a result."

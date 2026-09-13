@@ -550,8 +550,9 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_assembly_accepts_the_retimed_daily_that_used_to_be_refused(self):
         # The 12 September daily, re-timed: the rigid opening drops from 133
         # to 113 frames and the seven remaining takes share those frames.
-        variant = variant_for_seed(339635668, "auto")
-        self.assertEqual(variant.obstacle.key, "moving-slide")
+        # Named rather than resolved through "auto": this take is about the
+        # re-timed timeline, not about which family a seed draws.
+        variant = variant_for_seed(339635668, "moving-slide")
         lengths = (113, 118, 111, 111, 118, 118, 106, 105)
         self.assertEqual(sum(lengths), 900)
         spans, cursor = [], 1
@@ -792,8 +793,12 @@ class SoftBodyVariantTests(unittest.TestCase):
     def test_automatic_obstacles_cover_only_reference_matched_scenes(self):
         resolved = {variant_for_seed(seed).obstacle.key for seed in range(10_000, 10_500)}
         self.assertEqual(resolved, set(AUTO_OBSTACLE_KEYS))
+        # pipe-bend rejoined once its rendered skin could be classified
+        # against an open tube rim. The other two never matched a
+        # reference scene and stay out until they do.
+        self.assertIn("pipe-bend", resolved)
         self.assertTrue(
-            {"pipe-bend", "twin-gears", "compression-ring"}.isdisjoint(resolved)
+            {"twin-gears", "compression-ring"}.isdisjoint(resolved)
         )
 
     def test_capsule_presets_remain_slender_and_reference_scaled(self):

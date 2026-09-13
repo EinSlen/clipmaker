@@ -852,8 +852,10 @@ class SurfaceContactTests(unittest.TestCase):
     def test_daily_moving_slide_seed_stays_stable_and_in_frame(self):
         """Cover the scheduled seed that exposed recycled Verlet energy."""
 
-        variant = variant_for_seed(495917862, "auto")
-        self.assertEqual(variant.obstacle.key, "moving-slide")
+        # Named rather than drawn through "auto": the seed covers a
+        # moving-slide defect, and which family it happens to draw is
+        # a property of the rotation rather than of this regression.
+        variant = variant_for_seed(495917862, "moving-slide")
         spans = renderer.stage_frame_spans(900, 5, variant.obstacle.key, variant.stages)
         for stage in (0, 3, 4):
             softness = variant.stages[stage]
@@ -880,8 +882,7 @@ class SurfaceContactTests(unittest.TestCase):
         re-timed take must be shorter, clean, and the exact same fall.
         """
 
-        variant = variant_for_seed(339635668, "auto")
-        self.assertEqual(variant.obstacle.key, "moving-slide")
+        variant = variant_for_seed(339635668, "moving-slide")
         spans = renderer.stage_frame_spans(900, 5, variant.obstacle.key, variant.stages)
         opening, following = spans[0], spans[1]
         authored = renderer.simulate_specimens(0, opening[1] - opening[0] + 1, 30, variant, 0)

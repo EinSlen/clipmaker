@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import reach_report
 
@@ -73,6 +76,25 @@ class ExportDiscoveryTests(unittest.TestCase):
             wanted = folder / "tiktok-analytics.csv"
             wanted.write_text("date,views\n", encoding="utf-8")
             self.assertEqual(reach_report.newest_export([folder]), wanted)
+
+
+class FamilyAttributionTests(unittest.TestCase):
+    def test_days_planned_before_the_rotation_changed_are_not_given_a_family(self):
+        # The rotation is derived from the date, not stored with the post, so
+        # adding a family rewrites what every earlier day appears to have run.
+        # pipe-bend rejoining would have relabelled the whole back catalogue.
+        from datetime import timedelta
+        changed = reach_report.AUTO_OBSTACLE_ROTATION_CHANGED
+        rows = [(changed - timedelta(days=1), 10), (changed, 20), (changed + timedelta(days=1), 30)]
+        copy = {day.isoformat(): {"caption": "c", "tags": "#t"} for day, _views in rows}
+        printed = io.StringIO()
+        with patch.object(reach_report, "captions_for", return_value=copy), \
+                contextlib.redirect_stdout(printed):
+            reach_report.report(rows, "daily")
+        output = printed.getvalue()
+        self.assertIn("planned before the rotation changed", output)
+        self.assertIn(reach_report.rotated_auto_obstacle(changed, "daily"), output)
+        self.assertIn(reach_report.rotated_auto_obstacle(changed + timedelta(days=1), "daily"), output)
 
 
 class GroupingTests(unittest.TestCase):
