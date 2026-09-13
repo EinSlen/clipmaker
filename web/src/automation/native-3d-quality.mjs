@@ -10,6 +10,12 @@ const SPECIMENS = {
   'compression-ring': 1,
 };
 
+// Families whose rendered obstacles are closed solids, classified by ray
+// parity through the whole solid. A nearest-face test has no defined inside
+// on the open rim of a pipe, and a render that quietly falls back to one is
+// refused here as well as in the assembly.
+const CLOSED_VOLUME = new Set(['stair-cascade', 'pipe-bend']);
+
 // Recheck persisted/imported evidence at the upload boundary too. A ready MP4
 // from an older renderer must not bypass today's physics checks.
 export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle = 'auto', musicProfile }) {
@@ -60,10 +66,11 @@ export function assertNative3dQuality(metadata, { seed, duration = 30, obstacle 
     if (framing?.frames_checked !== end - start + 1 || !Array.isArray(framing?.issues) || framing.issues.length
       || !Number.isFinite(framing.maximum_empty_seconds) || framing.maximum_empty_seconds < 0 || framing.maximum_empty_seconds > 1
       || !Number.isFinite(framing.maximum_side_exit_seconds) || framing.maximum_side_exit_seconds < 0 || framing.maximum_side_exit_seconds > 0.5) fail();
-    if (metadata.variant_obstacle === 'stair-cascade') {
-      if (renderedSurface.contact_model !== 'closed-stair-volume-v1'
+    if (CLOSED_VOLUME.has(metadata.variant_obstacle)
+      && (renderedSurface.contact_model !== 'closed-stair-volume-v1'
         || renderedSurface.classification !== 'independent-three-ray-parity'
-        || renderedSurface.outside_vertices_moved !== 0) fail();
+        || renderedSurface.outside_vertices_moved !== 0)) fail();
+    if (metadata.variant_obstacle === 'stair-cascade') {
       const outlet = framing.outlet;
       if (outlet?.minimum_observation_seconds !== 0.35
         || !Array.isArray(outlet?.issues) || outlet.issues.length

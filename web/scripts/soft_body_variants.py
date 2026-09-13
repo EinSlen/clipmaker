@@ -567,6 +567,14 @@ OBSTACLES = (
     ObstaclePreset("compression-ring", "Compression ring", "7635255329932053780", 0.05, 6.40, 0.0, 0.0, 3.35, 9.50),
 )
 OBSTACLE_KEYS = tuple(item.key for item in OBSTACLES)
+# Families whose rendered obstacles are closed, outward oriented solids,
+# and which therefore classify the final skin by ray parity through the
+# whole solid rather than by the nearest face normal. That normal is
+# undefined on the rim of an open tube: a vertex hanging in the air above
+# the pipe entrance sits exactly on the boundary of the test, and a
+# nearest-face classifier reads it as inside and drops it a metre onto the
+# glass. Parity answers the same question with three complete rays.
+CLOSED_VOLUME_OBSTACLES = frozenset({"stair-cascade", "pipe-bend"})
 AUTO_OBSTACLE_KEYS = ("moving-slide", "stair-cascade", "v-stairs", "peg-grid")
 AUTO_OBSTACLES = tuple(item for item in OBSTACLES if item.key in AUTO_OBSTACLE_KEYS)
 AUTO_OBSTACLE_EPOCH = date(2026, 1, 1)

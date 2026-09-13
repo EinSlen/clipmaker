@@ -16,7 +16,8 @@ from array import array
 from pathlib import Path
 
 from soft_body_variants import (
-    OBSTACLE_KEYS, minimum_complete_attempt_seconds, obstacle_specimen_offsets,
+    CLOSED_VOLUME_OBSTACLES, OBSTACLE_KEYS, minimum_complete_attempt_seconds,
+    obstacle_specimen_offsets,
     stage_attempt_frame_spans, stage_frame_spans, stage_spans_from_attempt_spans,
     stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
 )
@@ -122,12 +123,13 @@ def validate_motion_preflight(payload, variant, frame_count, fps):
                    or not math.isfinite(framing[key]) or not 0 <= framing[key] <= limit
                    for key, limit in (("maximum_empty_seconds", 1.0), ("maximum_side_exit_seconds", 0.5)))):
             raise ValueError("Native 3D camera framing was not validated")
-        if variant.obstacle.key == "stair-cascade":
+        if variant.obstacle.key in CLOSED_VOLUME_OBSTACLES:
             if (rendered_surface.get("contact_model") != VOLUME_CONTACT
                 or rendered_surface.get("classification") != "independent-three-ray-parity"
                 or type(rendered_surface.get("outside_vertices_moved")) is not int
                 or rendered_surface["outside_vertices_moved"] != 0):
-                raise ValueError("Native stair closed-volume contact was not validated")
+                raise ValueError("Native closed-volume contact was not validated")
+        if variant.obstacle.key == "stair-cascade":
             validate_stair_outlet_evidence(framing.get("outlet"), framing["frames_checked"], fps)
         if len(obstacle_specimen_offsets(variant.obstacle.key)) > 1:
             between = item.get("inter_body_contact")

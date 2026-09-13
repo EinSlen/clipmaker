@@ -27,6 +27,14 @@ renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
 
+def segments_cross(first, second, third, fourth):
+    """Do two planar segments cross, endpoints excluded?"""
+    def side(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return ((side(third, fourth, first) > 0) != (side(third, fourth, second) > 0)
+            and (side(first, second, third) > 0) != (side(first, second, fourth) > 0))
+
+
 class SurfaceContactTests(unittest.TestCase):
     def setUp(self):
         renderer.reset_scene()
@@ -99,6 +107,75 @@ class SurfaceContactTests(unittest.TestCase):
             point.copy(), point.copy(), .18, 1, 1, 1 / 240, variant, 8, 0, True)
         self.assertFalse(inside_stair(position))
         self.assertLess((position - previous).length, 1e-6, "projection must not create kinetic energy")
+
+    def pipe_surface(self):
+        variant = variant_for_seed(1807492708, "pipe-bend")
+        renderer.add_obstacle_geometry(self.material, self.material, variant, 240, 30)
+        renderer.add_receiver(self.material, self.material, variant)
+        objects = tuple(bpy.context.collection.objects)
+        return variant, objects, renderer.ObstacleSurface(objects)
+
+    def test_pipe_bend_walls_are_watertight_and_never_fold_through_themselves(self):
+        from soft_body_stair_geometry import VOLUME_CONTACT
+        _variant, objects, surface = self.pipe_surface()
+        # Two glass walls, the rebound ring, the cup and its rim. Ray parity
+        # reads the whole set, so every one of them has to be a closed solid
+        # and has to be labelled: a mixed set is refused, not guessed.
+        self.assertEqual(len(objects), 5)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for obj in objects:
+            self.assertEqual(obj.get("contact_model"), VOLUME_CONTACT, obj.name)
+            mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph), depsgraph=depsgraph)
+            bm = renderer.bmesh.new()
+            try:
+                bm.from_mesh(mesh)
+                renderer.bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
+                renderer.bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+                self.assertTrue(all(edge.is_manifold and edge.is_contiguous for edge in bm.edges), obj.name)
+                self.assertGreater(bm.calc_volume(signed=True), 0, obj.name)
+            finally:
+                bm.free()
+                bpy.data.meshes.remove(mesh)
+
+        # The walls stand PIPE_WALL_OFFSET off the centreline, so a centreline
+        # turning tighter than that folds the inner wall through itself. The
+        # hand-drawn path this replaced turned at 0.31 against a 0.47 offset:
+        # the inner tube crossed its own geometry, and neither contact test
+        # has a defined inside there.
+        centerline = renderer.pipe_bend_centerline()
+        self.assertGreater(renderer.PIPE_BEND_RADIUS, renderer.PIPE_WALL_OFFSET * 2)
+        for index in range(1, len(centerline) - 1):
+            before, point, after = centerline[index - 1], centerline[index], centerline[index + 1]
+            first = Vector(point) - Vector(before)
+            second = Vector(after) - Vector(point)
+            area = abs(first.x * second.y - first.y * second.x) / 2
+            if area < 1e-12:
+                continue
+            span = (Vector(after) - Vector(before)).length
+            radius = first.length * second.length * span / (4 * area)
+            self.assertGreater(radius, renderer.PIPE_WALL_OFFSET, f"turn {index} folds the inner wall")
+
+        walls = renderer.static_obstacle_segments("pipe-bend")
+        for side, name in ((0, "inner"), (1, "outer")):
+            segments = walls[side::2]
+            path = [segments[0][0], *[segment[1] for segment in segments]]
+            for index, (point, center) in enumerate(zip(path, centerline)):
+                self.assertAlmostEqual((Vector(point) - Vector(center)).length, .47, places=2,
+                                       msg=f"{name} wall wanders at {index}")
+            for first in range(len(path) - 1):
+                for second in range(first + 2, len(path) - 1):
+                    self.assertFalse(segments_cross(path[first], path[first + 1],
+                                                    path[second], path[second + 1]),
+                                     f"{name} wall crosses itself at {first}/{second}")
+
+        # A body travels down the middle of the pipe, which has to read as
+        # outside the glass, while the wall centres have to read as inside.
+        tree = surface.at_frame(1)
+        for x, z in centerline[1:-1]:
+            self.assertFalse(renderer.point_inside_closed_surface(tree, Vector((x, 0, z))))
+        for start, end, _thickness in walls:
+            middle = (Vector(start) + Vector(end)) / 2
+            self.assertTrue(renderer.point_inside_closed_surface(tree, Vector((middle.x, 0, middle.y))))
 
     def test_closed_volume_contact_preserves_outside_points_in_all_three_lanes(self):
         from soft_body_stair_geometry import pipe_path

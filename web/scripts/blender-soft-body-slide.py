@@ -22,6 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 from soft_body_variants import (
+    CLOSED_VOLUME_OBSTACLES,
     OBSTACLE_KEYS,
     REFERENCE_SCENE_OFFSET_X,
     SoftBodyVariant,
@@ -53,7 +54,8 @@ from soft_body_framing import (
 )
 from soft_body_render_contact import add_final_surface_contact, build_contact_targets, inspect_rendered_surface
 from soft_body_volume_contact import point_inside_closed_surface
-from soft_body_stair_geometry import add_staircase, add_curved_receivers, collision_segments, project_inside_stair
+from soft_body_stair_geometry import (add_staircase, add_curved_receivers, collision_segments,
+                                      project_inside_stair, VOLUME_CONTACT)
 
 
 
@@ -347,6 +349,40 @@ def physics_ramp_slope(local_x: float, variant: SoftBodyVariant) -> float:
     return ramp_slope(local_x, variant, collision=True)
 
 
+PIPE_WALL_OFFSET = 0.47
+# The pipe walls stand PIPE_WALL_OFFSET off the centreline, so a centreline
+# turning tighter than that folds the inner wall through itself. The drawn
+# path this replaced turned at 0.31 near the exit: the inner glass tube
+# crossed its own geometry, and no contact test has a defined inside within
+# a solid that crosses itself. Two mirrored arcs state the radius
+# rather than leaving it to an interpolation, and this one is more than twice
+# the offset.
+PIPE_BEND_RADIUS = 1.05
+
+
+@lru_cache(maxsize=1)
+def pipe_bend_centerline():
+    """Vertical entry, two mirrored arcs, vertical exit above the rebound ring."""
+    entry_x, exit_x, top, bottom = -0.85, 0.36, 5.70, 2.92
+    turn = math.acos(1.0 - (exit_x - entry_x) / (2.0 * PIPE_BEND_RADIUS))
+    step = turn / 10.0
+    points = [(entry_x, top), (entry_x, top - 0.28)]
+    entry_center = Vector((entry_x + PIPE_BEND_RADIUS, top - 0.56))
+    for sample in range(11):
+        angle = step * sample
+        points.append(tuple(entry_center
+            + Vector((-math.cos(angle), -math.sin(angle))) * PIPE_BEND_RADIUS))
+    exit_center = (Vector(points[-1])
+        - Vector((math.cos(turn), math.sin(turn))) * PIPE_BEND_RADIUS)
+    for sample in range(1, 11):
+        angle = turn - step * sample
+        points.append(tuple(exit_center
+            + Vector((math.cos(angle), math.sin(angle))) * PIPE_BEND_RADIUS))
+    points.append((exit_x, (points[-1][1] + bottom) * 0.5))
+    points.append((exit_x, bottom))
+    return tuple(points)
+
+
 def obstacle_segments(variant: SoftBodyVariant):
     """Return visible/collision-aligned line obstacles in the simulation plane."""
     return static_obstacle_segments(variant.obstacle.key)
@@ -372,25 +408,9 @@ def static_obstacle_segments(key):
     if key == "pipe-bend":
         # An open elbow assembled from short tangent segments.  The glass mesh
         # below uses these exact coordinates, so contacts never float.
-        centerline = [
-            (-0.85, 5.70), (-0.85, 5.15), (-0.82, 4.65), (-0.68, 4.24),
-            (-0.42, 3.94), (-0.08, 3.75), (0.25, 3.55), (0.36, 3.24),
-            (0.36, 2.92),
-        ]
-        knots = [Vector(point) for point in centerline]
-        centerline = []
-        for index in range(len(knots) - 1):
-            a, b = knots[max(0, index - 1)], knots[index]
-            c, d = knots[index + 1], knots[min(index + 2, len(knots) - 1)]
-            for sample in range(4):
-                u = sample / 4.0
-                point = 0.5 * ((2.0 * b) + (-a + c) * u
-                    + (2.0 * a - 5.0 * b + 4.0 * c - d) * u * u
-                    + (-a + 3.0 * b - 3.0 * c + d) * u * u * u)
-                centerline.append(tuple(point))
-        centerline.append(tuple(knots[-1]))
+        centerline = pipe_bend_centerline()
         walls = []
-        half_opening = 0.47
+        half_opening = PIPE_WALL_OFFSET
         normals = []
         for start, end in zip(centerline, centerline[1:]):
             tangent = (Vector(end) - Vector(start)).normalized()
@@ -596,9 +616,16 @@ def add_obstacle_geometry(
         return (frame - start) / fps
 
     if key == "pipe-bend":
-        glass = material("Clear pipe glass", (0.66, 0.82, 0.92, 0.34), roughness=0.10, clearcoat=0.48)
-        glass.blend_method = "BLEND"
+        # The pipe was named glass and rendered as white plastic. Its alpha
+        # stayed at 1 while the blend mode was set to BLEND, so the only thing
+        # the transparency bought was Eevee sorting the tube against its own
+        # far wall, in dark bands every few centimetres down both walls.
+        # Transmission is what makes glass in Eevee, and it reads through
+        # screen space refraction rather than through alpha blending.
+        glass = material("Clear pipe glass", (0.66, 0.82, 0.92, 1.0), roughness=0.06, clearcoat=0.48)
         glass.use_screen_refraction = True
+        glass.node_tree.nodes["Principled BSDF"].inputs["Transmission"].default_value = 1.0
+        glass.node_tree.nodes["Principled BSDF"].inputs["IOR"].default_value = 1.45
         walls = obstacle_segments(variant)
         for side in range(2):
             side_segments = walls[side::2]
@@ -618,6 +645,7 @@ def add_obstacle_geometry(
             wall = bpy.data.objects.new(f"Continuous glass pipe wall {side + 1}", curve)
             bpy.context.collection.objects.link(wall)
             wall.data.materials.append(glass)
+            wall["contact_model"] = VOLUME_CONTACT
     else:
         for index, (start, end, thickness) in enumerate(obstacle_segments(variant)):
             midpoint = ((start[0] + end[0]) * 0.5, 0.0, (start[1] + end[1]) * 0.5)
@@ -670,6 +698,7 @@ def add_obstacle_geometry(
         bevel = rebound_ring.modifiers.new("Rounded rebound edge", "BEVEL")
         bevel.width = 0.018
         bevel.segments = 2
+        rebound_ring["contact_model"] = VOLUME_CONTACT
         circles = ()
     for index, (center, radius, _velocity, _angular_speed) in enumerate(circles):
         gear_root = None
@@ -2443,6 +2472,12 @@ def add_receiver_tube(marble, gold, variant: SoftBodyVariant):
     rim.data.materials.append(gold)
     for polygon in rim.data.polygons:
         polygon.use_smooth = True
+    if variant.obstacle.key in CLOSED_VOLUME_OBSTACLES:
+        # Parity reads the whole obstacle set, so the cup the body
+        # lands in has to answer the same way as the pipe above it.
+        # A mixed set is refused rather than silently downgraded.
+        wall["contact_model"] = VOLUME_CONTACT
+        rim["contact_model"] = VOLUME_CONTACT
     return wall, rim
 
 
@@ -2713,6 +2748,9 @@ def main() -> None:
     scene.eevee.bloom_threshold = 1.1
     scene.eevee.use_soft_shadows = True
     scene.eevee.use_ssr = True
+    # Every glass in the project asks for screen space refraction, which does
+    # nothing at all until the scene turns it on.
+    scene.eevee.use_ssr_refraction = True
     scene.eevee.ssr_quality = 1.0
     scene.eevee.ssr_max_roughness = 0.8
     if hasattr(scene.eevee, "use_high_quality_normals"):
