@@ -16,6 +16,21 @@ from mathutils import Vector
 # seam. Parity is undefined there, so only a vertex measurably away from the
 # surface can be called outside.
 BOUNDARY_DISTANCE = .00001
+# A ray that skims a wall instead of piercing it cannot be counted. At a few
+# degrees of incidence the same surface registers one crossing, two, or none,
+# depending on the last digit of the origin, so the parity of that ray is
+# undefined rather than merely imprecise. A vertex travelling down the hollow
+# receiver sits exactly there: the fixed directions run along the tube, and a
+# body correctly inside the empty bore was being reported 0.27 deep inside the
+# solid. Discard the unreadable ray and judge on the ones that pierce cleanly.
+GRAZING_COSINE = .1
+# Step past a counted crossing by a distance large enough that the same
+# triangle cannot answer twice, and still 750 times thinner than the thinnest
+# receiver wall, so no real crossing is stepped over.
+CROSSING_ADVANCE = .0001
+PARITY_DIRECTIONS = ((1.0, .173, .317), (-.31, 1.0, .127), (.219, -.341, 1.0))
+# Only read when the directions above disagree or cannot be read at all.
+TIE_BREAK_DIRECTIONS = ((.71, -.62, .41), (-.53, -.79, .33), (.17, .27, -.95), (-.86, .23, -.46))
 
 
 def inspect_volume_surface(body, obstacle_surface, start, end):
@@ -182,21 +197,37 @@ def moved_from_outside(tree, point):
     return not point_inside_closed_surface(tree, point)
 
 
+def ray_parity(tree, point, direction):
+    """Parity of one complete ray, or None when the ray cannot be read."""
+    origin, crossings = point.copy(), 0
+    for _ in range(64):
+        hit, normal, _face, _distance = tree.ray_cast(origin, direction)
+        if hit is None:
+            return crossings % 2
+        if abs(normal.dot(direction)) < GRAZING_COSINE:
+            return None
+        crossings += 1
+        origin = hit + direction * CROSSING_ADVANCE
+    return None
+
+
 def point_inside_closed_surface(tree, point):
-    """Three complete parity rays; unresolved rays fail conservatively."""
-    inside_votes = 0
-    for direction in (Vector((1.0, 0.173, 0.317)),
-                      Vector((-0.31, 1.0, 0.127)),
-                      Vector((0.219, -0.341, 1.0))):
-        direction.normalize()
-        origin, crossings = point.copy(), 0
-        for _ in range(64):
-            hit, _normal, _face, _distance = tree.ray_cast(origin, direction)
-            if hit is None:
-                break
-            crossings += 1
-            origin = hit + direction * 0.00001
-        else:
-            return True
-        inside_votes += crossings % 2
-    return inside_votes >= 2
+    """Majority parity of the rays that pierce cleanly; no reading fails safe."""
+    inside = readable = 0
+    for vector in PARITY_DIRECTIONS:
+        parity = ray_parity(tree, point, Vector(vector).normalized())
+        if parity is None:
+            continue
+        readable += 1
+        inside += parity
+    for vector in TIE_BREAK_DIRECTIONS:
+        if readable and inside * 2 != readable:
+            break
+        parity = ray_parity(tree, point, Vector(vector).normalized())
+        if parity is None:
+            continue
+        readable += 1
+        inside += parity
+    if not readable:
+        return True
+    return inside * 2 > readable

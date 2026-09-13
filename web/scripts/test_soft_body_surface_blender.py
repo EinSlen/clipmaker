@@ -108,6 +108,36 @@ class SurfaceContactTests(unittest.TestCase):
         self.assertFalse(inside_stair(position))
         self.assertLess((position - previous).length, 1e-6, "projection must not create kinetic energy")
 
+    def test_the_whole_empty_bore_reads_as_open_air_not_only_its_axis(self):
+        from soft_body_stair_geometry import INNER_RADIUS, OUTER_RADIUS, pipe_path, path_normals
+        _variant, _objects, surface = self.stair_surface()
+        tree = surface.at_frame(1)
+        # The parity directions run along the pipe, so a ray leaving a vertex
+        # off the axis skims the wall at two or three degrees instead of
+        # piercing it. Counting a crossing there is undefined, not imprecise:
+        # the same surface answers once, twice or not at all depending on the
+        # last digit of the origin. It reported a body 0.27 deep inside the
+        # glass it was falling through, and a finished native render was
+        # rejected for it. The axis is the one place every ray reads cleanly,
+        # so the bore has to be sampled across its whole section.
+        wall_centre = (INNER_RADIUS + OUTER_RADIUS) / 2
+        for depth in obstacle_specimen_depth_offsets("stair-cascade"):
+            for (x, z), (nx, nz) in zip(pipe_path()[1:-1], path_normals(pipe_path())[1:-1]):
+                for fraction in (.2, .45, .7, .9):
+                    for step in range(8):
+                        angle = math.tau * step / 8
+                        radius = INNER_RADIUS * fraction
+                        point = Vector((x + nx * radius * math.cos(angle),
+                                        depth + radius * math.sin(angle),
+                                        z + nz * radius * math.cos(angle)))
+                        self.assertFalse(renderer.point_inside_closed_surface(tree, point),
+                                         f"open bore read as solid at {fraction:.2f} of the radius")
+                        wall = Vector((x + nx * wall_centre * math.cos(angle),
+                                       depth + wall_centre * math.sin(angle),
+                                       z + nz * wall_centre * math.cos(angle)))
+                        self.assertTrue(renderer.point_inside_closed_surface(tree, wall),
+                                        "the glass wall itself still has to read as solid")
+
     def pipe_surface(self):
         variant = variant_for_seed(1807492708, "pipe-bend")
         renderer.add_obstacle_geometry(self.material, self.material, variant, 240, 30)
@@ -448,6 +478,41 @@ class SurfaceContactTests(unittest.TestCase):
         report = renderer.inspect_specimen_intersections((first, second), 1, 2)
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["frames_checked"], 2)
+
+    def test_a_ray_that_grazes_a_wall_does_not_get_to_vote(self):
+        from mathutils.bvhtree import BVHTree
+        from soft_body_volume_contact import PARITY_DIRECTIONS, ray_parity
+        # A ray that skims a surface answers with one crossing, two, or none,
+        # depending on the last digit of its origin, so its parity is undefined
+        # rather than imprecise. Left in the count it called the empty bore of
+        # the receiver solid and rejected a finished native render. Move the
+        # sphere just inside tangency and the ray has to be discarded; tilt it
+        # far enough to pierce cleanly and the ray votes again.
+        direction = Vector(PARITY_DIRECTIONS[0]).normalized()
+        origin, radius = Vector((0.0, 0.0, 0.0)), 0.5
+        perpendicular = direction.cross(Vector((0.0, 0.0, 1.0))).normalized()
+        for shave, readable in ((0.002, False), (0.02, True)):
+            bpy.ops.wm.read_factory_settings(use_empty=True)
+            centre = origin + direction * 2.0 + perpendicular * (radius - shave)
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32,
+                                                 radius=radius, location=centre)
+            mesh = bpy.context.object.data
+            matrix = bpy.context.object.matrix_world
+            tree = BVHTree.FromPolygons([matrix @ vertex.co for vertex in mesh.vertices],
+                                        [tuple(polygon.vertices) for polygon in mesh.polygons],
+                                        all_triangles=False)
+            _hit, normal, _face, _distance = tree.ray_cast(origin, direction)
+            grazing = abs(normal.dot(direction))
+            parity = ray_parity(tree, origin, direction)
+            if readable:
+                self.assertGreater(grazing, .1)
+                self.assertEqual(parity, 0, "a ray that pierces both sides reads as outside")
+            else:
+                self.assertLess(grazing, .1)
+                self.assertIsNone(parity, "a grazing crossing cannot be counted")
+            # Discarding the unreadable ray must not blind the classifier.
+            self.assertFalse(renderer.point_inside_closed_surface(tree, origin))
+            self.assertTrue(renderer.point_inside_closed_surface(tree, centre))
 
     def test_closed_volume_check_handles_holes_and_reversed_face_normals(self):
         from mathutils.bvhtree import BVHTree
