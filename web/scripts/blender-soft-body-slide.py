@@ -24,6 +24,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from soft_body_variants import (
     CLOSED_VOLUME_OBSTACLES,
     OBSTACLE_KEYS,
+    PUBLICATION_DRAWS,
     REFERENCE_SCENE_OFFSET_X,
     SoftBodyVariant,
     deformation_response,
@@ -43,6 +44,7 @@ from soft_body_variants import (
     stage_selection_for,
     stage_spans_from_attempt_spans,
     supported_body_damping,
+    take_motion_index,
     variant_for_seed,
     variant_summary,
 )
@@ -578,17 +580,26 @@ def add_ramp(
     for trim in (front_trim, back_trim):
         trim.parent = ramp
 
-    for frame in range(1, frame_end + 1):
-        stage_index, start, end = next(
-            span for span in stage_spans if span[1] <= frame <= span[2]
-        )
-        local_frame = frame - start
-        stage_frames = end - start + 1
-        stage_motion = stage_motion_for(variant, stage_index)
+    for motion_index, start, end in stage_spans:
+        keyframe_ramp_span(ramp, variant, fps, motion_index, start, end)
+    return ramp
+
+
+def keyframe_ramp_span(ramp, variant: SoftBodyVariant, fps: int, motion_index: int,
+                       start: int, end: int) -> None:
+    """Lay the visible ramp path of one take, and lay it again when it is redrawn.
+
+    The solver samples this same sweep through the take's micro-variation, so
+    the two have to be read from one motion index or the bodies would land on
+    a ramp that is no longer where they fell.
+    """
+    stage_motion = stage_motion_for(variant, motion_index)
+    trial_duration = (end - start + 1) / fps
+    for frame in range(start, end + 1):
         ramp.location.x = ramp_position(
-            local_frame / fps,
+            (frame - start) / fps,
             variant,
-            stage_frames / fps,
+            trial_duration,
             stage_motion.ramp_phase_offset,
         )
         ramp.keyframe_insert("location", frame=frame)
@@ -596,7 +607,6 @@ def add_ramp(
         for curve in ramp.animation_data.action.fcurves:
             for point in curve.keyframe_points:
                 point.interpolation = "LINEAR"
-    return ramp
 
 
 def add_obstacle_geometry(
@@ -2072,6 +2082,15 @@ class ObstacleSurface:
             self.render_targets = build_contact_targets(self.objects)
         return self.render_targets
 
+    def invalidate(self):
+        """Drop the cached frame once an obstacle path has been redrawn.
+
+        The contact proxies follow their originals through a constraint, so
+        only this query tree has to be rebuilt.
+        """
+        self.cached_frame = None
+        self.tree = None
+
     def at_frame(self, frame):
         key = frame if self.animated else 0
         if self.cached_frame == key:
@@ -2552,7 +2571,7 @@ def scouted_attempt_frame_spans(reference_attempts, variant, fps, frame_end):
         authored = last - first + 1
         simulations = simulate_specimens(
             softness, authored, fps, variant,
-            stage_index + attempt_index * len(variant.stages),
+            take_motion_index(stage_index, attempt_index, len(variant.stages)),
         )
         framing = inspect_simulation_framing(simulations, variant, fps)
         print(json.dumps({"phase": "scout", "obstacle": variant.obstacle.key,
@@ -2568,6 +2587,75 @@ def scouted_attempt_frame_spans(reference_attempts, variant, fps, frame_end):
         tuple(minimums),
         max(1, round(0.5 * fps)),
     )
+
+
+def discard_take(objects) -> None:
+    """Remove a refused draw from the scene, its mesh and shape keys included."""
+    for obj in objects:
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+
+def build_take(gold, softness: int, stage_index: int, attempt_index: int, start: int, end: int,
+               frame_end: int, fps: int, variant: SoftBodyVariant, motion_index: int,
+               authored_frames: int, render_subdivision: int, obstacle_surface):
+    """Lay one draw of a take down and audit every gate it must publish through."""
+    specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
+    specimen_depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
+    simulations = simulate_specimens(
+        softness, end - start + 1, fps, variant, motion_index, authored_frames,
+    )
+    framing = inspect_simulation_framing(simulations, variant, fps)
+    objects, reports, events = [], [], []
+    for instance_index, instance_offset in enumerate(specimen_offsets):
+        rotation_offset = 0.0
+        if len(specimen_offsets) > 1:
+            rotation_offset = 0.045 if instance_index == 0 else -0.045
+        capsule, body_events, quality = add_capsule(
+            gold,
+            softness,
+            start,
+            end,
+            frame_end,
+            fps,
+            variant,
+            motion_index,
+            instance_index,
+            instance_offset,
+            specimen_depths[instance_index],
+            rotation_offset,
+            render_subdivision,
+            obstacle_surface,
+            simulations[instance_index],
+            tuple((simulation, specimen_depths[index]) for index, simulation in enumerate(simulations) if index != instance_index),
+        )
+        events.extend(body_events)
+        quality["framing"] = framing
+        quality["issues"].extend(framing["issues"])
+        objects.append(capsule)
+        reports.append({
+            "stage": stage_index + 1,
+            "softness": softness,
+            "attempt": attempt_index + 1,
+            "body": instance_index + 1,
+            "start_frame": start,
+            "end_frame": end,
+            **quality,
+        })
+    intersections = inspect_specimen_intersections(objects, start, end)
+    for report in reports:
+        report["inter_body_contact"] = intersections
+        report["issues"].extend(intersections["issues"])
+    for capsule, report in zip(objects, reports):
+        rendered_surface = inspect_rendered_surface(capsule, obstacle_surface, start, end)
+        report["rendered_surface"] = rendered_surface
+        report["issues"].extend(rendered_surface["issues"])
+        print(json.dumps({"phase": "native-surface-checked", "body": capsule.name,
+                          "start_frame": start, "end_frame": end,
+                          **rendered_surface}), flush=True)
+    return objects, reports, events
 
 
 def main() -> None:
@@ -2608,7 +2696,7 @@ def main() -> None:
         )
     )
     trial_spans = tuple(
-        (stage_index + attempt_index * len(variant.stages), first, last)
+        (take_motion_index(stage_index, attempt_index, len(variant.stages)), first, last)
         for stage_index, _softness, attempt_index, first, last, _authored_frames in attempts
     )
 
@@ -2617,8 +2705,9 @@ def main() -> None:
     backdrop = background_material(variant)
     add_background(backdrop)
     add_receiver(marble, gold, variant)
+    ramp = None
     if variant.obstacle.key == "moving-slide":
-        add_ramp(marble, gold, variant, frame_end, args.fps, trial_spans)
+        ramp = add_ramp(marble, gold, variant, frame_end, args.fps, trial_spans)
     else:
         add_obstacle_geometry(marble, gold, variant, frame_end, args.fps, trial_spans)
     obstacle_surface = ObstacleSurface(
@@ -2635,67 +2724,38 @@ def main() -> None:
             if index == stage_index
         )
         for attempt_index, (attempt_start, attempt_end, authored_frames) in enumerate(attempt_spans):
-            attempt_objects = []
-            attempt_reports = []
-            print(json.dumps({"phase": "simulate", "obstacle": variant.obstacle.key,
-                              "softness": softness, "attempt": attempt_index + 1,
-                              "start_frame": attempt_start, "end_frame": attempt_end}), flush=True)
             if attempt_index:
                 attempt_cut_frames.append(attempt_start)
-            specimen_offsets = obstacle_specimen_offsets(variant.obstacle.key)
-            specimen_depths = obstacle_specimen_depth_offsets(variant.obstacle.key)
-            simulations = simulate_specimens(
-                softness, attempt_end - attempt_start + 1, args.fps, variant,
-                stage_index + attempt_index * len(variant.stages), authored_frames,
-            )
-            framing = inspect_simulation_framing(simulations, variant, args.fps)
-            for instance_index, instance_offset in enumerate(specimen_offsets):
-                rotation_offset = 0.0
-                if len(specimen_offsets) > 1:
-                    rotation_offset = 0.045 if instance_index == 0 else -0.045
-                _capsule, events, quality = add_capsule(
-                    gold,
-                    softness,
-                    attempt_start,
-                    attempt_end,
-                    frame_end,
-                    args.fps,
-                    variant,
-                    stage_index + attempt_index * len(variant.stages),
-                    instance_index,
-                    instance_offset,
-                    specimen_depths[instance_index],
-                    rotation_offset,
-                    1 if args.width < 360 else 3,
-                    obstacle_surface,
-                    simulations[instance_index],
-                    tuple((simulation, specimen_depths[index]) for index, simulation in enumerate(simulations) if index != instance_index),
+            for draw_index in range(PUBLICATION_DRAWS):
+                motion_index = take_motion_index(
+                    stage_index, attempt_index, len(variant.stages), draw_index,
                 )
-                all_events.extend(events)
-                quality["framing"] = framing
-                quality["issues"].extend(framing["issues"])
-                attempt_objects.append(_capsule)
-                attempt_reports.append({
-                        "stage": stage_index + 1,
-                        "softness": softness,
-                        "attempt": attempt_index + 1,
-                        "body": instance_index + 1,
-                        "start_frame": attempt_start,
-                        "end_frame": attempt_end,
-                        **quality,
-                })
-            intersections = inspect_specimen_intersections(attempt_objects, attempt_start, attempt_end)
+                print(json.dumps({"phase": "simulate", "obstacle": variant.obstacle.key,
+                                  "softness": softness, "attempt": attempt_index + 1,
+                                  "draw": draw_index + 1,
+                                  "start_frame": attempt_start, "end_frame": attempt_end}), flush=True)
+                if draw_index and ramp is not None:
+                    keyframe_ramp_span(
+                        ramp, variant, args.fps, motion_index, attempt_start, attempt_end,
+                    )
+                    obstacle_surface.invalidate()
+                attempt_objects, attempt_reports, attempt_events = build_take(
+                    gold, softness, stage_index, attempt_index, attempt_start, attempt_end,
+                    frame_end, args.fps, variant, motion_index, authored_frames,
+                    1 if args.width < 360 else 3, obstacle_surface,
+                )
+                if not any(report["issues"] for report in attempt_reports):
+                    break
+                print(json.dumps({"phase": "take-refused", "obstacle": variant.obstacle.key,
+                                  "softness": softness, "attempt": attempt_index + 1,
+                                  "draw": draw_index + 1,
+                                  "issues": sorted({issue for report in attempt_reports
+                                                    for issue in report["issues"]})}), flush=True)
+                discard_take(attempt_objects)
             for report in attempt_reports:
-                report["inter_body_contact"] = intersections
-                report["issues"].extend(intersections["issues"])
-                attempt_quality.append(report)
-            for capsule, report in zip(attempt_objects, attempt_reports):
-                rendered_surface = inspect_rendered_surface(capsule, obstacle_surface, attempt_start, attempt_end)
-                report["rendered_surface"] = rendered_surface
-                report["issues"].extend(rendered_surface["issues"])
-                print(json.dumps({"phase": "native-surface-checked", "body": capsule.name,
-                                  "start_frame": attempt_start, "end_frame": attempt_end,
-                                  **rendered_surface}), flush=True)
+                report["draw"] = draw_index + 1
+            all_events.extend(attempt_events)
+            attempt_quality.extend(attempt_reports)
 
     if args.events:
         events_path = Path(args.events)

@@ -25,6 +25,7 @@ from soft_body_variants import (
     obstacle_specimen_offsets,
     stage_attempt_frame_spans,
     stage_frame_spans,
+    take_motion_index,
     variant_for_seed,
 )
 
@@ -70,7 +71,7 @@ def audit_attempt(
     precomputed_simulation=None,
 ):
     frame_count = max(1, round(duration * production_fps))
-    motion_index = stage_index + attempt_index * len(variant.stages)
+    motion_index = take_motion_index(stage_index, attempt_index, len(variant.stages))
     simulated = precomputed_simulation if precomputed_simulation is not None else renderer.simulate_chain(
         softness,
         frame_count,
@@ -334,12 +335,13 @@ def main() -> int:
                     duration = (attempt_span[1] - attempt_span[0] + 1) / args.production_fps
                     simulations = renderer.simulate_specimens(
                         softness, attempt_span[1] - attempt_span[0] + 1, args.production_fps,
-                        variant, stage_index + attempt_index * len(variant.stages),
+                        variant, take_motion_index(stage_index, attempt_index, len(variant.stages)),
                     )
                     framing = renderer.inspect_simulation_framing(simulations, variant, args.production_fps)
                     contacts = audit_specimen_contacts(
                         renderer, variant, simulations, softness,
-                        stage_index + attempt_index * len(variant.stages), args.production_fps,
+                        take_motion_index(stage_index, attempt_index, len(variant.stages)),
+                        args.production_fps,
                     ) if args.check_surface else None
                     for instance_index, instance_offset in enumerate(
                         obstacle_specimen_offsets(obstacle.key)
