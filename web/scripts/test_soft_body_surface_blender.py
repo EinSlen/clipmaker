@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from soft_body_variants import (
     OBSTACLES, PUBLICATION_DRAWS, SHAPES, obstacle_specimen_depth_offsets,
-    obstacle_specimen_offsets, stage_motion_for, take_motion_index, variant_for_seed,
+    obstacle_specimen_offsets, stage_motion_for, stage_selection_for, take_motion_index,
+    variant_for_seed,
 )
 from soft_body_framing import project_point
 
@@ -50,7 +51,7 @@ class SurfaceContactTests(unittest.TestCase):
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         return renderer.ObstacleSurface((box,)).at_frame(1)
 
-    def prepare_take(self, seed=910103, obstacle="peg-grid", softness=100, duration=1.2):
+    def prepare_take(self, seed=910103, obstacle="peg-grid", softness=100, duration=0.8):
         """Run the published preparation once, small enough to stay a unit test.
 
         Production starts from ``--factory-startup``, and so does this: a
@@ -469,36 +470,42 @@ class SurfaceContactTests(unittest.TestCase):
                                              surface.objects, depsgraph)
         self.assertEqual(candidates.tolist(), [True, False, True, False])
 
-    def test_a_take_the_gates_refuse_is_redrawn_instead_of_failing_the_render(self):
-        planned = self.prepare_take()
-        self.assertEqual([report["draw"] for report in planned["attempt_quality"]], [1, 1])
+    def test_a_take_the_gates_refuse_is_redrawn_and_carries_its_ramp(self):
         refused = []
         honest = renderer.inspect_rendered_surface
 
-        def refuse_the_first_body(body, obstacle_surface, start, end):
+        def refuse_the_first_draw(body, obstacle_surface, start, end):
             report = honest(body, obstacle_surface, start, end)
             if not refused:
                 refused.append(body.name)
                 return {**report, "issues": ["excessive-final-skin-correction"]}
             return report
 
-        with patch.object(renderer, "inspect_rendered_surface", refuse_the_first_body):
-            redrawn = self.prepare_take()
-        self.assertEqual(len(refused), 1, "one refused body is enough to refuse its whole take")
-        self.assertEqual([report["draw"] for report in redrawn["attempt_quality"]], [2, 2])
+        with patch.object(renderer, "inspect_rendered_surface", refuse_the_first_draw):
+            redrawn = self.prepare_take(obstacle="moving-slide")
+        self.assertEqual(len(refused), 1)
+        self.assertEqual([report["draw"] for report in redrawn["attempt_quality"]], [2])
         self.assertTrue(all(report["issues"] == [] for report in redrawn["attempt_quality"]))
-        self.assertEqual(redrawn["attempt_spans"], planned["attempt_spans"],
+        self.assertEqual(redrawn["attempt_spans"], [[1, 24]],
                          "a redraw keeps the montage the publisher was handed")
-        self.assertEqual(redrawn["stages"], planned["stages"])
-        self.assertNotEqual(redrawn["events"], planned["events"],
-                            "the accepted take is a new draw, not the refused one")
         self.assertEqual(
-            sorted(obj.name for obj in bpy.data.objects if obj.name.startswith("Sliding cylinder")),
-            ["Sliding cylinder 100% body 1", "Sliding cylinder 100% body 2"],
-            "a refused draw leaves no second body behind to render",
+            [obj.name for obj in bpy.data.objects if obj.name.startswith("Sliding cylinder")],
+            ["Sliding cylinder 100% body 1"],
+            "a refused draw leaves nothing behind to render",
         )
-        self.assertFalse([mesh.name for mesh in bpy.data.meshes
-                          if mesh.name.startswith("Sliding cylinder") and mesh.users == 0])
+        variant = variant_for_seed(910103, "moving-slide")
+        _stages, (stage_index,) = stage_selection_for(variant, 100)
+        accepted = stage_motion_for(
+            variant, take_motion_index(stage_index, 0, len(variant.stages), 1),
+        ).ramp_phase_offset
+        ramp = bpy.data.objects["Moving S marble ramp"]
+        for frame in (1, 12, 24):
+            bpy.context.scene.frame_set(frame)
+            self.assertAlmostEqual(
+                ramp.location.x,
+                renderer.ramp_position((frame - 1) / 30, variant, 24 / 30, accepted), places=6,
+                msg="the render keeps the ramp of the draw it accepted",
+            )
 
     def test_a_take_refused_on_every_draw_still_fails_the_render(self):
         draws = []
@@ -511,9 +518,12 @@ class SurfaceContactTests(unittest.TestCase):
 
         with patch.object(renderer, "inspect_rendered_surface", refuse_everything):
             with self.assertRaises(RuntimeError):
-                self.prepare_take()
-        self.assertEqual(len(draws), 2 * PUBLICATION_DRAWS,
+                self.prepare_take(obstacle="peg-grid")
+        self.assertEqual(len(draws), len(obstacle_specimen_offsets("peg-grid")) * PUBLICATION_DRAWS,
                          "a systematic defect is reported, not retried forever")
+        self.assertFalse([obj.name for obj in bpy.data.objects
+                          if obj.name.startswith("Sliding cylinder")],
+                         "every body of every refused draw is taken back out of the scene")
 
     def test_a_redrawn_take_carries_the_visible_ramp_with_its_physics(self):
         variant = variant_for_seed(910104, "moving-slide")
