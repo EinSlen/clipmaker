@@ -22,6 +22,7 @@ from game_variants import (
 from soft_body_variants import (
     AIR_RETENTION_PER_SECOND,
     PHYSICS_HZ,
+    PUBLICATION_DRAWS,
     AUTO_OBSTACLE_EPOCH,
     AUTO_OBSTACLE_KEYS,
     OBSTACLE_KEYS,
@@ -46,6 +47,7 @@ from soft_body_variants import (
     stage_selection_for,
     stage_spans_from_attempt_spans,
     supported_body_damping,
+    take_motion_index,
     variant_for_seed,
 )
 from soft_body_framing import (backdrop_corners, inspect_simulation_framing, inspect_stair_outlet,
@@ -925,6 +927,21 @@ class SoftBodyVariantTests(unittest.TestCase):
             self.assertLessEqual(abs(motion.rotation_offset), 0.030)
             self.assertLessEqual(abs(motion.linear_velocity_x), 0.028)
             self.assertLessEqual(abs(motion.ramp_phase_offset), 0.012)
+
+    def test_a_redrawn_take_never_reuses_the_variation_of_another_take(self):
+        variant = variant_for_seed(910104)
+        stage_count = len(variant.stages)
+        planned = [take_motion_index(stage, attempt, stage_count)
+                   for stage in range(stage_count) for attempt in range(2)]
+        self.assertEqual(planned, [stage + attempt * stage_count
+                                   for stage in range(stage_count) for attempt in range(2)],
+                         "the first draw keeps the index the published plan was scouted with")
+        drawn = [take_motion_index(stage, attempt, stage_count, draw)
+                 for stage in range(stage_count) for attempt in range(2)
+                 for draw in range(PUBLICATION_DRAWS)]
+        self.assertEqual(len(set(drawn)), len(drawn))
+        motions = [stage_motion_for(variant, index) for index in drawn]
+        self.assertEqual(len(set(motions)), len(motions))
 
     def test_render_level_release_motion_is_neutral_and_nonzero(self):
         for seed in range(910100, 910125):

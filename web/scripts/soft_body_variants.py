@@ -650,6 +650,24 @@ def stage_motion_for(variant: SoftBodyVariant, stage_index: int) -> StageMotion:
     )
 
 
+# A take the publication gates refuse is redrawn rather than patched: only its
+# micro-variation changes, so the published span, the softness level and the
+# drawn variant stay exactly as planned. Three draws bound the preparation at
+# three times its nominal length, well inside its 180-minute budget, and a take
+# that fails all three is a defect of the family rather than an unlucky draw.
+PUBLICATION_DRAWS = 3
+# A level holds two takes at most, so striding by eight levels keeps the
+# redraw of a refused take from reusing the variation already spent on
+# another take of the same scene.
+REDRAW_MOTION_STRIDE = 8
+
+
+def take_motion_index(stage_index: int, attempt_index: int, stage_count: int,
+                      draw_index: int = 0) -> int:
+    """Index the micro-variation of one take, then of each of its redraws."""
+    return stage_index + (attempt_index + draw_index * REDRAW_MOTION_STRIDE) * stage_count
+
+
 def stage_selection_for(variant: SoftBodyVariant, softness: int | None = None):
     """An explicit preview percentage is exact, not rounded to a preset."""
     if softness is None:

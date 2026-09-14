@@ -1,11 +1,13 @@
 """Fast integration regressions executed inside Blender, without rendering."""
 
 import importlib.util
+import json
 import math
 import random
 from dataclasses import replace
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,8 +19,9 @@ from bpy_extras.object_utils import world_to_camera_view
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from soft_body_variants import (
-    OBSTACLES, SHAPES, obstacle_specimen_depth_offsets, obstacle_specimen_offsets,
-    stage_motion_for, variant_for_seed,
+    OBSTACLES, PUBLICATION_DRAWS, SHAPES, obstacle_specimen_depth_offsets,
+    obstacle_specimen_offsets, stage_motion_for, stage_selection_for, take_motion_index,
+    variant_for_seed,
 )
 from soft_body_framing import project_point
 
@@ -47,6 +50,28 @@ class SurfaceContactTests(unittest.TestCase):
         box.dimensions = (1.0, 1.0, 0.2)
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         return renderer.ObstacleSurface((box,)).at_frame(1)
+
+    def prepare_take(self, seed=910103, obstacle="peg-grid", softness=100, duration=0.8):
+        """Run the published preparation once, small enough to stay a unit test.
+
+        Production starts from ``--factory-startup``, and so does this: a
+        neighbouring test reads an empty file, which leaves the scene without
+        the world the finished render colours.
+        """
+        bpy.ops.wm.read_factory_settings()
+        with tempfile.TemporaryDirectory() as directory:
+            frames = Path(directory)
+            events = frames / "motion-events.json"
+            argv = ["blender", "--",
+                    "--frames", str(frames), "--duration", str(duration), "--fps", "30",
+                    "--width", "320", "--height", "568", "--samples", "8",
+                    "--seed", str(seed), "--softness", str(softness),
+                    "--stage-softness", str(softness), "--theme", "ice",
+                    "--title", "HOW SOFT CAN IT GET?", "--obstacle", obstacle,
+                    "--events", str(events), "--build-only"]
+            with patch.object(sys, "argv", argv):
+                renderer.main()
+            return json.loads(events.read_text(encoding="utf-8"))
 
     def test_procedural_capsule_profiles_have_closed_finite_meshes_at_range_extremes(self):
         for baseline in SHAPES:
@@ -444,6 +469,86 @@ class SurfaceContactTests(unittest.TestCase):
         candidates = possible_inside_vertices(np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 0, 1]]),
                                              surface.objects, depsgraph)
         self.assertEqual(candidates.tolist(), [True, False, True, False])
+
+    def test_a_take_the_gates_refuse_is_redrawn_and_carries_its_ramp(self):
+        refused = []
+        honest = renderer.inspect_rendered_surface
+
+        def refuse_the_first_draw(body, obstacle_surface, start, end):
+            report = honest(body, obstacle_surface, start, end)
+            if not refused:
+                refused.append(body.name)
+                return {**report, "issues": ["excessive-final-skin-correction"]}
+            return report
+
+        with patch.object(renderer, "inspect_rendered_surface", refuse_the_first_draw):
+            redrawn = self.prepare_take(obstacle="moving-slide")
+        self.assertEqual(len(refused), 1)
+        self.assertEqual([report["draw"] for report in redrawn["attempt_quality"]], [2])
+        self.assertTrue(all(report["issues"] == [] for report in redrawn["attempt_quality"]))
+        self.assertEqual(redrawn["attempt_spans"], [[1, 24]],
+                         "a redraw keeps the montage the publisher was handed")
+        self.assertEqual(
+            [obj.name for obj in bpy.data.objects if obj.name.startswith("Sliding cylinder")],
+            ["Sliding cylinder 100% body 1"],
+            "a refused draw leaves nothing behind to render",
+        )
+        variant = variant_for_seed(910103, "moving-slide")
+        _stages, (stage_index,) = stage_selection_for(variant, 100)
+        accepted = stage_motion_for(
+            variant, take_motion_index(stage_index, 0, len(variant.stages), 1),
+        ).ramp_phase_offset
+        ramp = bpy.data.objects["Moving S marble ramp"]
+        for frame in (1, 12, 24):
+            bpy.context.scene.frame_set(frame)
+            self.assertAlmostEqual(
+                ramp.location.x,
+                renderer.ramp_position((frame - 1) / 30, variant, 24 / 30, accepted), places=6,
+                msg="the render keeps the ramp of the draw it accepted",
+            )
+
+    def test_a_take_refused_on_every_draw_still_fails_the_render(self):
+        draws = []
+        honest = renderer.inspect_rendered_surface
+
+        def refuse_everything(body, obstacle_surface, start, end):
+            draws.append(body.name)
+            return {**honest(body, obstacle_surface, start, end),
+                    "issues": ["excessive-final-skin-correction"]}
+
+        with patch.object(renderer, "inspect_rendered_surface", refuse_everything):
+            with self.assertRaises(RuntimeError):
+                self.prepare_take(obstacle="peg-grid")
+        self.assertEqual(len(draws), len(obstacle_specimen_offsets("peg-grid")) * PUBLICATION_DRAWS,
+                         "a systematic defect is reported, not retried forever")
+        self.assertFalse([obj.name for obj in bpy.data.objects
+                          if obj.name.startswith("Sliding cylinder")],
+                         "every body of every refused draw is taken back out of the scene")
+
+    def test_a_redrawn_take_carries_the_visible_ramp_with_its_physics(self):
+        variant = variant_for_seed(910104, "moving-slide")
+        marble = renderer.material("Test marble", (0.5, 0.5, 0.5, 1.0))
+        gold = renderer.material("Test gold", (0.8, 0.5, 0.1, 1.0))
+        ramp = renderer.add_ramp(marble, gold, variant, 60, 30, ((0, 1, 30), (1, 31, 60)))
+
+        def sweep(frames):
+            sampled = []
+            for frame in frames:
+                bpy.context.scene.frame_set(frame)
+                sampled.append(ramp.location.x)
+            return sampled
+
+        kept, replaced = sweep(range(1, 31)), sweep(range(31, 61))
+        redrawn = take_motion_index(1, 0, len(variant.stages), 1)
+        renderer.keyframe_ramp_span(ramp, variant, 30, redrawn, 31, 60)
+        self.assertEqual(sweep(range(1, 31)), kept, "an accepted take keeps the ramp it fell on")
+        self.assertNotEqual(sweep(range(31, 61)), replaced)
+        phase = stage_motion_for(variant, redrawn).ramp_phase_offset
+        for frame, sampled in zip(range(31, 61), sweep(range(31, 61))):
+            self.assertAlmostEqual(
+                sampled, renderer.ramp_position((frame - 31) / 30, variant, 1.0, phase), places=6,
+                msg="the visible ramp follows the sweep the solver just sampled",
+            )
 
     def test_rotating_gear_teeth_do_not_pull_free_skin_up_to_a_corner(self):
         # Exact native frame-60 regression: a sharp tooth's nearest corner

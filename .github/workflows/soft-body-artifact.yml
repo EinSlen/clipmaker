@@ -256,15 +256,34 @@ jobs:
         run: docker build --file web/Dockerfile --target ci --tag clipmaker-ci:3d .
       - name: Simulate every softness level once
         run: |
+          # A refused take is redrawn in the scene rather than failing the day,
+          # so keep the log: the summary below is the only place that says a
+          # draw was thrown away, and a family that starts needing redraws
+          # every morning is a defect worth seeing early.
+          set -o pipefail
           mkdir -p artifacts/scene/frames
           docker run --rm --init --volume "$PWD/artifacts/scene:/scene" clipmaker-ci:3d \
             blender --background --factory-startup --python-exit-code 1 --python scripts/blender-soft-body-slide.py -- \
               --frames /scene/frames --duration "$RENDER_DURATION" --fps "$RENDER_FPS" \
               --width "$RENDER_WIDTH" --height "$RENDER_HEIGHT" --samples "${{ matrix.samples }}" \
               --seed "${{ matrix.scene_seed }}" --softness 100 --theme ice --title "${{ matrix.title }}" \
-              --obstacle "${{ matrix.obstacle }}" --events /scene/motion-events.json --build-only
+              --obstacle "${{ matrix.obstacle }}" --events /scene/motion-events.json --build-only \
+            | tee artifacts/scene/prepare.log
           test -s artifacts/scene/frames/soft-body-comparison.blend
           test -s artifacts/scene/motion-events.json
+      - name: Report the takes that had to be drawn again
+        if: ${{ always() }}
+        run: |
+          refused=$(grep -c '"phase": "take-refused"' artifacts/scene/prepare.log || true)
+          if [ "${refused:-0}" -gt 0 ]; then
+            {
+              echo "### ${{ matrix.channel_id }} · $refused take(s) redrawn"
+              echo ""
+              echo '```'
+              grep '"phase": "take-refused"' artifacts/scene/prepare.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@v6
         with:
           name: soft-body-scene-${{ matrix.key }}
