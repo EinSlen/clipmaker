@@ -55,6 +55,29 @@ jobs:
         run: |
           npm --prefix web test
           npm --prefix web run build
+      - name: Test the Python scripts
+        # These suites existed and nothing ran them, so a regression in the
+        # renderers or the reach watchdog could only be found by hand. The
+        # Blender suite is excluded because it needs bpy, and the
+        # soft-body-surface job already runs it inside Blender.
+        run: |
+          python - <<'PY'
+          import glob
+          import os
+          import sys
+          import unittest
+
+          sys.path.insert(0, 'web/scripts')
+          names = [
+              os.path.basename(path)[:-3]
+              for path in sorted(glob.glob('web/scripts/test_*.py'))
+              if not path.endswith('test_soft_body_surface_blender.py')
+          ]
+          suite = unittest.defaultTestLoader.loadTestsFromNames(names)
+          result = unittest.TextTestRunner(verbosity=1).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+
       - name: Install and test the Cloudflare Worker
         run: |
           npm ci --prefix infra/cloud-control-worker

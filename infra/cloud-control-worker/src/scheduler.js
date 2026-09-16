@@ -33,6 +33,23 @@ function earliestTime(channels, field, fallback) {
   return Math.min(...channels.map((channel) => parseTime(channel[field] || fallback)));
 }
 
+// Publishing at the same minute every single day is a machine signature, and
+// the account this scheduler drives went out at 18:02 or 18:03 for a month.
+// The offset is drawn from the day and the slot instead of at random, so
+// every tick of the scheduler agrees on when the slot became due and the
+// retry and native-run bookkeeping keeps working unchanged.
+export const PUBLISH_JITTER_MINUTES = 60;
+
+export function publishJitter(date, slot, span = PUBLISH_JITTER_MINUTES) {
+  const width = Number.isFinite(span) ? Math.max(0, Math.min(180, Math.trunc(span))) : PUBLISH_JITTER_MINUTES;
+  if (!width) return 0;
+  let digest = 2166136261;
+  for (const character of `${date}:${slot}`) {
+    digest = Math.imul(digest ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+  return digest % width;
+}
+
 export function schedulerOperations(config, now) {
   const channels = (config?.channels || []).filter((channel) => channel.enabled !== false);
   if (!channels.length) return [];
@@ -83,7 +100,14 @@ export function schedulerOperations(config, now) {
   // A successful early account must not mark a later account's slot complete.
   // Keep the existing default key stable while accounts are added or disabled.
   for (const slot of [...new Set(channels.map((channel) => channel.publishTime || '18:00'))].sort()) {
-    const dueMinute = parseTime(slot);
+    // The slot keeps its name so the runner still matches it against the
+    // saved publishTime and the retry bookkeeping is untouched. Only the
+    // minute the slot becomes due moves, and it moves the same way for every
+    // tick of a given day. The workflow's own GitHub cron stays a safety net
+    // and ignores the offset, so a day where that cron is punctual publishes
+    // at its hour instead; in practice it has been running hours late, which
+    // is why this dispatcher exists at all.
+    const dueMinute = Math.min(1439, parseTime(slot) + publishJitter(clock.date, slot, config.publishJitterMinutes));
     operations.push({
       id: slot === '18:00' ? 'daily-publish' : `daily-publish-${slot.replace(':', '')}`,
       workflow: 'daily-publisher.yml',

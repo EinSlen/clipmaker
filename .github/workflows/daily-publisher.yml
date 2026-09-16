@@ -371,6 +371,37 @@ jobs:
           fi
           cat artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Watch what the feed is doing with the accounts
+        # Weekly, not daily: this opens TikTok Studio in a browser, and their
+        # terms are reason enough to keep it to an occasional look. It can
+        # never fail the run. It exists because six weeks of zero reach went
+        # unnoticed while every number that said so sat in Studio, unread.
+        if: ${{ always() && !cancelled() && steps.operation.outputs.command == 'publish' }}
+        continue-on-error: true
+        run: |
+          if [ "$(date -u '+%u')" != "1" ]; then
+            echo "Veille de portée hebdomadaire : prochain passage lundi."
+            exit 0
+          fi
+          docker ps --format '{{.Names}}' | grep -qx clipmaker-daily || exit 0
+          accounts="$(node -e "
+            const config = require('./web/config/publisher.json');
+            const names = (config.channels || [])
+              .filter((channel) => channel.enabled !== false && channel.tiktok?.enabled && channel.tiktok.username)
+              .map((channel) => channel.tiktok.username);
+            process.stdout.write([...new Set(names)].join(' '));
+          ")"
+          for account in $accounts; do
+            docker exec \
+              --env NODE_PATH=/opt/tiktok-signature/node_modules \
+              --env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
+              clipmaker-daily node /repo/web/scripts/tiktok-analytics-agent.cjs \
+              --user "$account" --out "/repo/artifacts/reach-$account.json" || continue
+            docker exec clipmaker-daily python3 /repo/web/scripts/reach_watchdog.py \
+              "/repo/artifacts/reach-$account.json" \
+              | grep -v '^CLIPMAKER_REACH:' >> artifacts/summary.md || true
+          done
+
       - name: Notify the owner through GitHub
         # A deliberately cancelled stale catch-up must not create a false red
         # notification after a newer run has taken over the publication.

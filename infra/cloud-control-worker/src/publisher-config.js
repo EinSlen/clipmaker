@@ -132,7 +132,7 @@ export function normalizePublisherConfig(raw) {
     if (ids.has(id)) fail(`Identifiant utilisé deux fois : ${id}.`);
     ids.add(id);
     const enabled = source.enabled !== false;
-    if (source.captionStyle !== undefined && !['auto', 'melancholic', 'revenge', 'gameplay'].includes(source.captionStyle)) fail('Style de description invalide.');
+    if (source.captionStyle !== undefined && !['auto', 'melancholic', 'revenge', 'gameplay', 'manifest', 'story'].includes(source.captionStyle)) fail('Style de description invalide.');
     const youtube = normalizeYoutube(source.youtube, id);
     const tiktok = normalizeTiktok(source.tiktok, id);
     if (enabled && !youtube.enabled && !tiktok.enabled) fail(`${id} doit publier sur TikTok ou YouTube.`);

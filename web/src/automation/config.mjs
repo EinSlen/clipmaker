@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertTime } from './time.mjs';
-import { CAPTION_STYLES } from './edit-captions.mjs';
+import { CAPTION_STYLES, GENRE_STYLES, channelGenre } from './edit-captions.mjs';
 
 export const GAME_IDS = Object.freeze([
   'ball-escape',
@@ -188,13 +188,24 @@ function normalizeChannel(value, index) {
   }
   if (typeof gameEntry === 'string') gameEntry = { id: gameEntry };
   if (gameEntry === undefined) throw new Error(`Channel ${id} needs one fixed game.`);
+  const game = normalizeGameEntry(gameEntry, id, gameSource);
+  // Refused here rather than at publication time: a caption that advertises
+  // the wrong genre costs a day of reach, and the dashboard can show the
+  // mistake while nobody is waiting on an 18:00 upload.
+  const genre = channelGenre(game);
+  if (value.captionStyle !== undefined && value.captionStyle !== 'auto'
+    && !GENRE_STYLES[genre].includes(value.captionStyle)) {
+    throw new Error(
+      `Channel ${id} is a ${genre} channel, so captionStyle must be auto or one of ${GENRE_STYLES[genre].join(', ')}.`,
+    );
+  }
   return {
     id,
     enabled: value.enabled !== false,
     ...(value.captionStyle !== undefined ? { captionStyle: value.captionStyle } : {}),
     generateTime: assertTime(value.generateTime || '00:30'),
     publishTime: assertTime(value.publishTime || '18:30'),
-    game: normalizeGameEntry(gameEntry, id, gameSource),
+    game,
     youtube: normalizeYoutube(value.youtube, id),
     tiktok: normalizeTiktok(value.tiktok, id),
   };

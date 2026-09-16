@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runScheduler, schedulerOperations } from '../src/scheduler.js';
+import { PUBLISH_JITTER_MINUTES, publishJitter, runScheduler, schedulerOperations } from '../src/scheduler.js';
 
 function configuration() {
   return {
-    timeZone: 'Europe/Paris', dryRun: false,
+    timeZone: 'Europe/Paris', dryRun: false, publishJitterMinutes: 0,
     channels: ['18:00', '20:00', '20:00'].map((publishTime, index) => ({
       id: `channel-${index}`, enabled: true, generateTime: '00:30', publishTime,
       game: { id: 'ball-escape' },
@@ -108,4 +108,35 @@ test('legacy records without a run ID only match the scheduled publication title
   const observed = await runScheduler({ env, token: 'test', now: new Date('2026-08-28T16:26:00Z') });
   assert.equal(observed[0].runId, 107);
   assert.equal(observed[0].action, 'skip');
+});
+
+test('the publication minute moves with the day instead of being the same minute forever', () => {
+  const config = configuration();
+  delete config.publishJitterMinutes;
+  const slotOf = (instant) => schedulerOperations(config, new Date(instant))
+    .find((operation) => operation.inputs.publish_slot === '18:00');
+
+  // Same day, same answer: the scheduler runs on a loop, and an offset drawn
+  // afresh on every tick would make a slot flicker in and out of being due.
+  const first = slotOf('2026-08-28T16:00:00Z');
+  assert.equal(first.dueMinute, slotOf('2026-08-28T19:00:00Z').dueMinute);
+  assert.equal(first.dueMinute, (18 * 60) + publishJitter('2026-08-28', '18:00'));
+  assert.equal(first.windowStart, first.dueMinute);
+  // The slot keeps its identity, because the runner matches on it.
+  assert.equal(first.id, 'daily-publish');
+  assert.equal(first.inputs.publish_slot, '18:00');
+
+  const minutes = new Set();
+  for (let day = 1; day <= 28; day += 1) {
+    const date = `2026-09-${String(day).padStart(2, '0')}`;
+    const offset = publishJitter(date, '18:00');
+    assert.ok(offset >= 0 && offset < PUBLISH_JITTER_MINUTES);
+    minutes.add(offset);
+  }
+  assert.ok(minutes.size >= 20, 'four weeks of publications spread across the hour');
+
+  config.publishJitterMinutes = 0;
+  assert.equal(slotOf('2026-08-28T16:00:00Z').dueMinute, 18 * 60);
+  config.publishJitterMinutes = 10;
+  assert.ok(slotOf('2026-08-28T16:00:00Z').dueMinute - (18 * 60) < 10);
 });

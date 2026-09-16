@@ -1,6 +1,6 @@
 // Original English copy, not quotes from the recordings. A day's choice is
 // deterministic; the publisher persists it before attempting either platform.
-export const CAPTION_STYLES = ['auto', 'melancholic', 'revenge', 'gameplay'];
+export const CAPTION_STYLES = ['auto', 'melancholic', 'revenge', 'gameplay', 'manifest', 'story'];
 export const CAPTIONS = Object.freeze({
   melancholic: [
     'some feelings outlive the goodbye.',
@@ -122,6 +122,36 @@ export const CAPTIONS = Object.freeze({
     'the whole point is the last one.',
     'guess the landing before it happens.',
   ],
+  // The story channel writes its own line per episode, so this deck is only
+  // drawn from when that line would repeat one already published. It stays
+  // in the language the episodes are written in, and it keeps asking for the
+  // next move, because the whole format runs on replies.
+  story: [
+    'Que va-t-il se passer ensuite ?',
+    'Dites-nous la suite en commentaire.',
+    'Vous auriez fait quoi, à leur place ?',
+    'La suite dépend de vos réponses.',
+    'On continue dans quelle direction ?',
+    'Le prochain choix vous appartient.',
+    'Qui devrait ouvrir la porte ?',
+    "On s'arrête là ou on continue ?",
+    'Votre commentaire décide du prochain épisode.',
+    'Personne ne devine jamais la suite.',
+    'Il reste une décision à prendre.',
+    "Dites-moi ce qu'ils doivent faire.",
+    'Le plus voté passe dans le prochain épisode.',
+    'Vous sentez venir la suite ?',
+    'Un détail change tout dans cet épisode.',
+    'On fait confiance à qui maintenant ?',
+    'Cette scène a deux fins possibles.',
+    'Choisissez, je tourne la suite.',
+    'Il y a un piège quelque part.',
+    'Racontez-moi comment ça finit.',
+    "Personne n'avait vu venir ce passage.",
+    'La suite arrive demain, dites-moi quoi.',
+    'Vous garderiez le secret, vous ?',
+    'Le prochain épisode part de votre réponse.',
+  ],
 });
 
 // Two tags stay put so the account keeps one address, two move with the
@@ -145,18 +175,66 @@ const GAMEPLAY_TAGS = Object.freeze([
   ['#softbodysimulation', '#satisfying', '#satisfyingvideo', '#3danimation'],
 ]);
 
+// A caption has to describe the video it travels with. TikTok lists
+// misleading captions and hashtags among the reasons a post never reaches
+// the For You feed, and this pipeline made the case on its own account: the
+// physics channel was pinned to the sad-edit deck while the story channel
+// fell through to the physics deck, so both advertised something the viewer
+// was not about to watch. The deck now follows what the render is, and a
+// style that does not describe that genre is refused rather than published.
+// The first entry is what `auto` resolves to, and the rest is what the
+// channel may be pinned to by hand. The story channel leads with its own
+// episode copy and only falls back to a deck when that copy would repeat.
+export const GENRE_STYLES = Object.freeze({
+  physics: ['gameplay'],
+  story: ['manifest', 'story'],
+  edit: ['melancholic', 'revenge'],
+});
+
+export function channelGenre(game = {}) {
+  // The dashboard writes `id` and the normalized config writes `game`, and
+  // reading only one of them would quietly call every channel physics.
+  if ((game?.game ?? game?.id) === 'story-comments') return 'story';
+  // Spoken edits are already restricted to soft-body-slide when the config
+  // loads, so the music profile is the only thing separating an edit from a
+  // plain physics drop.
+  if (String(game?.musicProfile || '').startsWith('edit-')) return 'edit';
+  return 'physics';
+}
+
+// Only reached when an episode's own line would repeat, so these stay
+// generic on purpose: the deck cannot know which series is on screen, and a
+// series tag that lies about the episode is worse than no series tag.
+const STORY_TAGS = Object.freeze([
+  ['#histoire', '#storytime', '#serie', '#suite'],
+  ['#histoire', '#storytime', '#mystere', '#episode'],
+  ['#histoire', '#storytime', '#choisislasuite', '#serie'],
+  ['#histoire', '#storytime', '#episode', '#suspense'],
+]);
+
 function hash(value) {
   let result = 2166136261;
   for (const char of value) result = Math.imul(result ^ char.charCodeAt(0), 16777619) >>> 0;
   return result;
 }
 
-export function publicationCopy({ style = 'auto', channelId = 'preview', date, seed = 1, raw = {} } = {}) {
+export function publicationCopy({
+  style = 'auto', genre = 'physics', channelId = 'preview', date, seed = 1, offset = 0, raw = {},
+} = {}) {
   if (!CAPTION_STYLES.includes(style)) throw new Error('Invalid caption style');
+  const allowed = GENRE_STYLES[genre];
+  if (!allowed) throw new Error(`Invalid channel genre: ${genre}`);
   const mood = raw?.music_profile ?? raw?.musicProfile;
   const resolved = style === 'auto'
-    ? mood === 'edit-revenge' ? 'revenge' : mood === 'edit-sad' ? 'melancholic' : 'gameplay'
+    ? genre === 'edit' ? (mood === 'edit-revenge' ? 'revenge' : 'melancholic') : allowed[0]
     : style;
+  if (!allowed.includes(resolved)) {
+    throw new Error(`Caption style ${resolved} does not describe a ${genre} video`);
+  }
+  // The story channel writes the episode's own words into the render
+  // manifest. Any deck here would replace the episode with a line about
+  // something else, which is the exact mismatch this gate exists to stop.
+  if (resolved === 'manifest') return null;
   let index = seed;
   if (date !== undefined) {
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(date) || !Number.isFinite(Date.parse(date))
@@ -164,9 +242,13 @@ export function publicationCopy({ style = 'auto', channelId = 'preview', date, s
     index = Math.floor(Date.parse(date) / 86400000);
   }
   if (!Number.isSafeInteger(index)) throw new Error('Invalid caption seed');
+  // The offset is how the publisher walks to the next phrase when the day's
+  // own phrase would repeat something already posted. Zero keeps the usual
+  // deterministic choice, so a retry of the same day lands on the same words.
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid caption offset');
   const deck = CAPTIONS[resolved].map((text, id) => ({ text, id, order: hash(`${channelId}:${resolved}:${id}`) }))
     .sort((a, b) => a.order - b.order || a.id - b.id);
-  const selected = deck[((index % deck.length) + deck.length) % deck.length];
+  const selected = deck[(((index + offset) % deck.length) + deck.length) % deck.length];
   const attribution = raw?.music_credit ?? raw?.musicCredit;
   const credit = typeof attribution === 'string' ? attribution.trim() : '';
   // Credits are never dropped or truncated by the platform adapters.
@@ -177,8 +259,10 @@ export function publicationCopy({ style = 'auto', channelId = 'preview', date, s
     caption: [selected.text, credit].filter(Boolean).join('\n\n'),
     tags: resolved === 'gameplay'
       ? GAMEPLAY_TAGS[((index % GAMEPLAY_TAGS.length) + GAMEPLAY_TAGS.length) % GAMEPLAY_TAGS.length]
-      : resolved === 'melancholic'
-        ? ['#melancholy', '#latenightthoughts', '#softbody', '#shorts']
-        : ['#quietcomeback', '#newchapter', '#softbody', '#shorts'],
+      : resolved === 'story'
+        ? STORY_TAGS[((index % STORY_TAGS.length) + STORY_TAGS.length) % STORY_TAGS.length]
+        : resolved === 'melancholic'
+          ? ['#melancholy', '#latenightthoughts', '#softbody', '#shorts']
+          : ['#quietcomeback', '#newchapter', '#softbody', '#shorts'],
   };
 }
