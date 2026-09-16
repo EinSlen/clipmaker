@@ -12,6 +12,7 @@ import { loadState, saveState, withStateLock } from './state.mjs';
 import { buildPublisherSummary } from './summary.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 import { assertNative3dQuality } from './native-3d-quality.mjs';
+import { CAPTIONS } from './edit-captions.mjs';
 
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'clipmaker-publisher-'));
@@ -752,6 +753,11 @@ test('a partial platform failure retries only the missing upload', async (t) => 
   assert(address && typeof address === 'object');
 
   const channel = sampleChannel();
+  // A spoken edit is the one genre that can legitimately switch decks, which
+  // is what this test needs in order to prove the frozen copy never moves.
+  // The loader pins spoken edits to soft-body-slide; this test drives the
+  // orchestrator directly, and the 3D quality gate has nothing to read here.
+  channel.game.musicProfile = 'edit-sad';
   channel.captionStyle = 'melancholic';
   channel.youtube.enabled = true;
   channel.tiktok = {
@@ -1048,4 +1054,78 @@ test('a publication catch-up can never render the 3D account inside the daily jo
     .split('- name: Save a safe status summary')[0];
   assert.match(step, /^ +extra\+=\(--skip-game soft-body-slide\)$/mu);
   assert.doesNotMatch(step, /COMMAND" = "generate"/u);
+});
+
+test('a caption style that does not describe the channel is refused when the config loads', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = path.join(directory, 'publisher.json');
+  const write = async (channel) => fs.writeFile(configPath, JSON.stringify({ channels: [channel] }));
+  const physics = {
+    id: 'softbody', game: { id: 'soft-body-slide' },
+    youtube: { enabled: false, account: 'default', privacy: 'private' },
+    tiktok: { enabled: false },
+  };
+
+  // The configuration that cost this account its reach: a physics drop
+  // advertised with the sad deck and #melancholy for a month.
+  await write({ ...physics, captionStyle: 'melancholic' });
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /physics channel/);
+  await write({ ...physics, captionStyle: 'story' });
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /physics channel/);
+  for (const captionStyle of ['auto', 'gameplay', undefined]) {
+    await write({ ...physics, captionStyle });
+    assert.equal((await readPublisherConfig(configPath, {})).channels[0].game.game, 'soft-body-slide');
+  }
+
+  const story = { ...physics, id: 'story', game: { id: 'story-comments', series: 'tentafruit', tiktokUser: 'dvlad' } };
+  await write({ ...story, captionStyle: 'gameplay' });
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /story channel/);
+  for (const captionStyle of ['auto', 'manifest', 'story']) {
+    await write({ ...story, captionStyle });
+    assert.equal((await readPublisherConfig(configPath, {})).channels[0].captionStyle, captionStyle);
+  }
+
+  // A spoken edit is a different genre even on the same game, so the decks
+  // written for it stay reachable.
+  const spokenEdit = { ...physics, game: { id: 'soft-body-slide', musicProfile: 'edit-sad', musicVolume: 0.5 } };
+  await write({ ...spokenEdit, captionStyle: 'melancholic' });
+  assert.equal((await readPublisherConfig(configPath, {})).channels[0].captionStyle, 'melancholic');
+  await write({ ...spokenEdit, captionStyle: 'gameplay' });
+  await assert.rejects(() => readPublisherConfig(configPath, {}), /edit channel/);
+});
+
+test('a caption that already went out is redrawn rather than repeated', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const calls = { render: 0, tiktok: 0 };
+  const baseUrl = await fakeClipmakerApi(t, calls);
+  // The story channel ships the words written for the episode, and the fake
+  // renderer hands back the same line twice, which is exactly the shape that
+  // put twenty three identical posts on one account.
+  const channel = {
+    ...sampleChannel(),
+    id: 'story',
+    game: { game: 'story-comments', duration: 30 },
+    tiktok: { enabled: true, username: 'clipmaker.test', musicId: null, visibility: 'private', confirmPublic: false },
+  };
+  const config = {
+    dryRun: false, baseUrl, requestTimeoutMinutes: 1, timeZone: 'Europe/Paris',
+    seedNamespace: 'test', stateDir: directory, catchupDays: 2, retentionDays: 120, channels: [channel],
+  };
+  for (const date of ['2026-09-15', '2026-09-16']) {
+    await generateChannel(config, channel, date);
+    await publishChannel(config, channel, date);
+  }
+
+  const jobs = (await loadState(directory)).jobs.slice().sort((left, right) => left.date.localeCompare(right.date));
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0].publicationCopy, null, 'the first day keeps the words of its own episode');
+  assert.equal(jobs[0].platforms.tiktok.status, 'published');
+  assert.equal(jobs[1].platforms.tiktok.status, 'published');
+  assert.equal(jobs[1].publicationCopy.captionStyle, 'story');
+  assert.ok(CAPTIONS.story.includes(jobs[1].publicationCopy.caption));
+  assert.notEqual(jobs[1].publicationCopy.caption, jobs[0].render.caption);
+  // The episode's own tags survive the redraw, because the deck cannot know
+  // which series is on screen and a wrong series tag is worse than none.
+  assert.deepEqual(jobs[1].publicationCopy.tags, jobs[1].render.tags);
+  assert.equal(calls.tiktok, 2);
 });

@@ -15,7 +15,7 @@ export type PublisherGameConfig = {
 
 export type PublisherChannelConfig = {
   id: string;
-  captionStyle?: "auto" | "melancholic" | "revenge" | "gameplay";
+  captionStyle?: "auto" | "melancholic" | "revenge" | "gameplay" | "manifest" | "story";
   enabled: boolean;
   generateTime: string;
   publishTime: string;

@@ -151,6 +151,7 @@ test('Cloudflare makes publication due at the exact configured minute', () => {
   const config = {
     dryRun: false,
     timeZone: 'Europe/Paris',
+    publishJitterMinutes: 0,
     channels: [{
       id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
       game: { id: 'soft-body-slide' },
@@ -168,6 +169,7 @@ test('scheduler skips a delayed native run instead of dispatching a duplicate', 
   const config = {
     dryRun: false,
     timeZone: 'Europe/Paris',
+    publishJitterMinutes: 0,
     channels: [{
       id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
       game: { id: 'soft-body-slide' },
@@ -203,6 +205,7 @@ test('scheduler dispatches once when GitHub missed the publication window', asyn
   const config = {
     dryRun: false,
     timeZone: 'Europe/Paris',
+    publishJitterMinutes: 0,
     channels: [{
       id: 'softbody-dvlad', enabled: true, generateTime: '00:07', publishTime: '18:00',
       game: { id: 'soft-body-slide' },

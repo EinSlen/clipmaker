@@ -12,6 +12,7 @@ import {
   TIKTOK_COOKIES_DIR,
 } from "@/lib/server-paths";
 import { listYouTubeAccounts } from "@/lib/youtube-agent";
+import { collidingChannels, readTikTokIdentities } from "@/lib/tiktok-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     const sessionFiles: Record<string, string> = {};
     const warnings: string[] = [];
     const accounts: {
-      tiktok: Array<{ username: string; ready: boolean }>;
+      tiktok: Array<{ username: string; ready: boolean; accountId?: string }>;
       youtube: Array<{ id: string; label: string; ready: boolean }>;
     } = { tiktok: [], youtube: [] };
     const configuredYoutubeAccounts = await listYouTubeAccounts();
@@ -86,6 +87,32 @@ export async function POST(request: Request) {
         if (!accounts.youtube.some((item) => item.id.toLowerCase() === channel.youtube.account.toLowerCase())) {
           accounts.youtube.push({ id: channel.youtube.account, label: channel.youtube.account, ready });
         }
+      }
+    }
+
+    // Two channels on one TikTok account post twice a day from the same
+    // profile. That went unnoticed here for weeks because the two sessions
+    // carried different labels, so the check has to compare the account
+    // behind them rather than the names in the configuration.
+    const tiktokAssignments = config.channels
+      .filter((channel) => channel.enabled && channel.tiktok.enabled && channel.tiktok.username)
+      .map((channel) => ({ channelId: channel.id, username: channel.tiktok.username as string }));
+    if (tiktokAssignments.length > 1) {
+      const identities = await readTikTokIdentities().catch((error) => {
+        warnings.push(`Identité TikTok non vérifiée : ${error instanceof Error ? error.message : "inconnue"}`);
+        return { accounts: [], shared: [] };
+      });
+      for (const account of identities.accounts || []) {
+        const entry = accounts.tiktok.find((item) => item.username === account.username);
+        if (entry && account.accountId) entry.accountId = account.accountId;
+      }
+      const collisions = collidingChannels(identities, tiktokAssignments);
+      if (collisions.length) {
+        const [collision] = collisions;
+        throw new Error(
+          `Les canaux ${collision.channels.join(" et ")} publient sur le même compte TikTok `
+          + `(sessions ${collision.usernames.join(", ")}). Donne un compte par canal avant de synchroniser.`,
+        );
       }
     }
 

@@ -12,7 +12,13 @@ import {
 import { doctorEndpoints, renderVideo, uploadTiktok, uploadYoutube } from './api-client.mjs';
 import { addDays, dateInTimeZone, isTimeDue } from './time.mjs';
 import { assertNative3dQuality } from './native-3d-quality.mjs';
-import { publicationCopy } from './edit-captions.mjs';
+import { CAPTIONS, GENRE_STYLES, channelGenre, publicationCopy } from './edit-captions.mjs';
+
+// Thirty days, because the rule this enforces is about what the feed has
+// already seen from the account, not about what one run remembers. The
+// window is deliberately longer than the longest deck, so a repeat can only
+// come from copy that did not go through a deck at all.
+const COPY_HISTORY_DAYS = 30;
 
 function deterministicSeed(date, channelId, namespace) {
   const digest = crypto.createHash('sha256').update(`${namespace}:${channelId}:${date}`).digest();
@@ -201,6 +207,52 @@ export async function generateChannel(config, channel, date, options = {}) {
   });
 }
 
+function shippedCaption(job) {
+  const copy = job.publicationCopy || job.render;
+  return String(copy?.caption || job?.render?.title || '').trim();
+}
+
+function recentCaptions(state, channel, job) {
+  const oldest = addDays(job.date, -COPY_HISTORY_DAYS);
+  const seen = new Set();
+  for (const previous of state.jobs) {
+    if (previous.id === job.id || previous.channelId !== channel.id) continue;
+    if (!previous.date || previous.date < oldest || previous.date > job.date) continue;
+    if (previous.platforms?.tiktok?.status !== 'published') continue;
+    const caption = shippedCaption(previous);
+    if (caption) seen.add(caption);
+  }
+  return seen;
+}
+
+// A post that repeats one already published is unoriginal content by
+// TikTok's own definition, and the account this pipeline drove through
+// August shipped the same manifest caption twenty three days running. The
+// day gets different words rather than no post at all: the deck is walked
+// from the day's own phrase, so nothing moves unless it has to.
+function freshPublicationCopy(state, channel, job) {
+  const genre = channelGenre(channel.game);
+  const request = {
+    style: channel.captionStyle, genre, channelId: channel.id,
+    date: job.date, seed: job.seed, raw: job.render.raw?.native3d || job.render.raw,
+  };
+  const first = publicationCopy(request);
+  const seen = recentCaptions(state, channel, job);
+  if (!seen.has(shippedCaption({ ...job, publicationCopy: first }))) return first;
+  // An episode's own line cannot be redrawn, so the genre's deck takes over
+  // for the day while the render keeps the tags it came with.
+  const fallback = first?.captionStyle
+    || GENRE_STYLES[genre].find((candidate) => candidate !== 'manifest')
+    || GENRE_STYLES[genre][0];
+  for (let offset = 0; offset < CAPTIONS[fallback].length; offset += 1) {
+    const copy = publicationCopy({ ...request, style: fallback, offset });
+    if (seen.has(copy.caption)) continue;
+    if (first) return copy;
+    return { ...copy, tags: job.render.tags?.length ? job.render.tags : copy.tags };
+  }
+  return first;
+}
+
 function enabledPlatformNames(channel) {
   return [
     ...(channel.youtube.enabled ? ['youtube'] : []),
@@ -287,8 +339,7 @@ export async function publishChannel(config, channel, date, options = {}) {
     if (!publicationStarted(job)) {
       // Freeze the same description before the first platform request. A
       // partial retry never changes already accepted copy or drops credits.
-      job.publicationCopy = publicationCopy({ style: channel.captionStyle, channelId: channel.id,
-        date: job.date, seed: job.seed, raw: job.render.raw?.native3d || job.render.raw });
+      job.publicationCopy = freshPublicationCopy(state, channel, job);
     }
     job.status = 'publishing';
     touch(job);

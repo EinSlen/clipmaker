@@ -354,6 +354,7 @@
     fields.append(field('Description de la publication', selectNode([
       ['auto', 'Automatique — suit la voix choisie'], ['melancholic', 'Mélancolique — 48 phrases anglaises'],
       ['revenge', 'Revenge — 24 phrases anglaises'], ['gameplay', 'Classique — description du jeu'],
+      ['manifest', "Épisode : les mots écrits pour l'épisode"], ['story', 'Story : 24 relances françaises'],
     ], channel.captionStyle || 'auto', (value) => { channel.captionStyle = value; }), 'field-span-2'));
     const captionNote = document.createElement('p'); captionNote.className = 'field-span-2';
     captionNote.textContent = 'Une description différente chaque jour, conservée lors des relances. Les crédits audio restent inclus. Exemple : “some feelings outlive the goodbye.”';
