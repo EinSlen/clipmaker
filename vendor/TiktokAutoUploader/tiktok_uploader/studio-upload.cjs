@@ -209,8 +209,12 @@ async function waitForUploadPage(page) {
   throw new Error('TikTok Studio upload form did not load.');
 }
 
+// Never add "Cancel" here. On this page it is not a dialog button: it is the
+// control that aborts the transfer of the file being uploaded. Clicking it
+// froze the upload wherever it had got to, left the Post button disabled for
+// good, and killed the run on its own deadline four minutes later.
 async function dismissUploadOverlays(page) {
-  for (const label of [/^Decline optional cookies$/i, /^Got it$/i, /^Cancel$/i]) {
+  for (const label of [/^Decline optional cookies$/i, /^Got it$/i]) {
     const buttons = page.getByRole('button', { name: label, exact: true });
     for (let index = (await buttons.count()) - 1; index >= 0; index -= 1) {
       const button = buttons.nth(index);
@@ -244,9 +248,23 @@ async function setCaption(page, caption) {
   }
   if (!editor) throw new Error('TikTok caption editor not found.');
   await dismissUploadOverlays(page);
-  await editor.click();
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.insertText(caption.slice(0, 2000));
+  // The caption box is a contenteditable combobox that never becomes
+  // actionable: a click waits for pointer events the element does not receive
+  // and times out, or it lands under a tooltip that opened over it, and the
+  // page is then left carrying the file name TikTok filled in for itself.
+  // Focus needs no actionability, and the keyboard reaches the same editor.
+  const text = caption.slice(0, 2000);
+  const expected = text.slice(0, 40).replace(/\s+/gu, ' ').trim();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await editor.focus().catch(() => {});
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.insertText(text);
+    await page.waitForTimeout(1200);
+    const written = (await editor.innerText().catch(() => '')).replace(/\s+/gu, ' ').trim();
+    if (written.startsWith(expected)) return;
+    await dismissUploadOverlays(page);
+  }
+  throw new Error('TikTok kept its own caption instead of the one it was given.');
 }
 
 async function setVisibility(page, privacy) {
@@ -306,7 +324,26 @@ async function waitUntilReady(page) {
   throw new Error('TikTok video upload did not become ready in time.');
 }
 
-async function confirmPost(page, baseline, responseIds) {
+// Playwright refuses a click it cannot deliver rather than sending it blind, so
+// a refusal means nothing was clicked and the attempt can be repeated once the
+// tooltip or banner in the way has been cleared. That keeps a covered button
+// from losing the day, without ever risking a second post.
+async function clickThrough(page, button, label) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await button.click({ timeout: 20_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      await dismissUploadOverlays(page);
+      await page.waitForTimeout(1500);
+    }
+  }
+  throw new Error(`TikTok kept something over the ${label}: ${lastError ? lastError.message.split('\n')[0] : 'unknown'}`);
+}
+
+async function confirmPost(page, baseline, responseIds, startedAt) {
   const direct = [...responseIds][0];
   if (direct) return { id: direct, evidence: 'post-response' };
   const deadline = Date.now() + 150_000;
@@ -318,7 +355,13 @@ async function confirmPost(page, baseline, responseIds) {
       await page.waitForTimeout(3000);
     }
     const ids = await collectPostIds(page, 2);
-    const added = [...ids].find((id) => !baseline.has(id));
+    // The content page sometimes renders with no posts at all, and a baseline
+    // taken from such a render makes every old post look new. A post id carries
+    // its own creation time, so only one created since this run started can be
+    // the one just published.
+    const added = [...ids]
+      .filter((id) => !baseline.has(id) && postTimestampMs(id) >= startedAt - 60_000)
+      .sort((left, right) => postTimestampMs(right) - postTimestampMs(left))[0];
     if (added) return { id: added, evidence: 'studio-content' };
     await page.waitForTimeout(7000);
   }
@@ -346,6 +389,7 @@ async function run() {
   });
   await context.addCookies(cookies);
   const page = await context.newPage();
+  const startedAt = Date.now();
   const responseIds = new Set();
   page.on('response', async (response) => {
     if (!/project\/post|\/publish|post\/v1/i.test(response.url())) return;
@@ -416,10 +460,10 @@ async function run() {
       })}\n`);
       return;
     }
-    await button.click();
+    await clickThrough(page, button, 'Post button');
     const postNow = page.getByRole('button', { name: /^(Post now|Publish now)$/i }).last();
     if (await postNow.isVisible({ timeout: 5000 }).catch(() => false)) await postNow.click();
-    const confirmation = await confirmPost(page, baseline, responseIds);
+    const confirmation = await confirmPost(page, baseline, responseIds, startedAt);
     const receipt = {
       provider: 'tiktok-studio-browser',
       platformPostId: confirmation.id,
