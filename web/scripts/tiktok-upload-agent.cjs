@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('node:path');
+const { existsSync } = require('node:fs');
 const { spawn } = require('node:child_process');
 
 const RECEIPT_PREFIX = 'CLIPMAKER_RECEIPT:';
@@ -65,9 +66,9 @@ function parseFailure(output) {
   };
 }
 
-function runProcess(command, args, { cwd, timeoutMs }) {
+function runProcess(command, args, { cwd, timeoutMs, env }) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, windowsHide: true });
+    const child = spawn(command, args, { cwd, windowsHide: true, ...(env ? { env } : {}) });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -102,11 +103,29 @@ function emitReceipt(receipt) {
   process.stdout.write(`${RECEIPT_PREFIX}${JSON.stringify(receipt)}\n`);
 }
 
+// The published image installs the browser and its driver outside the
+// repository, and the publisher server that spawns this agent knows neither
+// path. Handing them to the Studio process only, rather than exporting them
+// for the whole container, keeps the Next.js server resolving its own modules.
+function studioEnvironment() {
+  const environment = { ...process.env };
+  const modules = '/opt/tiktok-signature/node_modules';
+  if (!environment.NODE_PATH && existsSync(modules)) environment.NODE_PATH = modules;
+  if (!environment.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH && existsSync('/usr/bin/chromium')) {
+    environment.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH = '/usr/bin/chromium';
+  }
+  return environment;
+}
+
 async function runStudio(studioScript, vendorRoot, args, command = 'upload') {
   const studioArgs = [studioScript, command, '--users', args.users, '--visibility', args.visibility];
   if (command === 'upload') studioArgs.push('--video', args.video, '--title', args.title);
   if (command === 'verify-recent') studioArgs.push('--since', String(args.since));
-  return runProcess(process.execPath, studioArgs, { cwd: vendorRoot, timeoutMs: 9 * 60_000 });
+  return runProcess(process.execPath, studioArgs, {
+    cwd: vendorRoot,
+    timeoutMs: 9 * 60_000,
+    env: studioEnvironment(),
+  });
 }
 
 async function main() {
@@ -116,6 +135,7 @@ async function main() {
   const title = String(args.title || '').trim();
   const visibility = String(args.visibility) === '0' ? '0' : '1';
   const provider = String(args.provider || process.env.TIKTOK_UPLOAD_PROVIDER || 'auto');
+  const proxy = String(process.env.TIKTOK_PROXY_URL || '').trim();
   if (!/^[A-Za-z0-9._]{2,32}$/.test(username)) throw new Error('Invalid TikTok account name.');
   if (!video || !title) throw new Error('TikTok video and caption are required.');
   if (!PROVIDERS.has(provider)) throw new Error(`Unsupported TikTok provider: ${provider}.`);
@@ -127,6 +147,11 @@ async function main() {
   const studioScript = path.join(vendorRoot, 'tiktok_uploader', 'studio-upload.cjs');
   const startedAt = Date.now();
   const common = { users: username, video, title, visibility };
+  // Only the API uploader can attach an official sound. Failing here is better
+  // than publishing the day with the wrong audio and no way to tell afterwards.
+  if (provider === 'tiktok-studio-browser' && args.musicId) {
+    throw new Error('The Studio browser uploader cannot attach an official sound.');
+  }
 
   if (provider !== 'tiktok-studio-browser') {
     const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
@@ -135,6 +160,7 @@ async function main() {
       '--visibility', visibility,
     ];
     if (args.musicId) rawArgs.push('--music-id', String(args.musicId));
+    if (proxy) rawArgs.push('--proxy', proxy);
     const raw = await runProcess(python, rawArgs, { cwd: vendorRoot, timeoutMs: 5 * 60_000 });
     const rawReceipt = raw.code === 0 ? parseReceipt(raw.stdout, username) : null;
     if (rawReceipt) {

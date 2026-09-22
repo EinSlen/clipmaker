@@ -21,11 +21,42 @@ function parseArgs(argv) {
 }
 
 function playwright() {
-  try {
-    return require('playwright-chromium');
-  } catch {
-    return require(path.join(__dirname, 'tiktok-signature', 'node_modules', 'playwright-chromium'));
+  // The Docker image keeps these modules outside the repository tree, so the
+  // relative path that works from a checkout resolves to nothing in the
+  // container. Both locations are tried before giving up.
+  const candidates = [
+    'playwright-chromium',
+    path.join(__dirname, 'tiktok-signature', 'node_modules', 'playwright-chromium'),
+    '/opt/tiktok-signature/node_modules/playwright-chromium',
+  ];
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch {
+      continue;
+    }
   }
+  throw new Error('playwright-chromium is not installed.');
+}
+
+// A headless Chromium announces itself in its own user agent. TikTok reads it
+// on the upload page, so the browser claims the desktop Chrome the account was
+// logged in from instead.
+const DESKTOP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+
+function proxyOptions() {
+  const raw = String(process.env.TIKTOK_PROXY_URL || '').trim();
+  if (!raw) return undefined;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error('TIKTOK_PROXY_URL is not a valid URL.');
+  }
+  const proxy = { server: `${parsed.protocol}//${parsed.host}` };
+  if (parsed.username) proxy.username = decodeURIComponent(parsed.username);
+  if (parsed.password) proxy.password = decodeURIComponent(parsed.password);
+  return proxy;
 }
 
 function chromiumExecutable() {
@@ -300,14 +331,17 @@ async function run() {
   if (!/^[A-Za-z0-9._]{2,32}$/.test(username)) throw new Error('Invalid TikTok account name.');
   const cookies = readCookies(username);
   const { chromium } = playwright();
+  const proxy = proxyOptions();
   const browser = await chromium.launch({
     executablePath: chromiumExecutable(),
     headless: args.headed !== true,
+    ...(proxy ? { proxy } : {}),
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
   });
   const context = await browser.newContext({
     locale: 'en-US',
     timezoneId: 'Europe/Paris',
+    userAgent: DESKTOP_USER_AGENT,
     viewport: { width: 1440, height: 1000 },
   });
   await context.addCookies(cookies);
@@ -355,6 +389,7 @@ async function run() {
         username,
         provider: 'tiktok-studio-browser',
         readyForLiveUpload: true,
+        proxied: Boolean(proxy),
         visiblePostCount: baseline.size,
       })}\n`);
       return;
@@ -375,6 +410,7 @@ async function run() {
         provider: 'tiktok-studio-browser',
         readyForLiveUpload: true,
         uploadFormReady: true,
+        proxied: Boolean(proxy),
         privacy,
         visiblePostCount: baseline.size,
       })}\n`);
