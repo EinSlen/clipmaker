@@ -50,6 +50,11 @@ on:
         required: false
         default: ''
         type: string
+      tiktok_check:
+        description: Open the TikTok Studio upload page from this runner without posting
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -73,6 +78,8 @@ jobs:
       YOUTUBE_OAUTH_ACCOUNTS_B64: ${{ secrets.YOUTUBE_OAUTH_ACCOUNTS_B64 }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       MINIMAX_COOKIES_B64: ${{ secrets.MINIMAX_COOKIES_B64 }}
+      TIKTOK_UPLOAD_PROVIDER: ${{ vars.TIKTOK_UPLOAD_PROVIDER || 'tiktok-studio-browser' }}
+      TIKTOK_PROXY_URL: ${{ secrets.TIKTOK_PROXY_URL }}
       CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
       GH_TOKEN: ${{ github.token }}
       MANUAL_DRY_RUN: ${{ inputs.dry_run }}
@@ -163,6 +170,8 @@ jobs:
             --env CLIPMAKER_UPLOAD_TOKEN="$CLIPMAKER_UPLOAD_TOKEN" \
             --env YOUTUBE_API_KEY="$YOUTUBE_API_KEY" \
             --env CLOUD_CONTROL_API="$CLOUD_CONTROL_API" \
+            --env TIKTOK_UPLOAD_PROVIDER="$TIKTOK_UPLOAD_PROVIDER" \
+            --env TIKTOK_PROXY_URL="$TIKTOK_PROXY_URL" \
             --volume "$PWD:/repo" \
             --volume "$PWD/web/renders:/app/renders" \
             --volume "$PWD/web/uploads:/app/uploads" \
@@ -173,6 +182,23 @@ jobs:
           done
           docker logs clipmaker-daily >&2
           exit 1
+
+      - name: Check the TikTok Studio upload path from this runner
+        if: ${{ inputs.tiktok_check }}
+        run: |
+          accounts="$(node -e "
+            const config = require('./web/config/publisher.json');
+            const names = (config.channels || [])
+              .filter((channel) => channel.enabled !== false && channel.tiktok?.enabled && channel.tiktok.username)
+              .map((channel) => channel.tiktok.username);
+            process.stdout.write([...new Set(names)].join(' '));
+          ")"
+          for account in $accounts; do
+            echo "== $account"
+            docker exec \
+              --workdir /repo/vendor/TiktokAutoUploader \
+              clipmaker-daily node tiktok_uploader/studio-upload.cjs doctor --users "$account"
+          done
 
       - name: Select the scheduled or manual operation
         id: operation

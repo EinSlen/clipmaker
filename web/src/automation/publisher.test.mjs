@@ -538,6 +538,35 @@ test('TikTok upload restores the API provider with a verified Studio fallback an
   assert.doesNotMatch(source, /'--user', username/);
 });
 
+// Twenty five posts published through the bare API uploader received exactly no
+// distribution, on two different accounts, while the same renders posted from a
+// real browser reached their usual audience. The browser path is therefore the
+// default, and every piece of it has to survive a refactor.
+test('TikTok posts leave through a real browser that does not announce itself as one', async () => {
+  const workflowPath = await repositoryFile('.github/workflows/daily-publisher.yml');
+  const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/studio-upload.cjs');
+  const apiUploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/tiktok.py');
+  const agentPath = new URL('../../scripts/tiktok-upload-agent.cjs', import.meta.url);
+  const [workflow, uploader, apiUploader, agent] = await Promise.all([
+    fs.readFile(workflowPath, 'utf8'),
+    fs.readFile(uploaderPath, 'utf8'),
+    fs.readFile(apiUploaderPath, 'utf8'),
+    fs.readFile(agentPath, 'utf8'),
+  ]);
+  assert.match(workflow, /TIKTOK_UPLOAD_PROVIDER: \$\{\{ vars\.TIKTOK_UPLOAD_PROVIDER \|\| 'tiktok-studio-browser' \}\}/u);
+  assert.match(workflow, /--env TIKTOK_UPLOAD_PROVIDER="\$TIKTOK_UPLOAD_PROVIDER"/u);
+  assert.match(workflow, /--env TIKTOK_PROXY_URL="\$TIKTOK_PROXY_URL"/u);
+  assert.match(uploader, /userAgent: DESKTOP_USER_AGENT/u);
+  assert.doesNotMatch(uploader, /HeadlessChrome/u);
+  assert.match(uploader, /timezoneId: 'Europe\/Paris'/u);
+  assert.match(uploader, /TIKTOK_PROXY_URL/u);
+  assert.match(uploader, /\/opt\/tiktok-signature\/node_modules\/playwright-chromium/u);
+  // A random user agent per upload made one session look like many browsers.
+  assert.doesNotMatch(apiUploader, /UserAgent\(\)\.random/u);
+  assert.match(agent, /env: studioEnvironment\(\)/u);
+  assert.match(agent, /rawArgs\.push\('--proxy', proxy\)/u);
+});
+
 test('publisher doctor requires the historical API session and reports Studio fallback health separately', async () => {
   const routePath = new URL('../app/api/tiktok/accounts/route.ts', import.meta.url);
   const clientPath = new URL('./api-client.mjs', import.meta.url);

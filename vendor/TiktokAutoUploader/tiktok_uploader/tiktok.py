@@ -1,6 +1,5 @@
 import time, requests, datetime, hashlib, hmac, random, zlib, json, datetime
 import requests, zlib, json, time, subprocess, string, secrets, os, sys
-from fake_useragent import FakeUserAgentError, UserAgent
 from requests_auth_aws_sigv4 import AWSSigV4
 from tiktok_uploader.cookies import load_cookies_from_file
 from tiktok_uploader.bot_utils import *
@@ -13,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Constants
-_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36'
+_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 
 _UPLOAD_PHASE = "initializing"
 
@@ -74,11 +73,10 @@ def login(login_name: str):
 # Local Code...
 def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, allow_duet=0, allow_stitch=0, visibility_type=0, brand_organic_type=0, branded_content_type=0, ai_label=0, proxy=None, music_id=None):
 	_set_upload_phase("preflight")
-	try:
-		user_agent = UserAgent().random
-	except FakeUserAgentError as e:
-		user_agent = _UA
-		print("[-] Could not get random user agent, using default")
+	# A session that posts from a different browser every day reads as a stolen
+	# one. The account logged in from a desktop Chrome, so every upload claims
+	# that same browser, and the request signature is computed from it.
+	user_agent = _UA
 
 	cookies = load_cookies_from_file(f"tiktok_session-{session_user}")
 	session_id = next((c["value"] for c in cookies if c["name"] == 'sessionid'), None)
