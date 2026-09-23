@@ -521,7 +521,7 @@ test('TikTok upload restores the API provider with a verified Studio fallback an
   assert.match(uploader, /CLIPMAKER_RECEIPT:/u);
   assert.match(uploader, /tiktok-studio-browser/u);
   assert.match(uploader, /verifiedInStudio: true/u);
-  assert.match(uploader, /confirmPost\(page, baseline, responseIds\)/u);
+  assert.match(uploader, /confirmPost\(page, baseline, responseIds, startedAt\)/u);
   assert.match(uploader, /Date\.now\(\) \+ 90_000/u);
   assert.match(uploader, /tiktok-cookie-banner, #react-joyride-portal/u);
   assert.match(uploader, /button\[role="combobox"\]:has-text\("Everyone"\)/u);
@@ -565,6 +565,17 @@ test('TikTok posts leave through a real browser that does not announce itself as
   assert.doesNotMatch(apiUploader, /UserAgent\(\)\.random/u);
   assert.match(agent, /env: studioEnvironment\(\)/u);
   assert.match(agent, /rawArgs\.push\('--proxy', proxy\)/u);
+  // On the upload page "Cancel" aborts the transfer of the file. Clicking it as
+  // if it closed a dialog froze the upload and disabled Post until the run
+  // timed out, which is why this uploader had never once published.
+  assert.doesNotMatch(uploader, /\^Cancel\$/u);
+  // The caption box never becomes actionable, so it is focused, not clicked,
+  // and what it ends up holding is read back before the post goes out.
+  assert.match(uploader, /await editor\.focus\(\)/u);
+  assert.match(uploader, /TikTok kept its own caption/u);
+  assert.doesNotMatch(uploader, /await editor\.click\(\)/u);
+  // An empty render of the content page made every older post look new.
+  assert.match(uploader, /postTimestampMs\(id\) >= startedAt - 60_000/u);
 });
 
 test('publisher doctor requires the historical API session and reports Studio fallback health separately', async () => {
