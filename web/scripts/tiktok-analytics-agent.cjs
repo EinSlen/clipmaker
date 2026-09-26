@@ -9,7 +9,7 @@
  * Studio fetches for its own charts is captured as it arrives and written to
  * disk, so the shape of the payload never has to be guessed in advance.
  *
- *   node web/scripts/tiktok-analytics-agent.cjs --user dvlad [--headed] [--out file.json]
+ *   node web/scripts/tiktok-analytics-agent.cjs --user dvlad [--headed] [--out file.json] [--posts 7]
  *   node web/scripts/tiktok-analytics-agent.cjs --user dvlad --search "soft body simulation"
  *
  * The search mode reads the public results page the same way a person does,
@@ -99,6 +99,16 @@ function readCookies(username) {
     }));
 }
 
+function recentPostIds(captured) {
+  const posts = new Map();
+  for (const { payload } of captured) {
+    for (const item of payload?.item_list || []) {
+      if (item?.item_id) posts.set(String(item.item_id), Number(item.create_time) || 0);
+    }
+  }
+  return [...posts].sort((a, b) => b[1] - a[1]).map(([id]) => id).filter((id) => /^\d{8,25}$/.test(id));
+}
+
 async function run() {
   const args = parseArgs(process.argv.slice(2));
   const username = String(args.user || args.users || '').trim();
@@ -126,7 +136,9 @@ async function run() {
     if (!/json/i.test(response.headers()['content-type'] || '')) return;
     const payload = await response.json().catch(() => null);
     if (!payload) return;
-    const key = `${url.split('?')[0]}:${JSON.stringify(payload).length}`;
+    // The query names the post a per-video insight is about, so it is part of
+    // what makes two responses different.
+    const key = `${url}:${JSON.stringify(payload).length}`;
     if (seen.has(key)) return;
     seen.add(key);
     captured.push({ url: url.split('?')[0], query: url.split('?')[1] || '', payload });
@@ -158,6 +170,17 @@ async function run() {
         await page.goto(target, { waitUntil: 'networkidle', timeout: 90_000 }).catch(() => {});
         // One settle, not a polling loop: the charts fetch on load.
         await page.waitForTimeout(6000);
+      }
+      // Views alone said every post stopped near 90 and not why. Each post's
+      // own overview carries its retention curve, which does. One page per
+      // post, newest first, and a fixed settle: waiting for the network to
+      // go idle on these pages ran into the timeout every time.
+      const wanted = Math.max(0, Math.min(10, Number.parseInt(String(args.posts || '0'), 10) || 0));
+      for (const id of recentPostIds(captured).slice(0, wanted)) {
+        await page.goto(`https://www.tiktok.com/tiktokstudio/analytics/${id}/overview`, {
+          waitUntil: 'domcontentloaded', timeout: 90_000,
+        }).catch(() => {});
+        await page.waitForTimeout(8000);
       }
     }
     const signedIn = !/\/login/i.test(page.url());

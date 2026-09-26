@@ -422,7 +422,7 @@ jobs:
               --env NODE_PATH=/opt/tiktok-signature/node_modules \
               --env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
               clipmaker-daily node /repo/web/scripts/tiktok-analytics-agent.cjs \
-              --user "$account" --out "/repo/artifacts/reach-$account.json" || continue
+              --user "$account" --posts 7 --out "/repo/artifacts/reach-$account.json" || continue
             docker exec clipmaker-daily python3 /repo/web/scripts/reach_watchdog.py \
               "/repo/artifacts/reach-$account.json" \
               | grep -v '^CLIPMAKER_REACH:' >> artifacts/summary.md || true
