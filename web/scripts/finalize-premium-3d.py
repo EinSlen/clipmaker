@@ -15,6 +15,7 @@ from types import ModuleType
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
 from edit_audio import EDIT_PROFILES, prepare_edit_soundtrack
 from sample_foley import resolve_pack, synth_sample_foley
+from soft_body_edit import accent_times, frame_motion, published_edit, published_events, stage_published_frames
 from soft_body_variants import source_variant_summary
 
 
@@ -116,7 +117,7 @@ def main() -> None:
     motion_payload = json.loads(events_path.read_text(encoding="utf-8"))
     source_variant = source_variant_summary(variant, motion_payload)
     attempt_quality = renderer.validate_motion_preflight(motion_payload, variant, frame_count, args.fps)
-    _attempts, published_spans, _counts = renderer.published_attempt_timeline(
+    attempts, published_spans, counts = renderer.published_attempt_timeline(
         motion_payload, variant, frame_count, args.fps
     )
     events, attempt_cuts = read_motion_events(events_path)
@@ -131,24 +132,34 @@ def main() -> None:
             staged_frames, frame_count, len(stages), attempt_cuts, variant.obstacle.key, stages,
             published_spans,
         )
+        # The evidence covers the full render; the viewer gets the edit of it.
+        # A spoken or vocal track is chosen for the full 30 s and carries the
+        # clip, so cutting the picture under it would cut the voice too.
+        cut = args.music_profile == "original"
+        motion = frame_motion(staged_frames, frame_count) if cut else ()
+        edit = published_edit(motion, attempts, counts, events, args.fps, cut)
+        published_frames = root / "published"
+        stage_published_frames(staged_frames, published_frames, edit)
+        published_duration = edit.duration
+        heard_events = published_events(edit, events)
         silent = root / "silent.mp4"
         effects = root / "premium-foley.wav"
         music = root / "original-soft-body-bed.wav"
         if args.music_profile == "original":
-            renderer.synth_soft_body_bed(args.duration, music, args.seed)
+            renderer.synth_soft_body_bed(published_duration, music, args.seed)
             soundtrack = {"music": "Original seeded ambient bed", "music_generated": True, "music_profile": "original"}
         elif args.music_profile in EDIT_PROFILES:
             soundtrack = prepare_edit_soundtrack(args.duration, music, plan_seed, args.music_profile, args.date, args.channel_id, synth_bed=renderer.synth_soft_body_bed)
         else:
             soundtrack = prepare_vocal_soundtrack(args.duration, music, plan_seed, args.music_profile, args.date, args.channel_id)
         video_filter = renderer.build_video_filter(
-            args.duration, stages, variant.obstacle.key,
-            renderer.stage_label_time_spans(published_spans, args.fps),
+            published_duration, stages, variant.obstacle.key,
+            edit.level_seconds, edit.opening_seconds,
         )
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-framerate", str(args.fps), "-i", str(staged_frames / "frame_%04d.png"),
+                "-framerate", str(args.fps), "-i", str(published_frames / "frame_%04d.png"),
                 "-vf", video_filter,
                 "-c:v", "libx264", "-preset", args.preset, "-crf", str(args.crf),
                 "-pix_fmt", "yuv420p", "-an", str(silent),
@@ -156,17 +167,24 @@ def main() -> None:
             check=True,
         )
         pack = resolve_pack(args.sound_pack)
+        foley_duration = published_duration + renderer.FOLEY_TAIL_SECONDS
         if pack:
-            sound = synth_sample_foley(args.duration, events, effects, args.seed, pack)
+            sound = synth_sample_foley(foley_duration, heard_events, effects, args.seed, pack, accent_times(edit, events))
         else:
-            renderer.synth_premium_foley(args.duration, events, effects, args.seed)
+            renderer.synth_premium_foley(foley_duration, heard_events, effects, args.seed)
             sound = {"sound_pack": "premium-foley", "sound_pack_kind": "synthesised"}
-        audio_filter = renderer.build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
+        vocals = bool(soundtrack.get("music_has_vocals"))
+        spoken = soundtrack.get("music_content_kind") == "spoken"
+        audio_inputs = ["-i", str(silent), "-i", str(effects), *([] if spoken else ["-stream_loop", "-1"]), "-i", str(music)]
+        audio_filter = renderer.build_continuous_audio_filter(args.music_volume, vocals, spoken)
+        audio_filter = renderer.build_continuous_audio_filter(
+            args.music_volume, vocals, spoken,
+            renderer.measure_mix_loudness("ffmpeg", audio_inputs, audio_filter, published_duration),
+        )
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(silent), "-i", str(effects),
-                *([] if soundtrack.get("music_content_kind") == "spoken" else ["-stream_loop", "-1"]), "-i", str(music),
+                *audio_inputs,
                 "-filter_complex", audio_filter,
                 "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac",
                 "-ar", "48000", "-b:a", "160k", "-shortest", "-movflags", "+faststart",
@@ -192,13 +210,18 @@ def main() -> None:
         "event_source": "simulated-collision-peaks" if events else "no-physical-events",
         "physics_preflight": "passed",
         "attempt_quality": attempt_quality,
-        "foley_event_times": [round(float(event["time"]), 3) for event in events],
+        "foley_event_times": [round(float(event["time"]), 3) for event in heard_events],
         "foley_event_types": sorted({str(event.get("kind", "contact")) for event in events}),
         "trials": len(stages),
         "units_completed": args.difficulty,
         "units_total": 100,
         "renderer": "Blender Eevee native GitHub matrix",
+        # `frames` and `duration` stay the simulated timeline the preflight
+        # covers; the file itself is the edit.
         "frames": frame_count,
+        "published_frames": len(edit.frames),
+        "published_duration": round(published_duration, 3),
+        "published_edit": edit.summary(),
         "render_width": 1080,
         "render_height": 1920,
         "render_fps": args.fps,

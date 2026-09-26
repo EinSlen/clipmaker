@@ -22,6 +22,7 @@ from soft_body_variants import (
     stage_time_spans, variant_for_seed, variant_summary, source_variant_summary,
 )
 from sample_foley import resolve_pack, synth_sample_foley
+from soft_body_edit import accent_times, frame_motion, published_edit, published_events, stage_published_frames
 from soft_body_framing import validate_stair_outlet_evidence
 from soft_body_stair_geometry import VOLUME_CONTACT
 from vocal_playlist import PROFILES, prepare_vocal_soundtrack
@@ -387,8 +388,17 @@ def synth_soft_body_bed(duration: float, output: Path, seed: int) -> None:
         destination.writeframes(pcm.tobytes())
 
 
-def build_continuous_audio_filter(music_volume: float, vocals: bool = False, spoken: bool = False) -> str:
-    """Mix readable vocals or a quiet instrumental bed with collision Foley."""
+def build_continuous_audio_filter(
+    music_volume: float,
+    vocals: bool = False,
+    spoken: bool = False,
+    measured: dict[str, str] | None = None,
+) -> str:
+    """Mix readable vocals or a quiet instrumental bed with collision Foley.
+
+    ``measured`` is loudnorm's own report on this mix; with it the instrumental
+    branch applies one constant gain instead of riding the level.
+    """
     bounded_volume = max(0.0, min(1.5, music_volume))
     if vocals:
         # Keep the actual recording's character and stereo image. No pitch,
@@ -415,8 +425,54 @@ def build_continuous_audio_filter(music_volume: float, vocals: bool = False, spo
         # -2.5 the same file measures -1.40 dBFS for -17.77 LUFS, so the
         # mix keeps its loudness and gains most of a decibel of headroom
         # for the re-encode the platforms run on it.
-        "[limited]loudnorm=I=-18:TP=-2.5:LRA=10[a]"
+        f"[limited]loudnorm=I=-18:TP=-2.5:LRA=10{linear_loudnorm_options(measured)}[a]"
     )
+
+
+# loudnorm holds back the end of its buffer, so a Foley track exactly as long
+# as the picture came out 90 ms short and -shortest dropped the last frames.
+# The track runs past the picture instead and the picture sets the end.
+FOLEY_TAIL_SECONDS = 0.5
+
+
+def linear_loudnorm_options(measured: dict[str, str] | None) -> str:
+    # Riding the level sets its first gain on the opening three seconds. With
+    # the accent there, the 26 September daily came out 1.3 dB under target
+    # with the meow squashed to 4 dB over the busy part; one measured gain
+    # lands within 0.3 dB and keeps it 9 dB over. loudnorm itself falls back
+    # to riding when a constant gain would break the true peak ceiling.
+    if not measured:
+        return ""
+    return (
+        f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
+        f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
+        f":offset={measured['target_offset']}:linear=true"
+    )
+
+
+def measure_mix_loudness(ffmpeg: str, inputs: list[str], audio_filter: str, duration: float) -> dict[str, str] | None:
+    """First loudnorm pass over the mix, or None when it cannot be read.
+
+    The bed loops without end and only the picture stops the final mix, so the
+    pass is cut at the same length.
+    """
+    if "[limited]loudnorm=" not in audio_filter or not audio_filter.endswith("[a]"):
+        return None
+    probe = audio_filter[:-len("[a]")] + ":print_format=json[a]"
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-nostats", *inputs, "-filter_complex", probe, "-map", "[a]",
+         "-t", f"{duration:.3f}", "-f", "null", "-"],
+        capture_output=True, text=True, check=True,
+    )
+    report = result.stderr
+    try:
+        measured = json.loads(report[report.rindex("{"):report.rindex("}") + 1])
+    except ValueError:
+        return None
+    keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+    if any(not math.isfinite(float(measured.get(key, "nan"))) for key in keys):
+        return None
+    return {key: str(measured[key]) for key in keys}
 
 
 def ffmpeg_filter_path(path: Path) -> str:
@@ -461,6 +517,7 @@ def build_video_filter(
     stages: tuple[int, ...],
     obstacle_key: str | None = None,
     spans: tuple[tuple[float, float], ...] | None = None,
+    opening: tuple[float, float] | None = None,
 ) -> str:
     """Keep native pixels and reproduce the reference's stage-only typography."""
     font_file = premium_font_file()
@@ -480,10 +537,16 @@ def build_video_filter(
             "shadowcolor=black@0.32:shadowx=0:shadowy=3:"
             f"enable='between(t\\,0\\,{HOOK_SECONDS:.3f})'"
         )
+    windows = []
+    if opening and stages:
+        # The opening is a moment of the last level, so it carries that
+        # level's percentage: the first thing read is where the clip ends up.
+        windows.append((stages[-1], opening[0], opening[1] - 0.001))
     for index, (softness, (start, stop)) in enumerate(
         zip(stages, stage_time_spans(duration, len(stages), obstacle_key, stages) if spans is None else spans)
     ):
-        end = duration if index == len(stages) - 1 else stop - 0.001
+        windows.append((softness, start, duration if index == len(stages) - 1 else stop - 0.001))
+    for softness, start, end in windows:
         window = f"enable='between(t\\,{start:.3f}\\,{end:.3f})'"
         # The percentage is the whole point of the comparison, so it carries
         # the size and the word sits under it, small and letter spaced. A hard
@@ -535,13 +598,11 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         external_music = Path(args.music).resolve() if args.music and Path(args.music).is_file() else None
         soundtrack = {"music": external_music.name if external_music else "Original seeded ambient bed",
                       "music_generated": external_music is None, "music_profile": "external" if external_music else "original"}
-        if external_music is None:
-            if args.music_profile == "original":
-                synth_soft_body_bed(args.duration, generated_bed, args.seed)
-            elif args.music_profile in EDIT_PROFILES:
-                soundtrack = prepare_edit_soundtrack(args.duration, generated_bed, args.seed, args.music_profile, synth_bed=synth_soft_body_bed)
-            else:
-                soundtrack = prepare_vocal_soundtrack(args.duration, generated_bed, args.seed, args.music_profile)
+        # The original bed is written once the edit knows its length.
+        if external_music is None and args.music_profile in EDIT_PROFILES:
+            soundtrack = prepare_edit_soundtrack(args.duration, generated_bed, args.seed, args.music_profile, synth_bed=synth_soft_body_bed)
+        elif external_music is None and args.music_profile != "original":
+            soundtrack = prepare_vocal_soundtrack(args.duration, generated_bed, args.seed, args.music_profile)
         motion_events = root / "motion-events.json"
         blender_command = [
             blender, "--background", "--factory-startup", "--python-exit-code", "1", "--python", str(SCRIPT_DIR / "blender-soft-body-slide.py"), "--",
@@ -561,7 +622,7 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         if motion_events.is_file():
             payload = json.loads(motion_events.read_text(encoding="utf-8"))
             attempt_quality = validate_motion_preflight(payload, variant, frame_count, fps)
-            _attempts, published_spans, _counts = published_attempt_timeline(payload, variant, frame_count, fps)
+            attempts, published_spans, counts = published_attempt_timeline(payload, variant, frame_count, fps)
             exported_cuts = payload.get("attempt_cuts", [])
             if isinstance(exported_cuts, list):
                 attempt_cuts = tuple(
@@ -588,28 +649,44 @@ def render(args: argparse.Namespace) -> dict[str, object]:
             # collision or a clean geometric receiver entry exported by
             # Blender.  The ambient bed still keeps the mix alive.
             event_source = "no-physical-events"
+        # Same edit as the daily assembly, so a local preview is what ships.
+        cut = args.music_profile == "original"
+        edit = published_edit(frame_motion(frames, frame_count) if cut else (), attempts, counts, events, fps, cut)
+        published_frames = root / "published"
+        stage_published_frames(frames, published_frames, edit)
+        published_duration = edit.duration
+        heard_events = published_events(edit, events)
+        if external_music is None and args.music_profile == "original":
+            synth_soft_body_bed(published_duration, generated_bed, args.seed)
         video_filter = build_video_filter(
-            args.duration, stages, variant.obstacle.key,
-            stage_label_time_spans(published_spans, fps),
+            published_duration, stages, variant.obstacle.key,
+            edit.level_seconds, edit.opening_seconds,
         )
         subprocess.run([
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-framerate", str(fps),
-            "-i", str(frames / "frame_%04d.png"),
+            "-i", str(published_frames / "frame_%04d.png"),
             "-vf", video_filter,
             "-c:v", "libx264", "-preset", video_preset, "-crf", video_crf,
             "-pix_fmt", "yuv420p", "-an", str(silent),
         ], check=True)
         pack = resolve_pack(args.sound_pack)
+        foley_duration = published_duration + FOLEY_TAIL_SECONDS
         if pack:
-            sound = synth_sample_foley(args.duration, events, effects, args.seed, pack)
+            sound = synth_sample_foley(foley_duration, heard_events, effects, args.seed, pack, accent_times(edit, events))
         else:
-            synth_premium_foley(args.duration, events, effects, args.seed)
+            synth_premium_foley(foley_duration, heard_events, effects, args.seed)
             sound = {"sound_pack": "premium-foley", "sound_pack_kind": "synthesised"}
         music_source = external_music or generated_bed
-        audio_filter = build_continuous_audio_filter(args.music_volume, bool(soundtrack.get("music_has_vocals")), soundtrack.get("music_content_kind") == "spoken")
+        vocals = bool(soundtrack.get("music_has_vocals"))
+        spoken = soundtrack.get("music_content_kind") == "spoken"
+        audio_inputs = ["-i", str(silent), "-i", str(effects), *([] if spoken else ["-stream_loop", "-1"]), "-i", str(music_source)]
+        audio_filter = build_continuous_audio_filter(args.music_volume, vocals, spoken)
+        audio_filter = build_continuous_audio_filter(
+            args.music_volume, vocals, spoken,
+            measure_mix_loudness(ffmpeg, audio_inputs, audio_filter, published_duration),
+        )
         audio_command = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent), "-i", str(effects),
-            *([] if soundtrack.get("music_content_kind") == "spoken" else ["-stream_loop", "-1"]), "-i", str(music_source), "-filter_complex", audio_filter,
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *audio_inputs, "-filter_complex", audio_filter,
         ]
         subprocess.run(audio_command + [
             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000",
@@ -640,12 +717,15 @@ def render(args: argparse.Namespace) -> dict[str, object]:
         "event_source": event_source,
         "physics_preflight": "passed",
         "attempt_quality": attempt_quality,
-        "foley_event_times": [round(float(event["time"]), 3) for event in events],
+        "foley_event_times": [round(float(event["time"]), 3) for event in heard_events],
         "foley_event_types": sorted({str(event.get("kind", "contact")) for event in events}),
         "units_completed": args.difficulty,
         "units_total": 100,
         "renderer": "Blender Eevee cinematic rod",
         "frames": frame_count,
+        "published_frames": len(edit.frames),
+        "published_duration": round(published_duration, 3),
+        "published_edit": edit.summary(),
         "render_width": width,
         "render_height": height,
         "render_fps": fps,

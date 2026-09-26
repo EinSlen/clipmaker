@@ -489,7 +489,13 @@ jobs:
           streams = probe.get("streams", [])
           video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
           audio_stream = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
-          expected_video = ("h264", 1080, 1920, "30/1", "900")
+          # The file is the edit of the simulated timeline: dead air cut, the
+          # payoff shown first. `frames` stays the simulated count.
+          published_frames = metadata.get("published_frames")
+          if (type(published_frames) is not int or not 300 <= published_frames <= metadata.get("frames", 0) + 60
+                  or abs(published_frames / 30 - float(metadata.get("published_duration", 0))) > 0.002):
+              raise SystemExit(f"Unexpected published edit: {published_frames} frames")
+          expected_video = ("h264", 1080, 1920, "30/1", str(published_frames))
           actual_video = tuple((video_stream or {}).get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
           if actual_video != expected_video:
               raise SystemExit(f"Unexpected production video stream: {video_stream}")
@@ -498,7 +504,7 @@ jobs:
           if actual_audio != expected_audio:
               raise SystemExit(f"Unexpected production audio stream: {audio_stream}")
           duration = float(probe.get("format", {}).get("duration", 0))
-          if not 29.9 <= duration <= 30.1:
+          if abs(duration - published_frames / 30) > 0.1:
               raise SystemExit(f"Unexpected production duration: {duration}")
           cleared_vocals = (metadata.get("music_provider") == "ncs"
                             and metadata.get("music_has_vocals") is True
@@ -527,7 +533,7 @@ jobs:
                   "title": title, "youtubeTitle": f"{title} #shorts",
                   "caption": f"{title} 0% to 100% soft body comparison. Did you predict the ending?" + ("\n\n" + metadata["music_credit"] if metadata.get("music_credit") else ""),
                   "tags": ["#softbody", "#satisfying", "#simulation", "#shorts"],
-                  "duration": 30, "outcome": "comparison-complete",
+                  "duration": metadata["published_duration"], "outcome": "comparison-complete",
                   "variantKey": metadata.get("variant_key", os.environ["DAILY_OBSTACLE"]), "raw": metadata,
               },
           }
@@ -605,8 +611,9 @@ jobs:
           from pathlib import Path
 
           probe = json.loads(Path("artifacts/final/ffprobe.json").read_text(encoding="utf-8"))
+          metadata = json.loads(Path("artifacts/final/metadata.json").read_text(encoding="utf-8"))
           stream = probe["streams"][0]
-          expected = ("h264", 1080, 1920, "30/1", "900")
+          expected = ("h264", 1080, 1920, "30/1", str(metadata["published_frames"]))
           actual = tuple(stream.get(key) for key in ("codec_name", "width", "height", "r_frame_rate", "nb_frames"))
           if actual != expected:
               raise SystemExit(f"Unexpected production stream: {stream}")

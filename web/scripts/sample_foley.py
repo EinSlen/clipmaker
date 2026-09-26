@@ -18,6 +18,11 @@ PACKS = Path(__file__).resolve().parent.parent / "data" / "sound-packs"
 # Soft Body request values that resolve to a sampled pack. Anything else keeps
 # the synthesised premium Foley.
 ALIASES = {"auto": "funny", "funny": "funny", "meme": "meme"}
+# Measured on the 26 September daily: at 0.5 the meow peaks 9 dB over the
+# busy part of the clip once the mix is normalised, a surprise rather than a
+# scream. Whatever still plays under it keeps the sum below the ceiling.
+ACCENT_LEVEL = 0.5
+ACCENT_CEILING = 0.96
 
 
 def resolve_pack(requested: str) -> str | None:
@@ -27,23 +32,34 @@ def resolve_pack(requested: str) -> str | None:
     return None
 
 
+def read_sample(root: Path, entry: dict) -> array:
+    with wave.open(str(root / entry["file"]), "rb") as source:
+        if (source.getframerate(), source.getnchannels(), source.getsampwidth()) != (RATE, 1, 2):
+            raise ValueError(f"{entry['file']} is not mono 48 kHz PCM")
+        frames = array("h")
+        frames.frombytes(source.readframes(source.getnframes()))
+    if not len(frames):
+        raise ValueError(f"{entry['file']} is empty")
+    return frames
+
+
 def load_pack(name: str) -> tuple[dict, list[array]]:
     root = PACKS / name
     manifest = json.loads((root / "pack.json").read_text(encoding="utf-8"))
     entries = manifest.get("samples", [])
     if not entries:
         raise ValueError(f"Sound pack {name} declares no sample")
-    samples: list[array] = []
-    for entry in entries:
-        with wave.open(str(root / entry["file"]), "rb") as source:
-            if (source.getframerate(), source.getnchannels(), source.getsampwidth()) != (RATE, 1, 2):
-                raise ValueError(f"{entry['file']} is not mono 48 kHz PCM")
-            frames = array("h")
-            frames.frombytes(source.readframes(source.getnframes()))
-        if not len(frames):
-            raise ValueError(f"{entry['file']} is empty")
-        samples.append(frames)
-    return manifest, samples
+    return manifest, [read_sample(root, entry) for entry in entries]
+
+
+def load_accent(name: str, manifest: dict) -> array | None:
+    """The pack's signature sound, kept out of the contact rotation."""
+    entry = manifest.get("accent")
+    return read_sample(PACKS / name, entry) if entry else None
+
+
+def credit(entry: dict) -> str:
+    return f"{entry['title']} by {entry['author']} ({entry['source']})"
 
 
 def synth_sample_foley(
@@ -52,9 +68,11 @@ def synth_sample_foley(
     output: Path,
     seed: int,
     pack: str,
+    accents: tuple[float, ...] = (),
 ) -> dict[str, object]:
     """Write the stereo one-shot track and report what it used."""
     manifest, samples = load_pack(pack)
+    accent = load_accent(pack, manifest) if accents else None
     sample_count = math.ceil(duration * RATE) + 1
     left = array("f", [0.0]) * sample_count
     right = array("f", [0.0]) * sample_count
@@ -99,25 +117,45 @@ def synth_sample_foley(
     # ceiling: the per-hit level already sets the balance with the bed.
     peak = max(0.001, max(max(abs(value) for value in left), max(abs(value) for value in right)))
     scale = min(0.86 / peak, 1.0)
+
+    # The accent is the one sound meant to surprise, so it plays as recorded:
+    # centred, never pitched, and louder than any contact. It is laid over the
+    # matched contacts rather than matched with them: counted in the peak, a
+    # meow landing on a squish would turn every contact of the clip down.
+    centre = array("f", [0.0]) * sample_count
+    played_accents = []
+    accent_peak = max(abs(value) for value in accent) / 32768.0 if accent else 1.0
+    for timestamp in (sorted(accents) if accent is not None else ()):
+        start = round(max(0.0, min(duration - 0.005, float(timestamp))) * RATE)
+        length = min(len(accent), sample_count - start)
+        under = max((max(abs(left[index]), abs(right[index])) * scale
+                     for index in range(start, start + length)), default=0.0)
+        level = max(0.0, min(ACCENT_LEVEL, (ACCENT_CEILING - under) / accent_peak))
+        for index in range(max(0, length)):
+            centre[start + index] += accent[index] / 32768.0 * level
+        played_accents.append(round(start / RATE, 3))
+
     pcm = array("h")
-    for left_value, right_value in zip(left, right):
-        pcm.append(round(max(-1.0, min(1.0, left_value * scale)) * 32767))
-        pcm.append(round(max(-1.0, min(1.0, right_value * scale)) * 32767))
+    for left_value, right_value, centre_value in zip(left, right, centre):
+        pcm.append(round(max(-1.0, min(1.0, left_value * scale + centre_value)) * 32767))
+        pcm.append(round(max(-1.0, min(1.0, right_value * scale + centre_value)) * 32767))
     with wave.open(str(output), "wb") as destination:
         destination.setnchannels(2)
         destination.setsampwidth(2)
         destination.setframerate(RATE)
         destination.writeframes(pcm.tobytes())
 
-    return {
+    report = {
         "sound_pack": pack,
         "sound_pack_kind": "sampled-one-shots",
         "sound_pack_label": manifest.get("label", pack),
         "sound_pack_size": len(samples),
         "sound_pack_rights": manifest.get("rights", ""),
-        "sound_pack_credits": [
-            f"{entry['title']} by {entry['author']} ({entry['source']})"
-            for entry in manifest["samples"]
-        ],
+        "sound_pack_credits": [credit(entry) for entry in manifest["samples"]],
         "sound_pack_hits": len(events),
     }
+    if played_accents:
+        report["sound_pack_credits"].append(credit(manifest["accent"]))
+        report["sound_pack_accent"] = manifest["accent"]["title"]
+        report["sound_pack_accent_times"] = played_accents
+    return report
