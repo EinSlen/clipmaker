@@ -487,7 +487,10 @@ test('production 3D assembly rejects a video without the generated audio mix', a
   const workflow = await fs.readFile(workflowPath, 'utf8');
   assert.match(workflow, /stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels/u);
   assert.match(workflow, /expected_audio = \("aac", "48000", 2\)/u);
-  assert.match(workflow, /29\.9 <= duration <= 30\.1/u);
+  // The file is the published edit, so its length is checked against the
+  // edit the assembly declared rather than against the simulated 30 s.
+  assert.match(workflow, /expected_video = \("h264", 1080, 1920, "30\/1", str\(published_frames\)\)/u);
+  assert.match(workflow, /abs\(duration - published_frames \/ 30\) > 0\.1/u);
   assert.match(workflow, /metadata\.get\("music_generated"\) is not True/u);
   // Every shipped pack has to be named here, or the assembly refuses a
   // finished render as missing its collision Foley clearance.

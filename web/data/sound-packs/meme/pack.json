@@ -132,5 +132,13 @@
       "license": "https://creativecommons.org/publicdomain/zero/1.0/",
       "duration": 0.914
     }
-  ]
+  ],
+  "accent": {
+    "file": "256452.wav",
+    "title": "Cat meow",
+    "author": "philsapphire",
+    "source": "https://freesound.org/people/philsapphire/sounds/256452/",
+    "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "duration": 1.284
+  }
 }
