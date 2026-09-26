@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 # A healthy account is carried by the feed, not by its own back catalogue.
 # Anything under this share means the recommendation system is not handing
@@ -36,6 +38,9 @@ ZERO_VIEW_STREAK = 3
 MIN_POST_AGE_HOURS = 24
 PRIVATE_VISIBILITY = 2
 MARKER = "CLIPMAKER_REACH:"
+# The posts of 17 to 25 September all stopped near 90 views with 17 to 24%
+# of their length watched. Staying under this is staying where they were.
+WATCHED_SHARE_FLOOR = 0.30
 
 
 def captured_at(capture: dict) -> float:
@@ -90,8 +95,39 @@ def posts(capture: dict) -> list:
                 "plays": int(item.get("play_count") or 0),
                 "inReview": bool(item.get("in_review")),
                 "caption": str(item.get("desc") or ""),
+                "durationSeconds": int(item.get("duration") or 0) / 1000,
             }
     return sorted(collected.values(), key=lambda entry: entry["createdAt"], reverse=True)
+
+
+def _realtime_value(payload: dict, field: str):
+    value = (payload.get(field) or {}).get("value")
+    if isinstance(value, dict):
+        value = value.get("value")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def retention(capture: dict) -> dict:
+    """Each post's own watch curve, keyed by post id.
+
+    The per-video insight only names its post in the request, so the id is
+    read from there.
+    """
+    curves = {}
+    for response in capture.get("responses", []):
+        payload = response.get("payload") or {}
+        curve = ((payload.get("video_retention_rate_realtime") or {}).get("value") or {}).get("list")
+        match = re.search(r'"aweme_id":"(\d+)"', unquote(str(response.get("query") or "")))
+        if not isinstance(curve, list) or not curve or not match:
+            continue
+        points = {int(point.get("timestamp") or 0): float(point.get("value") or 0) for point in curve}
+        curves[match.group(1)] = {
+            "at1s": points.get(1000),
+            "at5s": points.get(5000),
+            "finished": _realtime_value(payload, "video_finish_rate_realtime"),
+            "watchedSeconds": _realtime_value(payload, "video_per_duration_realtime"),
+        }
+    return curves
 
 
 def zero_view_streak(entries: list, now: float) -> list:
@@ -120,14 +156,38 @@ def private_streak(entries: list, now: float) -> list:
     return streak
 
 
+def short_watch_streak(entries: list, now: float) -> list:
+    """The run of settled posts that viewers left well before the end."""
+    streak = []
+    for entry in entries:
+        watched = entry.get("retention", {}).get("watchedSeconds")
+        if now - entry["createdAt"] < MIN_POST_AGE_HOURS * 3600 or watched is None or not entry["durationSeconds"]:
+            continue
+        if watched / entry["durationSeconds"] >= WATCHED_SHARE_FLOOR:
+            break
+        streak.append(entry)
+    return streak
+
+
 def verdict(capture: dict) -> dict:
     now = captured_at(capture)
     entries = posts(capture)
+    curves = retention(capture)
+    for entry in entries:
+        if entry["id"] in curves:
+            entry["retention"] = curves[entry["id"]]
     sources = traffic_sources(capture)
     for_you = sources.get("For You")
     silent = zero_view_streak(entries, now)
     invisible = private_streak(entries, now)
+    leaving = short_watch_streak(entries, now)
     alarms = []
+    if len(leaving) >= ZERO_VIEW_STREAK:
+        alarms.append({
+            "code": "short-watch",
+            "detail": (f"The last {len(leaving)} settled posts were watched for under "
+                       f"{WATCHED_SHARE_FLOOR * 100:.0f}% of their length on average."),
+        })
     if for_you is not None and for_you < FOR_YOU_FLOOR:
         alarms.append({
             "code": "for-you-share",
@@ -151,9 +211,19 @@ def verdict(capture: dict) -> dict:
         "posts": len(entries),
         "zeroViewStreak": len(silent),
         "privateStreak": len(invisible),
+        "shortWatchStreak": len(leaving),
+        "retention": [
+            {"id": entry["id"], "createdAt": entry["createdAt"], "plays": entry["plays"],
+             "durationSeconds": entry["durationSeconds"], **entry["retention"]}
+            for entry in entries if "retention" in entry
+        ],
         "alarms": alarms,
         **account_numbers(capture),
     }
+
+
+def _share(value) -> str:
+    return "-" if value is None else f"{value * 100:.0f}%"
 
 
 def report(result: dict) -> str:
@@ -167,6 +237,16 @@ def report(result: dict) -> str:
     if "followers" in result:
         lines.append(f"- {result['followers']} abonnés, {result.get('uniqueViewers', 0)} spectateurs uniques")
     lines.append(f"- {result['posts']} posts lus dans Studio")
+    if result.get("retention"):
+        lines += ["", "| Post | Vues | Regardé | à 1 s | à 5 s | Jusqu'au bout |", "|---|---|---|---|---|---|"]
+        for row in result["retention"]:
+            day = time.strftime("%d/%m", time.gmtime(row["createdAt"]))
+            watched = row.get("watchedSeconds")
+            watched_text = "-" if watched is None else "%.1f s sur %.0f" % (watched, row["durationSeconds"])
+            lines.append(
+                f"| {day} | {row['plays']} | {watched_text} "
+                f"| {_share(row.get('at1s'))} | {_share(row.get('at5s'))} | {_share(row.get('finished'))} |")
+        lines.append("")
     for alarm in result["alarms"]:
         lines.append(f"- ALERTE {alarm['code']} : {alarm['detail']}")
     if not result["alarms"]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from urllib.parse import quote
 
 import reach_watchdog
 
@@ -88,6 +89,59 @@ class SilenceTests(unittest.TestCase):
         result = reach_watchdog.verdict(capture(items))
         self.assertEqual(result["privateStreak"], 5)
         self.assertIn("published-private", [alarm["code"] for alarm in result["alarms"]])
+
+
+def overview(identifier, watched, at1s=0.6, at5s=0.3, finished=0.05):
+    """A post's own Studio overview, which names the post only in its query."""
+    return {
+        "url": "insight",
+        "query": "aid=1988&type_requests=" + quote(f'[{{"insigh_type":"video_info","aweme_id":"{identifier}"}}]'),
+        "payload": {
+            "video_retention_rate_realtime": {"value": {"list": [
+                {"timestamp": "0", "value": 1}, {"timestamp": "1000", "value": at1s},
+                {"timestamp": "5000", "value": at5s}, {"timestamp": "30000", "value": finished},
+            ]}},
+            "video_finish_rate_realtime": {"value": {"status": 0, "value": finished}},
+            "video_per_duration_realtime": {"value": {"status": 0, "value": watched}},
+        },
+    }
+
+
+def with_duration(item, seconds=30):
+    return {**item, "duration": int(seconds * 1000)}
+
+
+class RetentionTests(unittest.TestCase):
+    def test_each_curve_is_given_to_the_post_its_request_names(self):
+        items = [with_duration(post(1, 48, plays=83)), with_duration(post(2, 72, plays=92))]
+        data = capture(items, for_you=0.88)
+        data["responses"] += [overview(2, 5.0, at1s=0.63, at5s=0.26), overview(1, 7.2, at1s=0.59, at5s=0.32)]
+        result = reach_watchdog.verdict(data)
+        self.assertEqual([(row["id"], row["watchedSeconds"], row["at5s"]) for row in result["retention"]],
+                         [("1", 7.2, 0.32), ("2", 5.0, 0.26)])
+        table = reach_watchdog.report(result)
+        self.assertIn("| 7.2 s sur 30 | 59% | 32% | 5% |", table)
+
+    def test_three_posts_left_early_are_named(self):
+        # The posts of 23 to 25 September: under a quarter watched, each one
+        # stopped at its test audience.
+        items = [with_duration(post(index, 24 * index + 1, plays=90)) for index in (1, 2, 3)]
+        data = capture(items, for_you=0.88)
+        data["responses"] += [overview(1, 7.2), overview(2, 5.0), overview(3, 4.3)]
+        result = reach_watchdog.verdict(data)
+        self.assertEqual(result["shortWatchStreak"], 3)
+        self.assertEqual([alarm["code"] for alarm in result["alarms"]], ["short-watch"])
+
+    def test_one_post_watched_to_a_third_ends_the_streak(self):
+        items = [with_duration(post(index, 24 * index + 1, plays=90)) for index in (1, 2, 3)]
+        data = capture(items, for_you=0.88)
+        data["responses"] += [overview(1, 9.0), overview(2, 5.0), overview(3, 4.3)]
+        self.assertEqual(reach_watchdog.verdict(data)["alarms"], [])
+
+    def test_a_capture_without_overviews_reports_no_retention(self):
+        result = reach_watchdog.verdict(capture([with_duration(post(1, 48, plays=90))], for_you=0.88))
+        self.assertEqual(result["retention"], [])
+        self.assertNotIn("| Post |", reach_watchdog.report(result))
 
 
 class ForYouTests(unittest.TestCase):
