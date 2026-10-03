@@ -68,9 +68,10 @@ jobs:
           import unittest
 
           sys.path.insert(0, 'web/scripts')
+          sys.path.insert(0, 'jour7')
           names = [
               os.path.basename(path)[:-3]
-              for path in sorted(glob.glob('web/scripts/test_*.py'))
+              for path in sorted(glob.glob('web/scripts/test_*.py') + glob.glob('jour7/test_*.py'))
               if not path.endswith('test_soft_body_surface_blender.py')
           ]
           suite = unittest.defaultTestLoader.loadTestsFromNames(names)

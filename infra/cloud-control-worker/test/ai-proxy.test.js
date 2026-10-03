@@ -99,3 +99,26 @@ test('transcription accepts base64 audio within the body limit and pins the lang
     input: { audio, language: 'francais' },
   }), /Langue invalide/);
 });
+
+test('illustrations go to FLUX.2 klein with at most two references and a bounded frame', () => {
+  const reference = Buffer.from('jpeg bytes').toString('base64');
+  const request = validateAiRequest({
+    task: 'illustration',
+    input: { prompt: 'she holds a coffee mug', references: [reference, reference], width: 770, height: 5000 },
+  });
+  assert.equal(request.model, '@cf/black-forest-labs/flux-2-klein-4b');
+  assert.deepEqual(request.input, { prompt: 'she holds a coffee mug', references: [reference, reference], width: 768, height: 1344 });
+  assert.deepEqual(validateAiRequest({ task: 'illustration', input: { prompt: 'x' } }).input,
+    { prompt: 'x', references: [], width: 768, height: 1344 });
+
+  assert.throws(() => validateAiRequest({ task: 'illustration', input: { prompt: '' } }), /Prompt d’illustration invalide/);
+  assert.throws(() => validateAiRequest({
+    task: 'illustration', input: { prompt: 'x', references: [reference, reference, reference] },
+  }), /Deux images de référence au plus/);
+  assert.throws(() => validateAiRequest({
+    task: 'illustration', input: { prompt: 'x', references: ['not base64 !!'] },
+  }), /Image de référence invalide/);
+  assert.throws(() => validateAiRequest({
+    task: 'illustration', input: { prompt: 'x', references: ['a'.repeat(200_001)] },
+  }), /Image de référence invalide/);
+});

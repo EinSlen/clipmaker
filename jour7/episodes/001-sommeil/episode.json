@@ -1,0 +1,46 @@
+{
+  "slug": "sommeil",
+  "caption": "Ce qui arrive à ton cerveau quand tu dors moins de 6 heures pendant 7 jours. Et toi, tu dors combien ? #sommeil #cerveau #santé #apprendre #jour7",
+  "sources": [
+    "Van Dongen et al., 2003, Sleep 26(2): 6 h par nuit pendant 14 jours, déficits cumulés comparables à une à deux nuits blanches, somnolence ressentie qui plafonne",
+    "Spiegel et al., 2004, Annals of Internal Medicine 141(11): ghréline en hausse, leptine en baisse, faim accrue après restriction de sommeil",
+    "Yoo et al., 2007, Current Biology 17(20): réactivité de l'amygdale accrue après privation de sommeil"
+  ],
+  "scenes": [
+    {
+      "line": "Voilà ce qui arrive à ton cerveau quand tu dors moins de six heures pendant sept jours.",
+      "badge": null,
+      "picture": "Night in her dark cozy bedroom: she lies in bed under a green blanket, wide awake, staring at the ceiling with tired eyes. On the nightstand a small alarm clock glows and shows 1:47. Moonlight through the window, crescent moon and stars. Dim blue-green night palette with a warm glow from the clock."
+    },
+    {
+      "line": "Jour un. Tu tiens le coup. Un café, et ça passe.",
+      "badge": "JOUR 1",
+      "picture": "Morning in a small cozy kitchen: she stands holding a big steaming coffee mug with both hands, light dark circles under her eyes but a brave little smile. Soft morning sunlight through the window, plants on the windowsill."
+    },
+    {
+      "line": "Jour deux. Ta faim se dérègle. Tu as envie de sucre toute la journée.",
+      "badge": "JOUR 2",
+      "picture": "In her kitchen she reaches into a big cookie jar, a plate of donuts and cookies on the counter, her eyes wide with an irresistible craving. A small thought bubble above her head contains a slice of strawberry cake."
+    },
+    {
+      "line": "Jour trois. Tu t'énerves pour un rien. Ton centre des émotions s'emballe.",
+      "badge": "JOUR 3",
+      "picture": "At her desk in front of a laptop she frowns angrily with puffed red cheeks and clenched fists, a tiny dark storm cloud with a little lightning bolt floats above her head, a knocked-over pencil cup with scattered pencils."
+    },
+    {
+      "line": "Jour cinq. Tu relis trois fois la même phrase. Ton attention décroche sans prévenir.",
+      "badge": "JOUR 5",
+      "picture": "She sits at a wooden library desk in front of an open book, heavy eyelids, head propped on one hand, nodding off. Little abstract squiggles drift up off the open page and float away. Warm desk lamp light, bookshelves behind."
+    },
+    {
+      "line": "Jour sept. Ton cerveau fonctionne comme après une nuit blanche. Et tu ne t'en rends même pas compte.",
+      "badge": "JOUR 7",
+      "picture": "In her kitchen she absent-mindedly puts her house keys into the open fridge next to a milk bottle, eyes half-closed, deep dark circles, messy hair, glasses slightly crooked. Above her head floats a small hand-drawn battery icon that is almost empty with one red bar."
+    },
+    {
+      "line": "Et toi, tu dors combien d'heures ?",
+      "badge": null,
+      "picture": "Bright morning in her bedroom: she sits up in bed, well rested and glowing, hugging a pillow and looking directly at the viewer with a warm curious smile, as if asking a question. A cat sleeps at the foot of the bed, golden sunlight through the window."
+    }
+  ]
+}
