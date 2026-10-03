@@ -14,6 +14,8 @@ const SCHEDULER_HEALTH_KEY = 'scheduler-last-tick-v1';
 const SESSION_LIFETIME_MS = 150 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 12_000;
 const MAX_SYNC_BODY_BYTES = 96_000;
+// Two reference images ride along with an illustration prompt.
+const MAX_AI_BODY_BYTES = 480_000;
 const SOFT_BODY_OBSTACLES = new Set([
   'peg-grid',
   'moving-slide',
@@ -589,10 +591,11 @@ async function apiEditAudio(request, env, runner = false) {
 }
 
 // The story channel reaches Workers AI through this Worker so no Cloudflare
-// API token ever has to exist outside the account. Only these three models are
+// API token ever has to exist outside the account. Only these models are
 // reachable, and only with the runner token.
 const AI_MODELS = Object.freeze({
   image: '@cf/black-forest-labs/flux-1-schnell',
+  illustration: '@cf/black-forest-labs/flux-2-klein-4b',
   speech: '@cf/deepgram/aura-2-en',
   text: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
   transcribe: '@cf/openai/whisper-large-v3-turbo',
@@ -617,6 +620,31 @@ export function validateAiRequest(body) {
         prompt,
         steps: Number.isFinite(steps) ? Math.max(1, Math.min(8, Math.round(steps))) : 4,
       },
+    };
+  }
+
+  // Jour 7 draws the same character in every scene, which only holds when the
+  // model sees her: the references are the character sheet and a finished
+  // scene for the style. klein 4B costs about 190 Neurons for a vertical frame
+  // with its references, so a whole episode stays inside the free daily
+  // allocation; the frame is bounded so a caller cannot make it cost more.
+  if (task === 'illustration') {
+    const prompt = String(input.prompt || '').trim();
+    if (!prompt || prompt.length > 2500) throw new HttpError(400, 'Prompt d’illustration invalide.');
+    const references = Array.isArray(input.references) ? input.references.map(String) : [];
+    if (references.length > 2) throw new HttpError(400, 'Deux images de référence au plus.');
+    for (const reference of references) {
+      if (!reference || reference.length > 200_000 || !/^[A-Za-z0-9+/=]+$/u.test(reference)) {
+        throw new HttpError(400, 'Image de référence invalide.');
+      }
+    }
+    const side = (value, fallback) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.max(256, Math.min(1344, Math.round(number / 16) * 16)) : fallback;
+    };
+    return {
+      model: AI_MODELS.illustration,
+      input: { prompt, references, width: side(input.width, 768), height: side(input.height, 1344) },
     };
   }
 
@@ -686,14 +714,30 @@ export function validateAiRequest(body) {
   };
 }
 
+// FLUX.2 takes its references as form fields, not JSON.
+function illustrationForm(input) {
+  const form = new FormData();
+  form.append('prompt', input.prompt);
+  form.append('width', String(input.width));
+  form.append('height', String(input.height));
+  input.references.forEach((reference, index) => {
+    const bytes = Uint8Array.from(atob(reference), (character) => character.charCodeAt(0));
+    form.append(`input_image_${index}`, new Blob([bytes], { type: 'image/jpeg' }), `reference-${index}.jpg`);
+  });
+  const encoded = new Response(form);
+  return { body: encoded.body, contentType: encoded.headers.get('content-type') };
+}
+
 async function apiAiRun(request, env) {
   await workflowRequest(request, env);
   if (!env.AI) throw new HttpError(503, 'Le binding Workers AI est absent de ce déploiement.');
-  const body = await boundedJson(request, MAX_SYNC_BODY_BYTES);
+  const body = await boundedJson(request, MAX_AI_BODY_BYTES);
   const { model, input } = validateAiRequest(body);
   let result;
   try {
-    result = await env.AI.run(model, input);
+    result = model === AI_MODELS.illustration
+      ? await env.AI.run(model, { multipart: illustrationForm(input) })
+      : await env.AI.run(model, input);
   } catch (error) {
     throw new HttpError(502, `Workers AI a échoué : ${error instanceof Error ? error.message : 'erreur inconnue'}`);
   }

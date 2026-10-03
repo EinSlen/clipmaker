@@ -52,3 +52,7 @@ infra/cloud-control-worker/.dev.vars
 
 # Minimax browser profile (session Hailuo, jamais commiter)
 .minimax-browser/
+
+# Jour 7 episodes keep their script in git; drawings, voice and renders stay local.
+jour7/episodes/*/*
+!jour7/episodes/*/episode.json

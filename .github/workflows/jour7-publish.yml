@@ -1,0 +1,164 @@
+name: Jour 7 publisher
+run-name: ${{ github.event_name == 'schedule' && 'Jour 7 · safety net' || format('Jour 7 · {0}', inputs.schedule_date || 'manual') }}
+
+# One episode a day, at the time the Cloudflare dispatcher draws for that day
+# (a different hour every day, between 09:00 and 22:00 in Paris). Episodes are
+# the folders of jour7/episodes, taken in order. A folder whose render was
+# reviewed by hand ships that render, uploaded to the `jour7` release as
+# `<folder>.mp4`; any other folder is drawn and rendered here, for free. The
+# release also keeps one `log-<date>-<number>.json` per publication, which is
+# both the history and the guard against posting twice in a day.
+
+on:
+  workflow_dispatch:
+    inputs:
+      schedule_date:
+        description: Day being published, Europe/Paris (empty means today)
+        required: false
+        default: ''
+      dry_run:
+        description: Fill the TikTok form and stop before the Post button
+        required: false
+        default: 'false'
+  # The dispatcher picks the time. This late run only posts when the
+  # dispatcher did not, so a broken Worker costs the day its random hour, not
+  # its episode.
+  schedule:
+    - cron: "17 21 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jour7-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE: jour7
+      ACCOUNT: ${{ vars.JOUR7_TIKTOK_ACCOUNT }}
+      CLIPMAKER_UPLOAD_TOKEN: ${{ secrets.CLIPMAKER_UPLOAD_TOKEN }}
+      CLOUD_CONTROL_API: https://clipmaker-cloud-control.einslen.workers.dev
+      SCHEDULE_DATE: ${{ inputs.schedule_date }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Pick today's episode
+        id: pick
+        run: |
+          today="$(TZ=Europe/Paris date +%F)"
+          date="${SCHEDULE_DATE:-$today}"
+          stop() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # A retry that slips past midnight must not publish yesterday's slot today.
+          [ "$date" = "$today" ] || stop "Dispatched for $date, today is $today."
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(TZ=Europe/Paris date +%-H)" -lt 22 ]; then
+            stop "The safety net only acts once the publication window has closed."
+          fi
+          test -n "$ACCOUNT" || { echo "Set the JOUR7_TIKTOK_ACCOUNT repository variable." >&2; exit 1; }
+          gh release view "$RELEASE" > /dev/null 2>&1 || gh release create "$RELEASE" --latest=false \
+            --title "Jour 7" --notes "Publication log and reviewed renders of the Jour 7 channel."
+          gh release view "$RELEASE" --json assets --jq '.assets[].name' > /tmp/assets.txt
+          ! grep -q "^log-$date-" /tmp/assets.txt || stop "Jour 7 already published on $date."
+          for folder in jour7/episodes/*/; do
+            name="$(basename "$folder")"
+            number="${name%%-*}"
+            if ! grep -Eq "^log-[0-9]{4}-[0-9]{2}-[0-9]{2}-$number\.json$" /tmp/assets.txt; then
+              echo "episode=$name" >> "$GITHUB_OUTPUT"
+              echo "number=$number" >> "$GITHUB_OUTPUT"
+              echo "date=$date" >> "$GITHUB_OUTPUT"
+              echo "Publishing $name on $date."
+              exit 0
+            fi
+          done
+          echo "::warning::Every Jour 7 episode has been published; add new folders to jour7/episodes."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
+      - name: Render the episode
+        id: render
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          EPISODE: ${{ steps.pick.outputs.episode }}
+        run: |
+          folder="jour7/episodes/$EPISODE"
+          video="$folder/$(jq -r .slug "$folder/episode.json").mp4"
+          echo "video=$video" >> "$GITHUB_OUTPUT"
+          if grep -qx "$EPISODE.mp4" /tmp/assets.txt; then
+            gh release download "$RELEASE" --pattern "$EPISODE.mp4" --output "$video"
+            echo "reviewed=true" >> "$GITHUB_OUTPUT"
+            echo "Using the reviewed render of $EPISODE."
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg > /dev/null
+          python -m pip install --disable-pip-version-check --quiet edge-tts==7.2.8 Pillow==11.3.0
+          python jour7/episode.py "$folder"
+
+      - name: Restore the TikTok session from Cloudflare
+        if: steps.pick.outputs.skip != 'true'
+        run: |
+          curl --fail --silent --show-error --header "Authorization: Bearer $CLIPMAKER_UPLOAD_TOKEN" \
+            "$CLOUD_CONTROL_API/api/workflow/bootstrap" > /tmp/cloud-bootstrap.json
+          python3 - <<'PY'
+          import base64
+          import gzip
+          import json
+          import os
+          from pathlib import Path
+
+          wanted = f"tiktok_session-{os.environ['ACCOUNT']}.cookie"
+          payload = json.loads(Path("/tmp/cloud-bootstrap.json").read_text(encoding="utf-8"))
+          bundle = json.loads(gzip.decompress(base64.b64decode(payload["sessionsBundle"])))
+          target = Path("vendor/TiktokAutoUploader/CookiesDir") / wanted
+          for relative, encoded in bundle.get("files", {}).items():
+              if Path(relative).name == wanted:
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(base64.b64decode(encoded))
+          if not target.exists():
+              raise SystemExit(f"The cloud bundle has no TikTok session for {os.environ['ACCOUNT']}.")
+          PY
+          rm -f /tmp/cloud-bootstrap.json
+
+      - name: Post on TikTok
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          EPISODE: ${{ steps.pick.outputs.episode }}
+          NUMBER: ${{ steps.pick.outputs.number }}
+          DAY: ${{ steps.pick.outputs.date }}
+          VIDEO: ${{ steps.render.outputs.video }}
+          REVIEWED: ${{ steps.render.outputs.reviewed }}
+        run: |
+          caption="$(jq -r .caption "jour7/episodes/$EPISODE/episode.json")"
+          (cd vendor/TiktokAutoUploader/tiktok_uploader/tiktok-signature \
+            && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund --silent)
+          flags=()
+          [ "$DRY_RUN" != true ] || flags+=(--dry-run)
+          (cd vendor/TiktokAutoUploader && PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome \
+            node tiktok_uploader/studio-upload.cjs upload --users "$ACCOUNT" --video "$GITHUB_WORKSPACE/$VIDEO" \
+            --title "$caption" --visibility 0 "${flags[@]}") | tee /tmp/upload.log
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run: the form was ready, nothing was posted." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          receipt="$(sed -n 's/^CLIPMAKER_RECEIPT://p' /tmp/upload.log | tail -n 1)"
+          test -n "$receipt" || { echo "TikTok gave no receipt." >&2; exit 1; }
+          log="log-$DAY-$NUMBER.json"
+          jq -n --arg episode "$EPISODE" --arg at "$(date -u +%FT%TZ)" --argjson receipt "$receipt" \
+            '{episode: $episode, publishedAt: $at, receipt: $receipt}' > "$log"
+          # The log is what stops a second post today, so it goes up first and
+          # gets retried; the render is only kept for the record.
+          for attempt in 1 2 3 4 5; do
+            gh release upload "$RELEASE" "$log" --clobber && break
+            [ "$attempt" -lt 5 ] || { echo "::error::Posted, but the publication log could not be saved." >&2; exit 1; }
+            sleep 15
+          done
+          if [ "$REVIEWED" != true ]; then
+            cp "$VIDEO" "$EPISODE.mp4"
+            gh release upload "$RELEASE" "$EPISODE.mp4" --clobber || true
+          fi
+          url="$(jq -r .releaseUrl <<< "$receipt")"
+          echo "Jour 7 · $EPISODE published: $url" >> "$GITHUB_STEP_SUMMARY"

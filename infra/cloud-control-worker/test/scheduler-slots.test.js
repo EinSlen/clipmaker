@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PUBLISH_JITTER_MINUTES, publishJitter, runScheduler, schedulerOperations } from '../src/scheduler.js';
+import {
+  JOUR7_CONFIG_KEY, PUBLISH_JITTER_MINUTES, jour7DueMinute, jour7Operation, publishJitter, runScheduler, schedulerOperations,
+} from '../src/scheduler.js';
 
 function configuration() {
   return {
@@ -139,4 +141,58 @@ test('the publication minute moves with the day instead of being the same minute
   assert.equal(slotOf('2026-08-28T16:00:00Z').dueMinute, 18 * 60);
   config.publishJitterMinutes = 10;
   assert.ok(slotOf('2026-08-28T16:00:00Z').dueMinute - (18 * 60) < 10);
+});
+
+test('Jour 7 posts at a different hour every day, anywhere inside its window', () => {
+  const hours = [];
+  for (let offset = 0; offset < 120; offset += 1) {
+    const date = new Date(Date.UTC(2026, 9, 1) + (offset * 86_400_000)).toISOString().slice(0, 10);
+    const minute = jour7DueMinute(date);
+    assert.ok(minute >= 9 * 60 && minute < 22 * 60, `${date} falls inside 09:00-22:00`);
+    hours.push(Math.floor(minute / 60));
+  }
+  for (let index = 1; index < hours.length; index += 1) {
+    assert.notEqual(hours[index], hours[index - 1], 'never the same hour two days running');
+  }
+  assert.equal(new Set(hours).size, 13, 'four months reach every hour of the window');
+  assert.equal(jour7DueMinute('2026-11-05'), jour7DueMinute('2026-11-05'));
+  assert.ok(jour7DueMinute('2026-11-05', '12:00', '14:00') >= 12 * 60);
+  assert.throws(() => jour7DueMinute('2026-11-05', '12:00', '12:30'), /Invalid Jour 7 window/u);
+});
+
+test('Jour 7 is off until its configuration says otherwise, then due once a day', () => {
+  const now = new Date('2026-10-04T08:00:00Z');
+  assert.equal(jour7Operation(null, now), null);
+  assert.equal(jour7Operation({ enabled: false }, now), null);
+  const operation = jour7Operation({ enabled: true }, now);
+  assert.equal(operation.workflow, 'jour7-publish.yml');
+  assert.equal(operation.inputs.schedule_date, '2026-10-04');
+  assert.equal(operation.inputs.dry_run, 'false');
+  assert.equal(operation.dueMinute, jour7DueMinute('2026-10-04'));
+  const atDue = new Date(Date.parse('2026-10-04T00:00:00+02:00') + (operation.dueMinute * 60_000));
+  assert.equal(jour7Operation({ enabled: true }, new Date(atDue.getTime() - 60_000)).eligible, false);
+  assert.equal(jour7Operation({ enabled: true }, atDue).eligible, true);
+});
+
+test('the scheduler dispatches Jour 7 even with every ClipMaker channel paused', async () => {
+  const paused = configuration();
+  paused.channels.forEach((channel) => { channel.enabled = false; });
+  const records = new Map();
+  const dispatched = [];
+  const env = {
+    REPOSITORY_OWNER: 'owner', REPOSITORY_NAME: 'repo',
+    CONFIG: {
+      get: async (key) => ({ 'publisher-config-v1': paused, [JOUR7_CONFIG_KEY]: { enabled: true } })[key] ?? records.get(key),
+      put: async (key, value) => records.set(key, JSON.parse(value)),
+    },
+    github: async (path, options = {}) => {
+      if (options.method === 'POST') dispatched.push({ path, body: JSON.parse(options.body) });
+      return { response: new Response('{}'), payload: options.method === 'POST' ? { workflow_run_id: 9 } : { workflow_runs: [] } };
+    },
+  };
+  const results = await runScheduler({ env, token: 'test', now: new Date('2026-10-04T21:30:00Z') });
+  assert.deepEqual(results.map((result) => [result.operation, result.action]), [['jour7-publish', 'dispatch']]);
+  assert.match(dispatched[0].path, /jour7-publish\.yml\/dispatches$/u);
+  assert.equal(dispatched[0].body.inputs.schedule_date, '2026-10-04');
+  assert.equal(records.get('scheduler:2026-10-04:jour7-publish').runId, 9);
 });

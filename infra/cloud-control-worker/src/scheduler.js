@@ -40,14 +40,59 @@ function earliestTime(channels, field, fallback) {
 // retry and native-run bookkeeping keeps working unchanged.
 export const PUBLISH_JITTER_MINUTES = 60;
 
+function digest(text) {
+  let value = 2166136261;
+  for (const character of text) {
+    value = Math.imul(value ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+  return value;
+}
+
 export function publishJitter(date, slot, span = PUBLISH_JITTER_MINUTES) {
   const width = Number.isFinite(span) ? Math.max(0, Math.min(180, Math.trunc(span))) : PUBLISH_JITTER_MINUTES;
   if (!width) return 0;
-  let digest = 2166136261;
-  for (const character of `${date}:${slot}`) {
-    digest = Math.imul(digest ^ character.charCodeAt(0), 16777619) >>> 0;
+  return digest(`${date}:${slot}`) % width;
+}
+
+// Jour 7 posts once a day at a time that moves across the whole window rather
+// than around a slot, and never in the same hour as the day before. Each day's
+// hour is derived from the previous day's, starting from a fixed epoch, so the
+// dispatcher keeps no state and every tick of a day agrees on the minute,
+// which leaves the retry and native-run bookkeeping below unchanged.
+export const JOUR7_CONFIG_KEY = 'jour7-config-v1';
+const JOUR7_EPOCH = '2026-10-01';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function jour7DueMinute(date, from = '09:00', to = '22:00') {
+  const start = parseTime(from);
+  const hours = Math.floor((parseTime(to) - start) / 60);
+  if (hours < 2) throw new Error(`Invalid Jour 7 window: ${from}-${to}`);
+  const target = Date.parse(`${date}T00:00:00Z`);
+  if (!Number.isFinite(target)) throw new Error(`Invalid Jour 7 date: ${date}`);
+  let hour = digest(`jour7:${JOUR7_EPOCH}`) % hours;
+  for (let cursor = Date.parse(`${JOUR7_EPOCH}T00:00:00Z`) + DAY_MS; cursor <= target; cursor += DAY_MS) {
+    const day = new Date(cursor).toISOString().slice(0, 10);
+    hour = (hour + 1 + (digest(`jour7:${day}`) % (hours - 1))) % hours;
   }
-  return digest % width;
+  return start + (hour * 60) + (digest(`jour7:${date}:minute`) % 60);
+}
+
+export function jour7Operation(config, now) {
+  if (config?.enabled !== true) return null;
+  const timeZone = config.timeZone || DEFAULT_TIME_ZONE;
+  const clock = localClock(now, timeZone);
+  const dueMinute = jour7DueMinute(clock.date, config.from, config.to);
+  return {
+    id: 'jour7-publish',
+    workflow: 'jour7-publish.yml',
+    dueMinute,
+    windowStart: dueMinute,
+    windowEnd: 1439,
+    eligible: clock.minute >= dueMinute,
+    inputs: { schedule_date: clock.date, dry_run: config.dryRun === true ? 'true' : 'false' },
+    date: clock.date,
+    timeZone,
+  };
 }
 
 export function schedulerOperations(config, now) {
@@ -189,9 +234,13 @@ async function dispatch(env, token, operation) {
 }
 
 export async function runScheduler({ env, token, now = new Date() }) {
-  const config = await env.CONFIG.get('publisher-config-v1', 'json');
+  const [config, jour7] = await Promise.all([
+    env.CONFIG.get('publisher-config-v1', 'json'),
+    env.CONFIG.get(JOUR7_CONFIG_KEY, 'json'),
+  ]);
   if (!config) throw new Error('Publisher configuration is missing.');
-  const operations = schedulerOperations(config, now).filter((operation) => operation.eligible);
+  const operations = [...schedulerOperations(config, now), jour7Operation(jour7, now)]
+    .filter((operation) => operation?.eligible);
   const results = [];
 
   for (const operation of operations) {
