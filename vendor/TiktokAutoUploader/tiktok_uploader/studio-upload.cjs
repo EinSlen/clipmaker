@@ -6,6 +6,7 @@ const { spawnSync } = require('node:child_process');
 
 const RECEIPT_PREFIX = 'CLIPMAKER_RECEIPT:';
 const DOCTOR_PREFIX = 'CLIPMAKER_TIKTOK_DOCTOR:';
+const EDIT_PREFIX = 'CLIPMAKER_TIKTOK_EDIT:';
 const STUDIO_CONTENT_URL = 'https://www.tiktok.com/tiktokstudio/content';
 const STUDIO_UPLOAD_URL = 'https://www.tiktok.com/tiktokstudio/upload?from=upload&lang=en';
 
@@ -232,6 +233,46 @@ async function dismissUploadOverlays(page) {
     .catch(() => {});
 }
 
+// TikTok links a hashtag only when it is picked from the list its editor opens
+// while the hashtag is typed. Pasted, or typed and left, it stays plain text:
+// the post then carries no hashtag at all and shows up under none of them.
+const HASHTAG = /#[\p{L}\p{N}_]+/gu;
+
+function captionPieces(caption) {
+  const pieces = [];
+  let last = 0;
+  for (const match of caption.matchAll(HASHTAG)) {
+    if (match.index > last) pieces.push({ text: caption.slice(last, match.index) });
+    pieces.push({ tag: match[0].slice(1) });
+    last = match.index + match[0].length;
+  }
+  if (last < caption.length) pieces.push({ text: caption.slice(last) });
+  return pieces;
+}
+
+// TikTok offers no entry for some words (#physique is one): those stay plain
+// text, and the caller is told which.
+async function typeHashtag(page, tag) {
+  await page.keyboard.type('#');
+  for (const letter of tag) {
+    await page.keyboard.type(letter);
+    await page.waitForTimeout(120);
+  }
+  const own = page.locator('.hashtag-suggestion-item')
+    .filter({ has: page.locator('.hash-tag-topic', { hasText: new RegExp(`^#${tag}$`, 'iu') }) })
+    .first();
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    if (await visible(own)) {
+      await own.click();
+      await page.waitForTimeout(400);
+      return true;
+    }
+    await page.waitForTimeout(300);
+  }
+  return false;
+}
+
 async function setCaption(page, caption) {
   const deadline = Date.now() + 90_000;
   let editor = null;
@@ -258,10 +299,22 @@ async function setCaption(page, caption) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await editor.focus().catch(() => {});
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.insertText(text);
+    const hashtags = { linked: [], plain: [] };
+    // A picked hashtag comes with its own space after it.
+    let picked = false;
+    for (const piece of captionPieces(text)) {
+      if (piece.text !== undefined) {
+        const rest = picked ? piece.text.replace(/^ /u, '') : piece.text;
+        if (rest) await page.keyboard.insertText(rest);
+        picked = false;
+      } else {
+        picked = await typeHashtag(page, piece.tag);
+        hashtags[picked ? 'linked' : 'plain'].push(piece.tag);
+      }
+    }
     await page.waitForTimeout(1200);
     const written = (await editor.innerText().catch(() => '')).replace(/\s+/gu, ' ').trim();
-    if (written.startsWith(expected)) return;
+    if (written.startsWith(expected)) return hashtags;
     await dismissUploadOverlays(page);
   }
   throw new Error('TikTok kept its own caption instead of the one it was given.');
@@ -425,6 +478,30 @@ async function run() {
       })}\n`);
       return;
     }
+    if (args.command === 'edit') {
+      // A published post's caption, rewritten in Studio's own edit form, where
+      // hashtags are picked from the same list as on upload.
+      const postId = numericPostId(args.post);
+      if (!postId) throw new Error('A valid TikTok post id is required.');
+      const title = String(args.title || '').trim();
+      if (!title) throw new Error('TikTok caption is empty.');
+      await goto(page, `https://www.tiktok.com/tiktokstudio/upload/post/${postId}?from=creator_center`);
+      const hashtags = await setCaption(page, title);
+      if (args.dryRun !== true) {
+        await clickThrough(page, page.getByRole('button', { name: /^Save$/i }).last(), 'Save button');
+        await page.waitForURL(/tiktokstudio\/content/i, { timeout: 60_000 });
+      }
+      process.stdout.write(`${EDIT_PREFIX}${JSON.stringify({
+        ok: true,
+        provider: 'tiktok-studio-browser',
+        platformPostId: postId,
+        releaseUrl: `https://www.tiktok.com/@${username}/video/${postId}`,
+        account: username,
+        saved: args.dryRun !== true,
+        hashtags,
+      })}\n`);
+      return;
+    }
     await goto(page, STUDIO_UPLOAD_URL);
     const fileInput = await waitForUploadPage(page);
     if (args.command === 'doctor') {
@@ -444,7 +521,7 @@ async function run() {
     if (!title) throw new Error('TikTok caption is empty.');
     const privacy = String(args.visibility) === '0' ? 'public' : 'private';
     await fileInput.setInputFiles(video);
-    await setCaption(page, title);
+    const hashtags = await setCaption(page, title);
     await setVisibility(page, privacy);
     const button = await waitUntilReady(page);
     if (args.dryRun === true) {
@@ -456,6 +533,7 @@ async function run() {
         uploadFormReady: true,
         proxied: Boolean(proxy),
         privacy,
+        hashtags,
         visiblePostCount: baseline.size,
       })}\n`);
       return;
@@ -474,6 +552,7 @@ async function run() {
         evidence: confirmation.evidence,
         verifiedInStudio: true,
         account: username,
+        hashtags,
       },
     };
     process.stdout.write(`${RECEIPT_PREFIX}${JSON.stringify(receipt)}\n`);

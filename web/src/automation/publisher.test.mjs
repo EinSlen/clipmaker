@@ -581,6 +581,21 @@ test('TikTok posts leave through a real browser that does not announce itself as
   assert.match(uploader, /postTimestampMs\(id\) >= startedAt - 60_000/u);
 });
 
+// Pasted into Studio's caption, a hashtag stays plain text: three posts went out
+// with their hashtags written out and not one of them linked. Each hashtag is
+// typed and its own entry picked from the list the editor opens, and a post
+// already out gets its caption rewritten the same way.
+test('TikTok hashtags are picked from Studio\'s list, never pasted', async () => {
+  const uploaderPath = await repositoryFile('vendor/TiktokAutoUploader/tiktok_uploader/studio-upload.cjs');
+  const uploader = await fs.readFile(uploaderPath, 'utf8');
+  assert.doesNotMatch(uploader, /keyboard\.insertText\(text\)/u);
+  assert.match(uploader, /\.hashtag-suggestion-item/u);
+  assert.match(uploader, /\.hash-tag-topic/u);
+  assert.match(uploader, /hashtags\[picked \? 'linked' : 'plain'\]/u);
+  assert.match(uploader, /args\.command === 'edit'/u);
+  assert.match(uploader, /tiktokstudio\/upload\/post\/\$\{postId\}/u);
+});
+
 test('publisher doctor requires the historical API session and reports Studio fallback health separately', async () => {
   const routePath = new URL('../app/api/tiktok/accounts/route.ts', import.meta.url);
   const clientPath = new URL('./api-client.mjs', import.meta.url);
